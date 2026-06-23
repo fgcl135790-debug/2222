@@ -7,7 +7,7 @@ st.set_page_config(page_title="行動大戶籌碼監控", page_icon="⚡", layou
 
 st.title("⚡ 行動大戶籌碼五檔 APP")
 
-# --- 📱 手機版大優化：把隱藏的側邊欄改為主畫面折疊收納盒 ---
+# --- 📱 把設定選單收納進主畫面的折疊收納盒 ---
 with st.expander("⚙️ 點我展開：輸入金鑰 / 更換股票 / 模擬測試", expanded=False):
     api_key = st.text_input("富果 API Key", type="password")
     stock_code = st.text_input("股票代號", value="2409")
@@ -36,21 +36,16 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
 
-# --- 📱 手機版版面配置：最重要資訊放最上面 ---
-# 1. 價格與時間區塊
-price_container = st.container()
-# 2. 多空訊號燈（一秒看風向）
+# --- 📱 修正點 1：全部改用 st.empty() 保證每秒自動擦除，絕不重複堆疊 ---
+price_block = st.empty()  
 signal_spot = st.empty()
-# 3. 動態門檻文字
 threshold_spot = st.empty()
 st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
 
-# 4. 最佳五檔區
 st.write("📋 **盤口最佳五檔**")
 five_ticks_spot = st.empty()
 st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
 
-# 5. 火網追蹤區
 st.write("🔥 **30秒大戶進攻火網**")
 history_counter_spot = st.empty()
 
@@ -66,22 +61,8 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     recent_buy_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Buy')
     recent_sell_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Sell')
     
-    # 📱 手機優化：利用不變形 HTML 表格並排顯示累積次數，防爆版
-    counter_html = f"""
-    <table style='width:100%; text-align:center; font-size:14px;'>
-        <tr>
-            <td style='width:50%; background-color:#1e261e; padding:6px; border-radius:4px;'>
-                <span style='color:#ff4466;font-size:12px;'>🔴 30s外盤大單吃貨</span><br>
-                <b style='color:#ff4466;font-size:20px;'>{recent_buy_cnt} 次</b>
-            </td>
-            <td style='width:4px;'></td>
-            <td style='width:50%; background-color:#19222a; padding:6px; border-radius:4px;'>
-                <span style='color:#00ff88;font-size:12px;'>🟢 30s內盤大單倒貨</span><br>
-                <b style='color:#00ff88;font-size:20px;'>{recent_sell_cnt} 次</b>
-            </td>
-        </tr>
-    </table>
-    """
+    # 將計分板 HTML 緊湊化，拔除所有會干擾 Markdown 的前置空格
+    counter_html = f"<table style='width:100%; text-align:center; font-size:14px;'><tr><td style='width:50%; background-color:#1e261e; padding:6px; border-radius:4px;'><span style='color:#ff4466;font-size:12px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:20px;'>{recent_buy_cnt} 次</b></td><td style='width:4px;'></td><td style='width:50%; background-color:#19222a; padding:6px; border-radius:4px;'><span style='color:#00ff88;font-size:12px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:20px;'>{recent_sell_cnt} 次</b></td></tr></table>"
     history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
 
     if current_price >= open_p and open_p > 0:
@@ -144,16 +125,8 @@ if api_key or test_mode:
             total_bid_vol = sum([b.get('size', 0) for b in bids])
             total_ask_vol = sum([a.get('size', 0) for a in asks])
             
-            # 📱 【手機抗變形黑科技】採用 HTML Table 緊湊排版，強制寬度防上下錯位
-            five_ticks_html = """
-            <table style='width:100%; text-align:center; font-size:15px; border-collapse:collapse; font-family:monospace;'>
-                <tr style='background-color:#111; height:28px;'>
-                    <th style='color:#00ff88; width:25%; font-size:12px;'>買張</th>
-                    <th style='color:#00ff88; width:25%; font-size:12px;'>買價</th>
-                    <th style='color:#ff4466; width:25%; font-size:12px;'>賣價</th>
-                    <th style='color:#ff4466; width:25%; font-size:12px;'>賣張</th>
-                </tr>
-            """
+            # 📱 修正點 2：將 HTML 五檔表格的縮排空格全部拔除，強迫手機瀏覽器渲染表格，拒絕顯示原始碼
+            five_ticks_html = "<table style='width:100%; text-align:center; font-size:15px; border-collapse:collapse; font-family:monospace;'><tr style='background-color:#111; height:28px;'><th style='color:#00ff88; width:25%; font-size:12px;'>買張</th><th style='color:#00ff88; width:25%; font-size:12px;'>買價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣張</th></tr>"
             for i in range(5):
                 b_price = bids[i].get('price', 0.0)
                 b_vol = int(bids[i].get('size', 0) / 1000)
@@ -165,14 +138,7 @@ if api_key or test_mode:
                 a_p_str = f"{a_price}" if a_price > 0 else "-"
                 a_v_str = f"{a_vol:,}" if a_vol > 0 else "-"
                 
-                five_ticks_html += f"""
-                <tr style='height:32px; border-bottom:1px solid #222;'>
-                    <td style='color:#00ff88; font-size:14px;'>{b_v_str}</td>
-                    <td style='color:#00ff88; font-weight:bold;'>{b_p_str}</td>
-                    <td style='color:#ff4466; font-weight:bold;'>{a_p_str}</td>
-                    <td style='color:#ff4466; font-size:14px;'>{a_v_str}</td>
-                </tr>
-                """
+                five_ticks_html += f"<tr style='height:32px; border-bottom:1px solid #222;'><td style='color:#00ff88; font-size:14px;'>{b_v_str}</td><td style='color:#00ff88; font-weight:bold;'>{b_p_str}</td><td style='color:#ff4466; font-weight:bold;'>{a_p_str}</td><td style='color:#ff4466; font-size:14px;'>{a_v_str}</td></tr>"
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
@@ -187,7 +153,9 @@ if api_key or test_mode:
             
             # 更新頂部手機計分板
             tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
-            with price_container:
+            
+            # 修正點 1：每次執行完強制重新改寫同一個 price_block 的內容，絕對不往下堆疊
+            with price_block.container():
                 cp1, cp2 = st.columns([5, 4])
                 cp1.header(f"📈 {code} : {current_price} 元")
                 cp2.subheader(f"⏱️ {tw_time_str}")
@@ -202,4 +170,4 @@ if api_key or test_mode:
 
     start_streaming(stock_code)
 else:
-    st.warning("🔑 請先展開上方選單輸入「富果 API Key」以啟動功能。")
+    st.warning("🔑 請先展開上方選單輸入「富果 API Key」或勾選「模擬測試」以啟動功能。")
