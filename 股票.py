@@ -161,8 +161,8 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
         if current_price < open_p and total_bid_vol > (total_ask_vol * 1.2) and recent_sell_cnt >= 3:
             return f"🎯【💥 做空訊號】{stock_name} 多頭防線潰散，順勢放空！"
 
-    return f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望..."
-# --- # --- API 連線與測試模式控制機制 ---
+    return f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望
+    # --- API 連線與測試模式控制機制 ---
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
@@ -186,35 +186,39 @@ if api_key or test_mode:
                 
                 if cycle < 10:
                     # 【階段 1：0~9秒】大戶外盤連續吃貨 ➔ 必定觸發【做多訊號】
-                    current_price = 29.05 + (cycle * 0.04) 
+                    raw_price = 29.05 + (cycle * 0.04) 
+                    current_price = round(raw_price, 2)  # ⚡ 強制去除 Python 浮點數微小溢出誤差
                     tick_qty = 550  
                     tick_price = current_price
-                    bids_base, asks_base = 1000, 5000  # 極端量比，賣盤壓力大，必滿足做多量比條件
-                    last_bid, last_ask = current_price - 0.05, current_price
+                    bids_base, asks_base = 1000, 5000  # 賣盤是買盤5倍，完美符合做多委託量比要求
+                    last_bid, last_ask = round(current_price - 0.05, 2), current_price
                     
                 elif cycle < 20:
                     # 【階段 2：10~19秒】高點折返下挫 ➔ 觸發【多頭清空熔斷】
-                    current_price = 29.41 - ((cycle - 10) * 0.05)  
+                    raw_price = 29.41 - ((cycle - 10) * 0.05)  
+                    current_price = round(raw_price, 2)  
                     tick_qty = 0
                     tick_price = current_price
                     bids_base, asks_base = 2000, 2000
-                    last_bid, last_ask = current_price, current_price + 0.05
+                    last_bid, last_ask = current_price, round(current_price + 0.05, 2)
                     
                 elif cycle < 30:
                     # 【階段 3：20~29秒】內盤大量砸貨 ➔ 必定觸發【做空訊號】
-                    current_price = 28.90 - ((cycle - 20) * 0.05)
+                    raw_price = 28.90 - ((cycle - 20) * 0.05)
+                    current_price = round(raw_price, 2)  
                     tick_qty = 600  
                     tick_price = current_price
-                    bids_base, asks_base = 6000, 1000  # 極端量比，買盤支撐強，必滿足做空量比條件
-                    last_bid, last_ask = current_price, current_price + 0.05
+                    bids_base, asks_base = 6000, 1000  # 買盤是賣盤6倍，完美符合做空委託量比要求
+                    last_bid, last_ask = current_price, round(current_price + 0.05, 2)
                     
                 else:
                     # 【階段 4：30~39秒】止跌回升反彈 ➔ 觸發【空頭清空防嘎】
-                    current_price = 28.40 + ((cycle - 30) * 0.05)  
+                    raw_price = 28.40 + ((cycle - 30) * 0.05)  
+                    current_price = round(raw_price, 2)  
                     tick_qty = 0
                     tick_price = current_price
                     bids_base, asks_base = 2000, 2000
-                    last_bid, last_ask = current_price - 0.05, current_price
+                    last_bid, last_ask = round(current_price - 0.05, 2), current_price
 
                 bids = [{'price': round(current_price - 0.05 * i, 2), 'size': bids_base - i * 100} for i in range(1, 6)]
                 asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
