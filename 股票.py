@@ -6,7 +6,7 @@ import time
 st.set_page_config(page_title="當沖免API監控", page_icon="📈", layout="centered")
 
 st.title("📈 免 API！當沖「真假希望」全自動監控")
-st.write("程式正在每 3 秒自動抓取 Yahoo 股市即時盤口數據...")
+st.write("程式正在每秒自動抓取 Yahoo 股市即時盤口數據...")
 
 # 讓使用者輸入想監控的台股代號（預設友達 2409）
 stock_code = st.text_input("輸入要監控的股票代號", value="2409")
@@ -65,5 +65,5 @@ else:
 
 # --- 🎯 手機免手 Key 的自動重新整理密技 ---
 # 程式執行到最後，休息 3 秒鐘，然後自動觸發網頁重新整理，達成無感自動抓取！
-time.sleep(3)
+time.sleep(1)
 st.rerun()
