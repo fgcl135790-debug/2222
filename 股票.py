@@ -161,7 +161,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
         if current_price < open_p and total_bid_vol > (total_ask_vol * 1.2) and recent_sell_cnt >= 3:
             return f"🎯【💥 做空訊號】{stock_name} 多頭防線潰散，順勢放空！"
 
-    return f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望...”
+    return f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望..."
     # --- API 連線與測試模式控制機制 ---
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
