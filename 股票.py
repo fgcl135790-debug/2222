@@ -157,7 +157,7 @@ if api_key or test_mode:
             st.session_state.last_update_time = current_now
 
             # =========================================================================
-            # 📌 【第三段】開始：模擬劇本模式（極端量比必發訊號與浮點數除錯造市劇本）
+            # 📌 模擬劇本模式（極端量比必發訊號與浮點數除錯造市劇本）
             # =========================================================================
             if test_mode:
                 taiex_price, taiex_change = 22135.45, -150.32
@@ -208,7 +208,7 @@ if api_key or test_mode:
                 bids = [{'price': round(current_price - 0.05 * i, 2), 'size': bids_base - i * 100} for i in range(1, 6)]
                 asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
             # =========================================================================
-            # 📌 【第四段 - A】開始：富果盤中實時解碼、150張防線與型態安全檢查
+            # 📌 盤中實時富果資料串接模式
             # =========================================================================
             else:
                 # 限制大盤更新頻率為 180 秒（3分鐘），大幅省下 API 流量額度
@@ -247,66 +247,6 @@ if api_key or test_mode:
                 
                 total_volume_lots = int(raw_volume) if raw_volume > 0 else 0
                 
-                # 安全解碼五檔
-                raw_bids = quote.get('bids', [])
-                raw_asks = quote.get('asks', [])
-                bids = raw_bids if isinstance(raw_bids, list) else []
-                asks = raw_asks if isinstance(raw_asks, list) else []
-                while len(bids) < 5: bids.append({'price': 0.0, 'size': 0})
-                while len(asks) < 5: asks.append({'price': 0.0, 'size': 0})
-                
-                # 處理最新成交，相容最新 API 的型態檢查保護，徹底杜絕 'list' object 報錯
-                last_trade_raw = quote.get('lastTrade')
-                if isinstance(last_trade_raw, list) and len(last_trade_raw) > 0:
-                    last_trade = last_trade_raw
-                elif isinstance(last_trade_raw, dict):
-                    last_trade = last_trade_raw
-                else:
-                    last_trade = {}
-
-                tick_qty = int(last_trade.get('unit') or last_trade.get('size', 0))
-                tick_price = last_trade.get('price', current_price)
-                trade_time = last_trade.get('time', 0)
-                
-                # 針對 last_bid/last_ask 做精確的字典型態安全防護
-                last_bid = bids.get('price', 0.0) if bids and isinstance(bids, dict) else 0.0
-                last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
-            else:
-                if current_now - st.session_state.last_index_fetch_time > 180.0:
-                    try:
-                        tx_q = client.stock.intraday.quote(symbol='IX0001')
-                        tx_p = tx_q.get('lastTrade', {}).get('price') or tx_q.get('closePrice') or 0.0
-                        tx_ref = tx_q.get('referencePrice', tx_p)
-                        st.session_state.taiex_cache = (tx_p, round(tx_p - tx_ref, 2))
-                    except: pass
-                    try:
-                        otc_q = client.stock.intraday.quote(symbol='IX0043')
-                        otc_p = otc_q.get('lastTrade', {}).get('price') or otc_q.get('closePrice') or 0.0
-                        otc_ref = otc_q.get('referencePrice', otc_p)
-                        st.session_state.otc_cache = (otc_p, round(otc_p - otc_ref, 2))
-                    except: pass
-                    st.session_state.last_index_fetch_time = current_now
-                
-                taiex_price, taiex_change = st.session_state.taiex_cache
-                otc_price, otc_change = st.session_state.otc_cache
-                
-                quote = client.stock.intraday.quote(symbol=code)
-                current_price = quote.get('lastTrade', {}).get('price') or quote.get('closePrice') or 0.0
-                open_price = quote.get('priceOpen') or quote.get('openPrice') or current_price
-                stock_name = quote.get('name') or f"股票 {code}"
-                
-                total_info = quote.get('total', {})
-                raw_volume = total_info.get('unit') or total_info.get('volume', 0)
-                if raw_volume == 0:
-                    try:
-                        ticker_info = client.stock.intraday.ticker(symbol=code)
-                        raw_volume = ticker_info.get('volume', 0)
-                        if stock_name == f"股票 {code}":
-                            stock_name = ticker_info.get('name') or f"股票 {code}"
-                    except: pass
-                
-                total_volume_lots = int(raw_volume) if raw_volume > 0 else 0
-                
                 raw_bids = quote.get('bids', [])
                 raw_asks = quote.get('asks', [])
                 bids = raw_bids if isinstance(raw_bids, list) else []
@@ -330,7 +270,7 @@ if api_key or test_mode:
                 last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
             # =========================================================================
-            # 📌 【第四段 - B】開始：畫面獨立渲染、最少150張過濾與頻率保護防禦
+            # 📌 畫面獨立渲染、最少150張過濾與頻率保護防禦
             # =========================================================================
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
@@ -368,7 +308,6 @@ if api_key or test_mode:
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
             current_trade_key = (trade_time, tick_qty, tick_price)
-            # 🎯 這裡依舊強制執行最少 150 張大戶過濾閥門
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= max(dynamic_threshold, 150):
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
                 elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
