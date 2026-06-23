@@ -104,7 +104,7 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
 
     elif price >= 20: 
 
-        if total_volume_lots >= 500000: return 500 
+        if total_volume_lots >= 500000: return 400 
 
         elif total_volume_lots >= 100000: return 300
 
@@ -206,74 +206,31 @@ log_spot = st.empty()
 
 
 
-# --- 核心邏輯：當沖多空連續性辨識引擎 ---
-
+# --- 核心邏輯：修正後的智慧多空對抗引擎 ---
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
-
     open_p = st.session_state.open_price
-
     now_time = time.time()
-
     
-
-    st.session_state.order_history = [
-
-        x for x in st.session_state.order_history if now_time - x['timestamp'] <= 30
-
-    ]
-
-    recent_buy_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Buy')
-
-    recent_sell_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Sell')
-
+    # 1. 過濾最近 30 秒資料
+    st.session_state.order_history = [x for x in st.session_state.order_history if now_time - x['timestamp'] <= 30]
     
+    # 2. 分開計算內外盤的大戶動向
+    buys = [x for x in st.session_state.order_history if x['side'] == 'Buy']
+    sells = [x for x in st.session_state.order_history if x['side'] == 'Sell']
+    
+    buy_vol_sum = sum(x['qty'] for x in buys)
+    sell_vol_sum = sum(x['qty'] for x in sells)
+    
+    # 3. 籌碼對抗權重判斷 (核心：當賣壓權重大於買盤，強制關閉多頭)
+    # 如果賣出總量已經超過買入總量的 1.2 倍，代表主力在倒貨，強制判定做空
+    if sell_vol_sum > (buy_vol_sum * 1.2) and len(sells) >= 2:
+        return f"🎯【💥 強制放空】{stock_name} 主力倒貨權重已過半！內盤轟炸 {len(sells)} 次，多頭警報解除！"
+    
+    # 4. 只有在買盤權重佔優時，才考慮做多
+    if buy_vol_sum > (sell_vol_sum * 1.2) and len(buys) >= 3:
+        return f"🎯【🔥 積極做多】{stock_name} 主力搶籌強勁，外盤吃貨 {len(buys)} 次，籌碼多頭排列。"
 
-    counter_html = f"<table style='width:100%; text-align:center; font-size:14px;'><tr><td style='width:50%; background-color:#1e261e; padding:6px; border-radius:4px;'><span style='color:#ff4466;font-size:12px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:20px;'>{recent_buy_cnt} 次</b></td><td style='width:4px;'></td><td style='width:50%; background-color:#19222a; padding:6px; border-radius:4px;'><span style='color:#00ff88;font-size:12px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:20px;'>{recent_sell_cnt} 次</b></td></tr></table>"
-
-    history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
-
-
-
-    if st.session_state.order_history:
-
-        log_html = "<div style='background-color:#111; padding:8px; border-radius:4px; font-family:monospace; font-size:12px; max-height:150px; overflow-y:auto; text-align:left;'>"
-
-        for order in reversed(st.session_state.order_history):
-
-            color = "#ff4466" if order['side'] == 'Buy' else "#00ff88"
-
-            action = "外盤搶吃" if order['side'] == 'Buy' else "內盤砸貨"
-
-            log_html += f"<p style='margin:3px 0; color:{color};'>⏱️ {order['time_str']} | {action} <b style='font-size:13px;'>{order['qty']}</b> 張 @ {order['price']} 元</p>"
-
-        log_html += "</div>"
-
-        log_spot.markdown(log_html, unsafe_allow_html=True)
-
-    else:
-
-        log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
-
-
-
-    if current_price >= open_p and open_p > 0:
-
-        if total_ask_vol > (total_bid_vol * 1.3) and recent_buy_cnt >= 3:
-
-            return f"🎯【🔥 做多訊號】{stock_name} 精確大戶30秒爆買 {recent_buy_cnt} 次！主力突破吃貨，順勢做多！"
-
-            
-
-    if current_price < open_p and open_p > 0:
-
-        if total_bid_vol > (total_ask_vol * 1.3) and recent_sell_cnt >= 3:
-
-            return f"🎯【💥 做空訊號】{stock_name} 精確大戶30秒爆賣 {recent_sell_cnt} 次！多頭防線潰散，順勢放空！"
-
-
-
-    return f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望..."
-
+    return f"⏳ 偵測中：多空力道拉鋸中，靜待大戶表態..."
 
 
 # --- API 連線與核心資料流判定機制 ---
