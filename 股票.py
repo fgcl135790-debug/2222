@@ -329,6 +329,9 @@ if api_key or test_mode:
                 last_bid = bids.get('price', 0.0) if bids and isinstance(bids, dict) else 0.0
                 last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
+            # =========================================================================
+            # 📌 【第四段 - B】開始：畫面獨立渲染、最少150張過濾與頻率保護防禦
+            # =========================================================================
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
                 return
@@ -365,6 +368,7 @@ if api_key or test_mode:
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
             current_trade_key = (trade_time, tick_qty, tick_price)
+            # 🎯 這裡依舊強制執行最少 150 張大戶過濾閥門
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= max(dynamic_threshold, 150):
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
                 elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
@@ -387,16 +391,16 @@ if api_key or test_mode:
                 f"</div>", unsafe_allow_html=True
             )
             
-            # ⚡ 執行雙向解耦決策渲染
+            # ⚡ 執行解耦雙回傳決策
             decision, alert = process_market_logic(current_price, total_bid_vol, total_ask_vol, dynamic_threshold, stock_name)
             
-            # 🟢 渲染獨立警告專區（若目前無轉折則完全隱藏、不佔空間）
+            # 🟢 獨立警報區渲染：若盤中出現 1% 折返則以黃色專區醒目固化，不被任何數據洗掉
             if alert:
                 retracement_alert_spot.warning(alert)
             else:
                 retracement_alert_spot.empty()
                 
-            # 渲染常規多空狀態燈號
+            # 渲染一般多空狀態燈
             if "做多" in decision: signal_spot.success(decision)
             elif "做空" in decision: signal_spot.error(decision)
             else: signal_spot.info(decision)
@@ -411,3 +415,4 @@ if api_key or test_mode:
     start_streaming(stock_code)
 else:
     st.warning("🔑 請先展開上方選單輸入「富果 API Key」或勾選「模擬測試」以啟動功能。")
+
