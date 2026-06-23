@@ -261,12 +261,20 @@ if api_key or test_mode:
                 while len(bids) < 5: bids.append({'price': 0.0, 'size': 0})
                 while len(asks) < 5: asks.append({'price': 0.0, 'size': 0})
                 
-                last_trade = quote.get('lastTrade', {})
+                # 🟢 修正：完美相容富果最新 API 在 list 與 dict 之間的型態切換
+                last_trade_raw = quote.get('lastTrade')
+                if isinstance(last_trade_raw, list) and len(last_trade_raw) > 0:
+                    last_trade = last_trade_raw[0]
+                elif isinstance(last_trade_raw, dict):
+                    last_trade = last_trade_raw
+                else:
+                    last_trade = {}
+
                 tick_qty = int(last_trade.get('unit') or last_trade.get('size', 0))
                 tick_price = last_trade.get('price', current_price)
                 trade_time = last_trade.get('time', 0)
-                last_bid = bids.get('price', 0.0) if bids else 0.0
-                last_ask = asks.get('price', 0.0) if asks else 0.0
+                last_bid = bids[0].get('price', 0.0) if bids else 0.0
+                last_ask = asks[0].get('price', 0.0) if asks else 0.0
 
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
