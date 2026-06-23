@@ -148,7 +148,7 @@ if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
     # 🟢 安全調控防護：將即時串流刷新速度放寬至 5.0 秒，徹底迴避富果 HTTP 個人基本額度封鎖限制
-    @st.fragment(run_every=5.0)
+    @st.fragment(run_every=2.0)
     def start_streaming(code):
         try:
             current_now = time.time()
