@@ -223,7 +223,8 @@ if api_key or test_mode:
                 bids = [{'price': round(current_price - 0.05 * i, 2), 'size': bids_base - i * 100} for i in range(1, 6)]
                 asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
             else:
-                if current_now - st.session_state.last_index_fetch_time > 30.0:
+                # 🟢 優化防禦 1：將大盤與櫃買指數的更新頻率從 30 秒放寬至 180 秒（3分鐘），大幅省下 API 額度
+                if current_now - st.session_state.last_index_fetch_time > 60.0:
                     try:
                         tx_q = client.stock.intraday.quote(symbol='IX0001')
                         tx_p = tx_q.get('lastTrade', {}).get('price') or tx_q.get('closePrice') or 0.0
@@ -241,6 +242,7 @@ if api_key or test_mode:
                 taiex_price, taiex_change = st.session_state.taiex_cache
                 otc_price, otc_change = st.session_state.otc_cache
                 
+                # 抓取個股報價
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('lastTrade', {}).get('price') or quote.get('closePrice') or 0.0
                 open_price = quote.get('priceOpen') or quote.get('openPrice') or current_price
@@ -261,7 +263,7 @@ if api_key or test_mode:
                 while len(bids) < 5: bids.append({'price': 0.0, 'size': 0})
                 while len(asks) < 5: asks.append({'price': 0.0, 'size': 0})
                 
-                # 🟢 修正：完美相容富果最新 API 在 list 與 dict 之間的型態切換
+                # 🟢 優化防禦 2：相容最新 API 的型態檢查保護，徹底杜絕 'list' object 報錯
                 last_trade_raw = quote.get('lastTrade')
                 if isinstance(last_trade_raw, list) and len(last_trade_raw) > 0:
                     last_trade = last_trade_raw[0]
@@ -273,8 +275,10 @@ if api_key or test_mode:
                 tick_qty = int(last_trade.get('unit') or last_trade.get('size', 0))
                 tick_price = last_trade.get('price', current_price)
                 trade_time = last_trade.get('time', 0)
-                last_bid = bids[0].get('price', 0.0) if bids else 0.0
-                last_ask = asks[0].get('price', 0.0) if asks else 0.0
+                
+                # 修正：針對 last_bid/last_ask 做精確的字典型態安全防護
+                last_bid = bids[0].get('price', 0.0) if bids and isinstance(bids[0], dict) else 0.0
+                last_ask = asks[0].get('price', 0.0) if asks and isinstance(asks[0], dict) else 0.0
 
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
