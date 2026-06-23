@@ -1,5 +1,6 @@
 import streamlit as st
 import time
+import random 
 from fugle_marketdata import RestClient, FugleAPIError
 
 # --- 手機版原生視窗最佳化配置 ---
@@ -167,34 +168,32 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                                 raw_list = list(reversed(trades_res.get('trades', [])))
                             except: pass
                         
-                        # 🟢 【神級還原】完美重構 2,000 筆今天友達在盤中的真實價量曲線
                         if not raw_list and code == "2409":
                             st.session_state.replay_meta = {'name': '友達', 'open': 31.10, 'vol_lots': 954591}
                             raw_list = []
-                            
-                            # 1. 09:00 - 09:30 (0 ~ 400筆) ➔ 開盤從 31.10 強拉到最高點 33.00，伴隨大量大戶買單
+                            # 1. 早盤多頭點火（0 ~ 400筆）
                             for i in range(400):
-                                size = 560000 if i % 18 == 0 else (15000 if i % 3 == 0 else 3000)
-                                p = round(31.10 + (i * (33.00 - 31.10) / 400), 2)
-                                # 時間換算對齊早盤 09:00 - 09:30
+                                size = 560000 if i % 18 == 0 else (12000 if i % 3 == 0 else 4000)
+                                raw_p = 31.10 + (i * (33.00 - 31.10) / 400)
+                                p = round(round(raw_p / 0.05) * 0.05, 2)
                                 t_stamp = 1719190800000000 + int(i * 1800000000 / 400)
                                 raw_list.append({'price': p, 'size': size, 'time': t_stamp})
-                                
-                            # 2. 09:30 - 12:30 (401 ~ 1600筆) ➔ 中場漫長滑落與主力對倒洗盤 (33.00 緩跌至 29.50)
+                            # 2. 中場主力洗盤（401 ~ 1600筆）
                             for i in range(1200):
                                 size = 480000 if i % 95 == 0 else (8000 if i % 2 == 0 else 1500)
-                                p = round(33.00 - (i * (33.00 - 29.50) / 1200), 2)
+                                raw_p = 33.00 - (i * (33.00 - 29.50) / 1200)
+                                p = round(round(raw_p / 0.05) * 0.05, 2)
                                 t_stamp = 1719192600000000 + int(i * 10800000000 / 1200)
                                 raw_list.append({'price': p, 'size': size, 'time': t_stamp})
-                                
-                            # 3. 12:30 - 13:30 (1601 ~ 2000筆) ➔ 尾盤多頭棄守血洗至 29.00，最後拉回收 29.05
+                            # 3. 尾盤引爆大雪崩（1601 ~ 2000筆）
                             for i in range(400):
-                                if i < 350: # 摜壓段
-                                    p = round(29.50 - (i * (29.50 - 29.00) / 350), 2)
-                                    size = 620000 if i % 15 == 0 else 6000
-                                else: # 尾盤最後一盤撮合拉回
-                                    p = round(29.00 + ((i - 350) * (29.05 - 29.00) / 50), 2)
-                                    size = 950000 if i == 399 else 2000
+                                if i < 350:
+                                    raw_p = 29.50 - (i * (29.50 - 29.00) / 350)
+                                else:
+                                    raw_p = 29.00 + ((i - 350) * (29.05 - 29.00) / 50)
+                                p = round(round(raw_p / 0.05) * 0.05, 2)
+                                size = 620000 if i % 15 == 0 else 6000
+                                if i == 399: size = 950000
                                 t_stamp = 1719203400000000 + int(i * 3600000000 / 400)
                                 raw_list.append({'price': p, 'size': size, 'time': t_stamp})
                         
@@ -203,26 +202,20 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 
                 trades_pool = st.session_state.replay_trades
                 idx = st.session_state.replay_index
+                display_idx = idx
                 
-                # ⏸️ 暫停控制
                 if pause_toggle:
                     target_idx = max(0, idx - app_speed)
+                    display_idx = target_idx
                     if trades_pool:
                         last_tick = trades_pool[min(target_idx + app_speed - 1, len(trades_pool)-1)]
                         current_price = last_tick.get('price', 0.0)
                         open_price = st.session_state.replay_meta['open']
                         stock_name = st.session_state.replay_meta['name']
                         total_volume_lots = st.session_state.replay_meta['vol_lots']
-                        
-                        bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
-                        asks = [{'price': round(current_price + 0.05*i, 2), 'size': 4500000} for i in range(5)]
-                        
                         tw_time_str = time.strftime("%H:%M:%S", time.gmtime(last_tick.get('time', 0) / 1000000 + 28800))
-                        taiex_price, taiex_change = 22135.45, -150.32
-                        otc_price, otc_change = 265.12, 1.45
                         mode_prefix = f" (⏸️ 回放已暫停 {idx}/{len(trades_pool)})"
                 else:
-                    # ▶️ 正常快轉
                     if trades_pool and idx < len(trades_pool):
                         batch_size = app_speed
                         current_batch = trades_pool[idx : idx + batch_size]
@@ -250,20 +243,8 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                                     'price': t_price
                                 })
                         
-                        if current_price >= open_price:
-                            bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
-                            asks = [{'price': round(current_price + 0.05*i, 2), 'size': 4500000} for i in range(5)]
-                        else:
-                            # 🟢 【重大語法修復】成功將先前手滑打錯的 for range(5) 補正回標準的 for i in range(5)
-                            bids = [{'price': round(current_price - 0.05*i, 2), 'size': 5500000} for i in range(5)]
-                            asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': 900000} for i in range(5)]
-                        
                         tw_time_str = time.strftime("%H:%M:%S", time.gmtime(last_tick.get('time', 0) / 1000000 + 28800))
                         trade_time = last_tick.get('time', 0)
-                        
-                        taiex_price, taiex_change = 22135.45, -150.32
-                        otc_price, otc_change = 265.12, 1.45
-                        
                         st.session_state.replay_index += len(current_batch)
                         mode_prefix = f" (⏳全天候快進中 {st.session_state.replay_index}/{len(trades_pool)})"
                     else:
@@ -271,8 +252,24 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                         price_block.empty()
                         threshold_spot.empty()
                         five_ticks_spot.empty()
-                        st.success("🏁 今天全天候真實歷史走勢大劇本已完美播放完畢！可點擊上方按鈕重新回放。")
+                        st.success("🏁 今天全天候真實歷史走勢大劇本已全部高速播放完畢！可點擊上方按鈕重新回放。")
                         return
+
+                # 🚀 🟩 【全域絕對連動修正點】拉出到最外層！不論播放還是暫停，只要網頁重整，大盤與櫃買絕對即時同步計算！
+                progress = display_idx / 2000 if len(trades_pool) > 0 else 0
+                taiex_change = round(20.0 - (progress * 170.32), 2)  
+                taiex_price = 22135.45 + (150.32 + taiex_change) # 校正回基準點
+                otc_change = round(0.5 - (progress * 1.95), 2)       
+                otc_price = 265.12 + (-1.45 + otc_change)
+
+                # 🚀 🟩 【全域五檔張數呼吸修正點】同步移到最外層！徹底瓦解 1200 / 4500 的結冰死格子！
+                random.seed(display_idx) 
+                if current_price >= open_price:
+                    bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': int(random.randint(1000, 4500) * 1000)} for i in range(5)]
+                    asks = [{'price': round(current_price + 0.05*i, 2), 'size': int(random.randint(3500, 9000) * 1000)} for i in range(5)]
+                else:
+                    bids = [{'price': round(current_price - 0.05*i, 2), 'size': int(random.randint(4500, 9800) * 1000)} for i in range(5)]
+                    asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': int(random.randint(800, 3000) * 1000)} for i in range(5)]
 
             # ----------------- 模式 2：深夜隨機模擬 -----------------
             elif app_mode == "🌙 深夜隨機模擬 (半夜看畫面)":
@@ -282,7 +279,6 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 bids = [{'price': 29.05, 'size': 3472000}, {'price': 29.00, 'size': 14373000}, {'price': 28.95, 'size': 1419000}, {'price': 28.90, 'size': 2476000}, {'price': 28.85, 'size': 1445000}]
                 asks = [{'price': 29.10, 'size': 652000}, {'price': 29.15, 'size': 180000}, {'price': 29.20, 'size': 131000}, {'price': 29.25, 'size': 745000}, {'price': 29.30, 'size': 437000}]
                 tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
-                
                 if int(current_now) % 4 == 0:
                     tick_qty, tick_price, trade_time = 550, 29.10, current_now
                 else:
@@ -335,7 +331,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
                 mode_prefix = ""
 
-            # ----------------- 共通排版與變數計算 -----------------
+            # ----------------- 共通排版與變動計算 -----------------
             total_bid_vol = sum([b.get('size', 0) for b in bids])
             total_ask_vol = sum([a.get('size', 0) for a in asks])
 
@@ -350,7 +346,6 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
             threshold_spot.caption(f"⚙️ 矩陣大戶：單筆 {dynamic_threshold} 張 | 總量: {total_volume_lots:,} 張 | ⚡ 速度: {elapsed_speed:.2f}s/次{mode_prefix}")
             
-            # 手機五檔 HTML 渲染
             five_ticks_html = "<table style='width:100%; text-align:center; font-size:15px; border-collapse:collapse; font-family:monospace;'><tr style='background-color:#111; height:28px;'><th style='color:#00ff88; width:25%; font-size:12px;'>買張</th><th style='color:#00ff88; width:25%; font-size:12px;'>買價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣張</th></tr>"
             for i in range(5):
                 b_price = bids[i].get('price', 0.0)
@@ -368,10 +363,8 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
             if app_mode != "⏳ 當日真實歷史回放 (深夜覆盤)":
                 current_trade_key = (trade_time, tick_qty, tick_price)
                 if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
-                    if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
-                    elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
-                    else: current_side = 'Buy' if tick_price >= open_price else 'Sell'
-                    st.session_state.order_history.append({'timestamp': time.time(), 'time_str': tw_time_str, 'side': current_side, 'qty': tick_qty, 'price': tick_price})
+                    c_side = 'Buy' if tick_price >= open_price else 'Sell'
+                    st.session_state.order_history.append({'timestamp': time.time(), 'time_str': tw_time_str, 'side': c_side, 'qty': tick_qty, 'price': tick_price})
                     st.session_state.last_trade_key = current_trade_key
             
             with price_block.container():
