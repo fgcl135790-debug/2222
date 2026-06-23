@@ -239,7 +239,7 @@ if api_key or test_mode:
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
             current_trade_key = (trade_time, tick_qty, tick_price)
-            if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
+            if current_trade_key != st.session_state.last_trade_key and tick_qty >= max(dynamic_threshold, 150):
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
                 elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
                 else: current_side = 'Buy' if tick_price >= st.session_state.open_price else 'Sell'
