@@ -218,11 +218,9 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                             })
                     
                     if current_price >= open_price:
-                        last_bid, last_ask = round(current_price - 0.05, 2), current_price
                         bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
                         asks = [{'price': round(current_price + 0.05*i, 2), 'size': 4500000} for i in range(5)]
                     else:
-                        last_bid, last_ask = current_price, round(current_price + 0.05, 2)
                         bids = [{'price': round(current_price - 0.05*i, 2), 'size': 5500000} for i in range(5)]
                         asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': 900000} for i in range(5)]
                     
@@ -252,9 +250,9 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
                 
                 if int(current_now) % 4 == 0:
-                    tick_qty, tick_price, last_bid, last_ask, trade_time = 550, 29.10, 29.05, 29.10, current_now
+                    tick_qty, tick_price, trade_time = 550, 29.10, current_now
                 else:
-                    tick_qty, tick_price, last_bid, last_ask, trade_time = 0, 29.05, 29.05, 29.10, current_now
+                    tick_qty, tick_price, trade_time = 0, 29.05, current_now
                 mode_prefix = " (🌙模擬測試)"
 
             # ----------------- 模式 3：☀️ 盤中即時串流 -----------------
@@ -299,13 +297,14 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 last_trade = quote.get('lastTrade', {})
                 tick_qty = int(last_trade.get('size', 0) / 1000)
                 tick_price = last_trade.get('price', current_price)
-                last_bid = last_trade.get('bid', 0)
-                last_ask = last_trade.get('ask', 0)
                 trade_time = last_trade.get('time', 0)
                 tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
                 mode_prefix = ""
 
-            # ----------------- 共通排版渲染 -----------------
+            # ----------------- 共通排版與變數計算（修復：全面強制計算總量防止 NameError） -----------------
+            total_bid_vol = sum([b.get('size', 0) for b in bids])
+            total_ask_vol = sum([a.get('size', 0) for a in asks])
+
             tx_color = "#ff4466" if taiex_change >= 0 else "#00ff88"
             tx_sign = "+" if taiex_change > 0 else ""
             otc_color = "#ff4466" if otc_change >= 0 else "#00ff88"
@@ -332,14 +331,12 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
-            # 🟢 【精確修復點】完美補齊先前被截斷的括號與變書，語法全面重回健康！
+            # 盤中單筆大單判讀
             if app_mode != "⏳ 當日真實歷史回放 (深夜覆盤)":
                 current_trade_key = (trade_time, tick_qty, tick_price)
                 if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
-                    if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
-                    elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
-                    else: current_side = 'Buy' if tick_price >= open_price else 'Sell'
-                    st.session_state.order_history.append({'timestamp': time.time(), 'time_str': tw_time_str, 'side': current_side, 'qty': tick_qty, 'price': tick_price})
+                    c_side = 'Buy' if tick_price >= open_price else 'Sell'
+                    st.session_state.order_history.append({'timestamp': time.time(), 'time_str': tw_time_str, 'side': c_side, 'qty': tick_qty, 'price': tick_price})
                     st.session_state.last_trade_key = current_trade_key
             
             with price_block.container():
