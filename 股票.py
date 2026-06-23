@@ -198,7 +198,8 @@ if api_key or test_mode:
             current_trade_key = (trade_time, tick_qty, tick_price)
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
-                elif tick_price <= last_bid Document and last_bid > 0: current_side = 'Sell'
+                # 🟢 【精準修復點】移除不小心多打的 Document 幽靈單字，語法重回完美
+                elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
                 else: current_side = 'Buy' if tick_price >= st.session_state.open_price else 'Sell'
                 st.session_state.order_history.append({'timestamp': time.time(), 'side': current_side})
                 st.session_state.last_trade_key = current_trade_key
