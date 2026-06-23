@@ -26,6 +26,7 @@ with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", e
 
 # --- 🟢 初始化全域狀態 ---
 if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
+if 'wave_high_price' not in st.session_state: st.session_state.wave_high_price = 0.0  # 追蹤連續上升進攻波的局部最高點
 if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
 if 'order_history' not in st.session_state: st.session_state.order_history = []
 if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
@@ -37,6 +38,7 @@ if 'last_index_fetch_time' not in st.session_state: st.session_state.last_index_
 
 if st.session_state.last_stock_code != stock_code:
     st.session_state.open_price = 0.0
+    st.session_state.wave_high_price = 0.0
     st.session_state.order_history = []
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
@@ -92,18 +94,35 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
         elif total_volume_lots >= 10000: return 100
         else: return 30
 
-# --- 核心邏輯：當沖多空連續性辨識引擎 ---
+# --- 核心邏輯：當沖多空連續性辨識引擎（加入進攻波回撤 1% 清空機制） ---
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
     
-    # 清除超過 30 秒的老舊紀錄
+    # 快速清洗超過 30 秒的老舊紀錄
     st.session_state.order_history = [
         x for x in st.session_state.order_history if now_time - x['timestamp'] <= 30
     ]
     recent_buy_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Buy')
     recent_sell_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Sell')
-    
+
+    # ⚡ 追蹤「連續上升進攻波」的局部最高點
+    if recent_buy_cnt > 0:
+        if current_price > st.session_state.wave_high_price:
+            st.session_state.wave_high_price = current_price
+    else:
+        st.session_state.wave_high_price = 0.0
+
+    # ⚡ 轉折判定：只要股價自這波攻擊高點往下回撤達到 1%，立刻抹除紀錄
+    DROP_THRESHOLD = 0.01  
+    if st.session_state.wave_high_price > 0:
+        drop_ratio = (st.session_state.wave_high_price - current_price) / st.session_state.wave_high_price
+        if drop_ratio >= DROP_THRESHOLD:
+            st.session_state.order_history = []
+            st.session_state.wave_high_price = 0.0  
+            recent_buy_cnt = 0  
+            return f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！大戶連續上升趨勢打破，強制清空籌碼，轉為觀望。"
+
     # 渲染計分板
     counter_html = f"<table style='width:100%; text-align:center; font-size:13px;'><tr><td style='width:49%; background-color:#221215; padding:5px; border-radius:4px;'><span style='color:#ff4466;font-size:11px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:18px;'>{recent_buy_cnt} 次</b></td><td style='width:2%;'></td><td style='width:49%; background-color:#112215; padding:5px; border-radius:4px;'><span style='color:#00ff88;font-size:11px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:18px;'>{recent_sell_cnt} 次</b></td></tr></table>"
     history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
@@ -120,6 +139,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     else:
         log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
 
+    # 多空核心訊號動態判定
     if open_p > 0:
         if current_price >= open_p and total_ask_vol > (total_bid_vol * 1.2) and recent_buy_cnt >= 3:
             return f"🎯【🔥 做多訊號】{stock_name} 主力突破吃貨，順勢做多！"
@@ -239,6 +259,7 @@ if api_key or test_mode:
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
             current_trade_key = (trade_time, tick_qty, tick_price)
+            # 🚀 關鍵過濾修正：結合動態矩陣，且強制規定最低 150 張才寫入歷史紀錄
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= max(dynamic_threshold, 150):
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
                 elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
