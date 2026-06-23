@@ -36,7 +36,7 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
 
-# --- 📱 修正點 1：全部改用 st.empty() 保證每秒自動擦除，絕不重複堆疊 ---
+# --- 📱 定義即時擦除容器 ---
 price_block = st.empty()  
 signal_spot = st.empty()
 threshold_spot = st.empty()
@@ -50,7 +50,7 @@ st.write("🔥 **30秒大戶進攻火網**")
 history_counter_spot = st.empty()
 
 # --- 核心邏輯：當沖多空連續性辨識引擎 ---
-def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol):
+def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
     tw_now_str = time.strftime('%H:%M:%S', time.gmtime(now_time + 28800))
@@ -61,17 +61,16 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     recent_buy_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Buy')
     recent_sell_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Sell')
     
-    # 將計分板 HTML 緊湊化，拔除所有會干擾 Markdown 的前置空格
     counter_html = f"<table style='width:100%; text-align:center; font-size:14px;'><tr><td style='width:50%; background-color:#1e261e; padding:6px; border-radius:4px;'><span style='color:#ff4466;font-size:12px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:20px;'>{recent_buy_cnt} 次</b></td><td style='width:4px;'></td><td style='width:50%; background-color:#19222a; padding:6px; border-radius:4px;'><span style='color:#00ff88;font-size:12px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:20px;'>{recent_sell_cnt} 次</b></td></tr></table>"
     history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
 
     if current_price >= open_p and open_p > 0:
         if total_ask_vol > (total_bid_vol * 1.3) and recent_buy_cnt >= 3:
-            return f"🎯【🔥 做多訊號】大戶30秒內爆買 {recent_buy_cnt} 次！主力突破吃貨，順勢現股做多！"
+            return f"🎯【🔥 做多訊號】{stock_name} 大戶30秒內爆買 {recent_buy_cnt} 次！主力突破吃貨，順勢現股做多！"
             
     if current_price < open_p and open_p > 0:
         if total_bid_vol > (total_ask_vol * 1.3) and recent_sell_cnt >= 3:
-            return f"🎯【💥 做空訊號】大戶30秒內爆賣 {recent_sell_cnt} 次！多頭防線潰散，順勢放空！"
+            return f"🎯【💥 做空訊號】{stock_name} 大戶30秒內爆賣 {recent_sell_cnt} 次！多頭防線潰散，順勢放空！"
 
     return f"⏳ 偵測中：未出現30秒內連續3筆以上大單 ({big_order_vol}張)，保持觀望..."
 
@@ -84,6 +83,8 @@ if api_key or test_mode:
         try:
             if test_mode:
                 current_price, open_price, total_volume_lots = 29.05, 31.10, 954591
+                # 🟢 深夜模擬模式：如果是 2409 就預設友達，其餘自動帶出
+                stock_name = "友達" if code == "2409" else f"股票 {code}"
                 bids = [{'price': 29.05, 'size': 3472000}, {'price': 29.00, 'size': 14373000}, {'price': 28.95, 'size': 1419000}, {'price': 28.90, 'size': 2476000}, {'price': 28.85, 'size': 1445000}]
                 asks = [{'price': 29.10, 'size': 652000}, {'price': 29.15, 'size': 180000}, {'price': 29.20, 'size': 131000}, {'price': 29.25, 'size': 745000}, {'price': 29.30, 'size': 437000}]
                 tick_qty, tick_price, last_bid, last_ask, trade_time = 450, 29.00, 29.05, 29.10, time.time()
@@ -91,6 +92,10 @@ if api_key or test_mode:
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('closePrice') or quote.get('lastPrice') or 0.0
                 open_price = quote.get('openPrice') or current_price
+                
+                # 🟢 【新功能】直接從富果 API 最外層抽取該代號的「繁體中文股名」
+                stock_name = quote.get('name') or f"股票 {code}"
+                
                 total_info = quote.get('total', {})
                 raw_volume = total_info.get('volume', 0)
                 
@@ -98,6 +103,9 @@ if api_key or test_mode:
                     try:
                         ticker_info = client.stock.intraday.ticker(symbol=code)
                         raw_volume = ticker_info.get('volume', 0)
+                        # 如果 quote 被洗成 0 抓不到名字，改去 ticker 補抓名字
+                        if stock_name == f"股票 {code}":
+                            stock_name = ticker_info.get('name') or f"股票 {code}"
                     except: pass
                 total_volume_lots = int(raw_volume / 1000) if raw_volume > 0 else 0
                 bids, asks = quote.get('bids', []), quote.get('asks', [])
@@ -125,7 +133,7 @@ if api_key or test_mode:
             total_bid_vol = sum([b.get('size', 0) for b in bids])
             total_ask_vol = sum([a.get('size', 0) for a in asks])
             
-            # 📱 修正點 2：將 HTML 五檔表格的縮排空格全部拔除，強迫手機瀏覽器渲染表格，拒絕顯示原始碼
+            # 手機五檔 HTML 表格
             five_ticks_html = "<table style='width:100%; text-align:center; font-size:15px; border-collapse:collapse; font-family:monospace;'><tr style='background-color:#111; height:28px;'><th style='color:#00ff88; width:25%; font-size:12px;'>買張</th><th style='color:#00ff88; width:25%; font-size:12px;'>買價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣張</th></tr>"
             for i in range(5):
                 b_price = bids[i].get('price', 0.0)
@@ -154,13 +162,13 @@ if api_key or test_mode:
             # 更新頂部手機計分板
             tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
             
-            # 修正點 1：每次執行完強制重新改寫同一個 price_block 的內容，絕對不往下堆疊
             with price_block.container():
                 cp1, cp2 = st.columns([5, 4])
-                cp1.header(f"📈 {code} : {current_price} 元")
+                # 🟢 【重大優化】這裡成功改為將股名與代號一起融合噴出來！
+                cp1.header(f"📈 {stock_name} ({code}) : {current_price} 元")
                 cp2.subheader(f"⏱️ {tw_time_str}")
             
-            decision = process_market_logic(current_price, total_bid_vol, total_ask_vol, dynamic_threshold)
+            decision = process_market_logic(current_price, total_bid_vol, total_ask_vol, dynamic_threshold, stock_name)
             if "做多" in decision: signal_spot.success(decision)
             elif "做空" in decision: signal_spot.error(decision)
             else: signal_spot.info(decision)
