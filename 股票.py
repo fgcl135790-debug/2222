@@ -63,7 +63,7 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.last_stock_code = stock_code
 
 # --- 📱 定義即時擦除容器（依手機視覺權重由上往下排列） ---
-index_block = st.empty()  # 🟢 新增：最頂層大盤與櫃買雙權指看板
+index_block = st.empty()  
 price_block = st.empty()  
 signal_spot = st.empty()
 threshold_spot = st.empty()
@@ -80,7 +80,6 @@ history_counter_spot = st.empty()
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
-    tw_now_str = time.strftime('%H:%M('%S', time.gmtime(now_time + 28800))
     tw_now_str = time.strftime('%H:%M:%S', time.gmtime(now_time + 28800))
     
     st.session_state.order_history = [
@@ -110,7 +109,6 @@ if api_key or test_mode:
     def start_streaming(code):
         try:
             if test_mode:
-                # 🌙 模擬測試模式數據 (含大盤、櫃買)
                 taiex_price, taiex_change = 22135.45, -150.32
                 otc_price, otc_change = 265.12, 1.45
                 
@@ -120,8 +118,6 @@ if api_key or test_mode:
                 asks = [{'price': 29.10, 'size': 652000}, {'price': 29.15, 'size': 180000}, {'price': 29.20, 'size': 131000}, {'price': 29.25, 'size': 745000}, {'price': 29.30, 'size': 437000}]
                 tick_qty, tick_price, last_bid, last_ask, trade_time = 550, 29.00, 29.05, 29.10, time.time()
             else:
-                # ☀️ 開盤實Streaming數據
-                # A. 抓取大盤 (IX0001) 與 櫃買 (IX0043)
                 try:
                     tx_q = client.stock.intraday.quote(symbol='IX0001')
                     taiex_price = tx_q.get('closePrice') or tx_q.get('lastPrice') or 0.0
@@ -136,7 +132,6 @@ if api_key or test_mode:
                     otc_change = round(otc_price - otc_open, 2)
                 except: otc_price, otc_change = 0.0, 0.0
                 
-                # B. 抓取個股資訊
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('closePrice') or quote.get('lastPrice') or 0.0
                 open_price = quote.get('openPrice') or current_price
@@ -171,32 +166,14 @@ if api_key or test_mode:
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
-            # --- 📱 渲染大盤與櫃買雙權指看板（HTML 抗變形對稱排版） ---
             tx_color = "#ff4466" if taiex_change >= 0 else "#00ff88"
             tx_sign = "+" if taiex_change > 0 else ""
             otc_color = "#ff4466" if otc_change >= 0 else "#00ff88"
             otc_sign = "+" if otc_change > 0 else ""
             
-            index_html = f"""
-            <table style='width:100%; text-align:center; font-size:13px; margin-bottom:5px;'>
-                <tr>
-                    <td style='width:49%; background-color:#161b22; padding:6px; border-radius:4px;'>
-                        <span style='color:#888; font-size:11px;'>加權大盤</span><br>
-                        <b style='color:{tx_color}; font-size:15px;'>{taiex_price:,.2f}</b> 
-                        <span style='color:{tx_color}; font-size:11px;'>({tx_sign}{taiex_change})</span>
-                    </td>
-                    <td style='width:2%;'></td>
-                    <td style='width:49%; background-color:#161b22; padding:6px; border-radius:4px;'>
-                        <span style='color:#888; font-size:11px;'>櫃買指數</span><br>
-                        <b style='color:{otc_color}; font-size:15px;'>{otc_price:,.2f}</b> 
-                        <span style='color:{otc_color}; font-size:11px;'>({otc_sign}{otc_change})</span>
-                    </td>
-                </tr>
-            </table>
-            """
+            index_html = f"<table style='width:100%; text-align:center; font-size:13px; margin-bottom:5px;'><tr><td style='width:49%; background-color:#161b22; padding:6px; border-radius:4px;'><span style='color:#888; font-size:11px;'>加權大盤</span><br><b style='color:{tx_color}; font-size:15px;'>{taiex_price:,.2f}</b> <span style='color:{tx_color}; font-size:11px;'>({tx_sign}{taiex_change})</span></td><td style='width:2%;'></td><td style='width:49%; background-color:#161b22; padding:6px; border-radius:4px;'><span style='color:#888; font-size:11px;'>櫃買指數</span><br><b style='color:{otc_color}; font-size:15px;'>{otc_price:,.2f}</b> <span style='color:{otc_color}; font-size:11px;'>({otc_sign}{otc_change})</span></td></tr></table>"
             index_block.markdown(index_html, unsafe_allow_html=True)
 
-            # 動態大戶文字渲染
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
             mode_prefix = " (🌙測試中)" if test_mode else ""
             threshold_spot.caption(f"⚙️ 矩陣大戶定義：單筆 {dynamic_threshold} 張以上 | 今日總量: {total_volume_lots:,} 張{mode_prefix}")
@@ -204,7 +181,6 @@ if api_key or test_mode:
             total_bid_vol = sum([b.get('size', 0) for b in bids])
             total_ask_vol = sum([a.get('size', 0) for a in asks])
             
-            # 手機五檔 HTML 表格
             five_ticks_html = "<table style='width:100%; text-align:center; font-size:15px; border-collapse:collapse; font-family:monospace;'><tr style='background-color:#111; height:28px;'><th style='color:#00ff88; width:25%; font-size:12px;'>買張</th><th style='color:#00ff88; width:25%; font-size:12px;'>買價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣張</th></tr>"
             for i in range(5):
                 b_price = bids[i].get('price', 0.0)
@@ -219,16 +195,14 @@ if api_key or test_mode:
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
-            # 大單判定
             current_trade_key = (trade_time, tick_qty, tick_price)
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
-                elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
+                elif tick_price <= last_bid Document and last_bid > 0: current_side = 'Sell'
                 else: current_side = 'Buy' if tick_price >= st.session_state.open_price else 'Sell'
                 st.session_state.order_history.append({'timestamp': time.time(), 'side': current_side})
                 st.session_state.last_trade_key = current_trade_key
             
-            # 更新個股價格計分板
             tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
             with price_block.container():
                 cp1, cp2 = st.columns([5, 4])
