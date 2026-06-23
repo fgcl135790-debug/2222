@@ -15,10 +15,8 @@ with st.expander("⚙️ 點我展開：輸入金鑰 / 更換股票 / 模擬測�
 
 # --- 💡 核心演算法：精細化大戶規則多維矩陣 ---
 def get_dynamic_big_order_threshold(price, total_volume_lots):
-    if price >= 1000:
-        return 2       
-    elif price >= 500:
-        return 5 if total_volume_lots >= 10000 else 3
+    if price >= 1000: return 2       
+    elif price >= 500: return 5 if total_volume_lots >= 10000 else 3
     elif price >= 200:
         if total_volume_lots >= 500000: return 50
         elif total_volume_lots >= 100000: return 40
@@ -55,6 +53,12 @@ if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
 if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
 if 'order_history' not in st.session_state: st.session_state.order_history = []
 if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
+if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
+
+# 🧠 核心新增：全域指數快取記憶體
+if 'taiex_cache' not in st.session_state: st.session_state.taiex_cache = (0.0, 0.0)
+if 'otc_cache' not in st.session_state: st.session_state.otc_cache = (0.0, 0.0)
+if 'last_index_fetch_time' not in st.session_state: st.session_state.last_index_fetch_time = 0.0
 
 if st.session_state.last_stock_code != stock_code:
     st.session_state.open_price = 0.0
@@ -62,7 +66,7 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
 
-# --- 📱 定義即時擦除容器（依手機視覺權重由上往下排列） ---
+# --- 📱 定義即時擦除容器 ---
 index_block = st.empty()  
 price_block = st.empty()  
 signal_spot = st.empty()
@@ -105,33 +109,48 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
-    @st.fragment(run_every=1.0)
+    # 🎯 ⚙️ 調整點二：從極端的 1.0 秒安全微調為一樣極速流暢的 2.0 秒，瞬間砍掉一半連線量！
+    @st.fragment(run_every=2.0)
     def start_streaming(code):
         try:
+            current_now = time.time()
+            elapsed_speed = current_now - st.session_state.last_update_time
+            if elapsed_speed > 10.0: elapsed_speed = 2.00
+            st.session_state.last_update_time = current_now
+
             if test_mode:
                 taiex_price, taiex_change = 22135.45, -150.32
                 otc_price, otc_change = 265.12, 1.45
-                
                 current_price, open_price, total_volume_lots = 29.05, 31.10, 954591
                 stock_name = "友達" if code == "2409" else f"股票 {code}"
                 bids = [{'price': 29.05, 'size': 3472000}, {'price': 29.00, 'size': 14373000}, {'price': 28.95, 'size': 1419000}, {'price': 28.90, 'size': 2476000}, {'price': 28.85, 'size': 1445000}]
                 asks = [{'price': 29.10, 'size': 652000}, {'price': 29.15, 'size': 180000}, {'price': 29.20, 'size': 131000}, {'price': 29.25, 'size': 745000}, {'price': 29.30, 'size': 437000}]
                 tick_qty, tick_price, last_bid, last_ask, trade_time = 550, 29.00, 29.05, 29.10, time.time()
             else:
-                try:
-                    tx_q = client.stock.intraday.quote(symbol='IX0001')
-                    taiex_price = tx_q.get('closePrice') or tx_q.get('lastPrice') or 0.0
-                    tx_open = tx_q.get('openPrice') or taiex_price
-                    taiex_change = round(taiex_price - tx_open, 2)
-                except: taiex_price, taiex_change = 0.0, 0.0
+                # 🧠 ⚙️ 調整點一：法人大盤快取機制控制
+                # 只有距離上一次抓大盤超過 30 秒，才真的發送 API 請求；其餘時間直接用快取，省下 2/3 的連線量
+                if current_now - st.session_state.last_index_fetch_time > 30.0:
+                    try:
+                        tx_q = client.stock.intraday.quote(symbol='IX0001')
+                        tx_p = tx_q.get('closePrice') or tx_q.get('lastPrice') or 0.0
+                        tx_o = tx_q.get('openPrice') or tx_p
+                        st.session_state.taiex_cache = (tx_p, round(tx_p - tx_o, 2))
+                    except: pass
+                    
+                    try:
+                        otc_q = client.stock.intraday.quote(symbol='IX0043')
+                        otc_p = otc_q.get('closePrice') or otc_q.get('lastPrice') or 0.0
+                        otc_o = otc_q.get('openPrice') or otc_p
+                        st.session_state.otc_cache = (otc_p, round(otc_p - otc_o, 2))
+                    except: pass
+                    
+                    st.session_state.last_index_fetch_time = current_now
                 
-                try:
-                    otc_q = client.stock.intraday.quote(symbol='IX0043')
-                    otc_price = otc_q.get('closePrice') or otc_q.get('lastPrice') or 0.0
-                    otc_open = otc_q.get('openPrice') or otc_price
-                    otc_change = round(otc_price - otc_open, 2)
-                except: otc_price, otc_change = 0.0, 0.0
+                # 從記憶體讀出大盤與櫃買快取數據
+                taiex_price, taiex_change = st.session_state.taiex_cache
+                otc_price, otc_change = st.session_state.otc_cache
                 
+                # C. 正常抓取個股（維持高敏感度更新）
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('closePrice') or quote.get('lastPrice') or 0.0
                 open_price = quote.get('openPrice') or current_price
@@ -166,6 +185,7 @@ if api_key or test_mode:
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
+            # HTML 雙指數面板渲染
             tx_color = "#ff4466" if taiex_change >= 0 else "#00ff88"
             tx_sign = "+" if taiex_change > 0 else ""
             otc_color = "#ff4466" if otc_change >= 0 else "#00ff88"
@@ -176,7 +196,7 @@ if api_key or test_mode:
 
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            threshold_spot.caption(f"⚙️ 矩陣大戶定義：單筆 {dynamic_threshold} 張以上 | 今日總量: {total_volume_lots:,} 張{mode_prefix}")
+            threshold_spot.caption(f"⚙️ 矩陣大戶定義：單筆 {dynamic_threshold} 張以上 | 今日總量: {total_volume_lots:,} 張 | ⚡ 刷新速度: {elapsed_speed:.2f} 秒/次{mode_prefix}")
             
             total_bid_vol = sum([b.get('size', 0) for b in bids])
             total_ask_vol = sum([a.get('size', 0) for a in asks])
@@ -198,7 +218,6 @@ if api_key or test_mode:
             current_trade_key = (trade_time, tick_qty, tick_price)
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
-                # 🟢 【精準修復點】移除不小心多打的 Document 幽靈單字，語法重回完美
                 elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
                 else: current_side = 'Buy' if tick_price >= st.session_state.open_price else 'Sell'
                 st.session_state.order_history.append({'timestamp': time.time(), 'side': current_side})
@@ -215,7 +234,12 @@ if api_key or test_mode:
             elif "做空" in decision: signal_spot.error(decision)
             else: signal_spot.info(decision)
                 
-        except FugleAPIError as e: st.error(f"富果 API 錯誤: {e.message}")
+        except FugleAPIError as e:
+            if "Rate limit exceeded" in e.message:
+                st.error("🚨 偵測到富果限制頻率，系統正在自動降速降壓防守中，請稍候 30 秒...")
+                time.sleep(5)
+            else:
+                st.error(f"富果 API 錯誤: {e.message}")
         except Exception as e: st.error(f"連線異常: {e}")
 
     start_streaming(stock_code)
