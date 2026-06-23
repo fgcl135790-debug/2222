@@ -84,7 +84,7 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
         elif total_volume_lots >= 10000: return 50
         else: return 20
     elif price >= 20: 
-        if total_volume_lots >= 500000: return 400 
+        if total_volume_lots >= 500000: return 500 
         elif total_volume_lots >= 100000: return 300
         elif total_volume_lots >= 50000: return 150
         elif total_volume_lots >= 10000: return 80
@@ -95,10 +95,14 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
         elif total_volume_lots >= 50000: return 200
         elif total_volume_lots >= 10000: return 100
         else: return 30
+
 # --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空版） ---
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
+    
+    # 確保 Session State 初始化空頭低點鎖
+    if 'wave_low_price' not in st.session_state: st.session_state.wave_low_price = 999999.0
     
     # 快速清洗超過 30 秒的老舊紀錄
     st.session_state.order_history = [
@@ -121,28 +125,36 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     else:
         st.session_state.wave_low_price = 999999.0
 
-    # ⚡ 3. 多頭轉折判定：自高點回撤 1% ➔ 清空多頭
+    # ⚡ 3. 轉折旗標初始化
+    retracement_triggered = False
+    warning_message = ""
     RETRACEMENT = 0.01  
+
+    # ⚡ 4. 多頭轉折判定：自高點回撤 1% ➔ 觸發警告並清空多頭
     if st.session_state.wave_high_price > 0:
         drop_ratio = (st.session_state.wave_high_price - current_price) / st.session_state.wave_high_price
         if drop_ratio >= RETRACEMENT:
             st.session_state.order_history = []
             st.session_state.wave_high_price = 0.0
-            return f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空籌碼，轉為觀望。"
+            recent_buy_cnt = 0
+            retracement_triggered = True
+            warning_message = f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空籌碼，轉為觀望。"
 
-    # ⚡ 4. 空頭轉折判定：自低點反彈 1% ➔ 清空空頭 (止跌回升測試)
-    if st.session_state.wave_low_price < 999999.0:
+    # ⚡ 5. 空頭轉折判定：自低點反彈 1% ➔ 觸發警告並清空空頭
+    if st.session_state.wave_low_price < 999999.0 and not retracement_triggered:
         rebound_ratio = (current_price - st.session_state.wave_low_price) / st.session_state.wave_low_price
         if rebound_ratio >= RETRACEMENT:
             st.session_state.order_history = []
             st.session_state.wave_low_price = 999999.0
-            return f"💥 空頭止跌：股價自這波低點 {st.session_state.wave_low_price} 元強彈達 {rebound_ratio*100:.2f}%！空方針對性遭到攻破，強制擦除砸貨明細，全力防守。"
+            recent_sell_cnt = 0
+            retracement_triggered = True
+            warning_message = f"💥 空頭止跌：股價自這波低點 {st.session_state.wave_low_price} 元強彈達 {rebound_ratio*100:.2f}%！空方針對性遭到攻破，強制擦除砸貨明細，全力防守。"
 
-    # 渲染計分板
+    # 6. 渲染計分板
     counter_html = f"<table style='width:100%; text-align:center; font-size:13px;'><tr><td style='width:49%; background-color:#221215; padding:5px; border-radius:4px;'><span style='color:#ff4466;font-size:11px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:18px;'>{recent_buy_cnt} 次</b></td><td style='width:2%;'></td><td style='width:49%; background-color:#112215; padding:5px; border-radius:4px;'><span style='color:#00ff88;font-size:11px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:18px;'>{recent_sell_cnt} 次</b></td></tr></table>"
     history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
 
-    # 渲染大戶進攻流水帳黑盒子
+    # 7. 渲染大戶進攻流水帳黑盒子
     if st.session_state.order_history:
         log_html = "<div style='background-color:#111; padding:6px; border-radius:4px; font-family:monospace; font-size:12px; max-height:100px; overflow-y:auto; text-align:left; border: 1px solid #222;'>"
         for order in reversed(st.session_state.order_history):
@@ -153,6 +165,19 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
         log_spot.markdown(log_html, unsafe_allow_html=True)
     else:
         log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
+
+    # ⚡ 8. 多空與轉折警示最終決策輸出
+    if retracement_triggered:
+        return warning_message  # 優先將 1% 轉折的警告標語拋回給主畫面容器顯示
+
+    if open_p > 0:
+        if current_price >= open_p and total_ask_vol > (total_bid_vol * 1.2) and recent_buy_cnt >= 3:
+            return f"🎯【🔥 做多訊號】{stock_name} 主力突破吃貨，順勢做多！"
+        if current_price < open_p and total_bid_vol > (total_ask_vol * 1.2) and recent_sell_cnt >= 3:
+            return f"🎯【💥 做空訊號】{stock_name} 多頭防線潰散，順勢放空！"
+
+    return f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望..."
+
 
     # 多空核心訊號動態判定
     if open_p > 0:
