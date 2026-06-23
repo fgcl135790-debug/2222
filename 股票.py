@@ -153,7 +153,7 @@ if api_key or test_mode:
         try:
             current_now = time.time()
             elapsed_speed = current_now - st.session_state.last_update_time
-            if elapsed_speed > 30.0 or elapsed_speed <= 0: elapsed_speed = 5.00
+            if elapsed_speed > 10.0 or elapsed_speed <= 0: elapsed_speed = 2.00
             st.session_state.last_update_time = current_now
 
             # =========================================================================
