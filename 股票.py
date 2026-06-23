@@ -5,14 +5,14 @@ import time
 
 st.set_page_config(page_title="當沖不閃爍監控", page_icon="📈", layout="centered")
 
+# 🟢 關鍵修復：必須在最外層（一開機）就初始化這兩個變數，才不會造成畫面變黑
+if 'open_price' not in st.session_state:
+    st.session_state.open_price = 0.0
+
 st.title("📈 全自動當沖監控 (無閃爍優化版)")
 st.write("利用局部定時洗價技術，保持畫面完全靜止，僅數據即時跳動。")
 
 stock_code = st.text_input("輸入要監控的股票代號", value="2409")
-
-# 在全域初始化開盤價，避免局部刷新時資料遺失
-if 'open_price' not in st.session_state:
-    st.session_state.open_price = 0.0
 
 def fetch_yahoo_stock(code):
     try:
@@ -31,25 +31,24 @@ def monitor_panel(code):
     current_p = fetch_yahoo_stock(code)
     
     if current_p:
+        # 如果是第一次抓到價格，設定為今日開盤基準價
         if st.session_state.open_price == 0.0:
             st.session_state.open_price = current_p
             
-        # 🕒 1. 自動抓取當下電腦/手機的最新秒級時間
+        # 🕒 自動抓取當下最新秒級時間
         current_time = time.strftime("%H:%M:%S")
             
-        # 📐 2. 建立並排欄位（左邊佔 3 等分放股價，右邊佔 1 等分放時間）
+        # 📐 建立並排欄位（左邊放股價，右邊放時間）
         col_price, col_time = st.columns([3, 1])
         
         with col_price:
-            # 左邊欄位：原本的即時股價
             st.metric(
-                label=f"📊 友達 ({code}) 即時股價", 
+                label=f"📊 股票 ({code}) 即時股價", 
                 value=f"{current_p} 元", 
-                delta=f"相較今日開盤: {round(current_p - st.session_state.open_price, 2)} 元"
+                delta=f"相較開盤: {round(current_p - st.session_state.open_price, 2)} 元"
             )
             
         with col_time:
-            # 右邊欄位：放你想要的最後更新時間
             st.metric(
                 label="⏱️ 最後更新時間",
                 value=current_time
@@ -62,3 +61,6 @@ def monitor_panel(code):
             st.success("🔥 【真希望/偏強】股價立足於開盤價之上，多方嘗試控盤中！")
     else:
         st.warning("⏳ 正在背景即時抓取數據中...")
+
+# 執行局部刷新區
+monitor_panel(stock_code)
