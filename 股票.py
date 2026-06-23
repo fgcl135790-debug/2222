@@ -24,25 +24,6 @@ with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", e
     stock_code = st.text_input("股票代號", value="2409")
     test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
 
-# --- 🟢 初始化全域狀態 ---
-if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
-if 'wave_high_price' not in st.session_state: st.session_state.wave_high_price = 0.0  # 追蹤連續上升進攻波的局部最高點
-if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
-if 'order_history' not in st.session_state: st.session_state.order_history = []
-if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
-if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
-
-if 'taiex_cache' not in st.session_state: st.session_state.taiex_cache = (0.0, 0.0)
-if 'otc_cache' not in st.session_state: st.session_state.otc_cache = (0.0, 0.0)
-if 'last_index_fetch_time' not in st.session_state: st.session_state.last_index_fetch_time = 0.0
-
-if st.session_state.last_stock_code != stock_code:
-    st.session_state.open_price = 0.0
-    st.session_state.wave_high_price = 0.0
-    st.session_state.order_history = []
-    st.session_state.last_trade_key = None
-    st.session_state.last_stock_code = stock_code
-
 # --- 📱 定義手機單頁即時擦除動態容器鎖定 ---
 index_block = st.empty()  
 price_block = st.empty()  
@@ -59,6 +40,27 @@ history_counter_spot = st.empty()
 
 st.markdown("<b style='font-size:14px; color:#ddd;'>📜 大戶進攻即時紀錄 (30秒內明細)</b>", unsafe_allow_html=True)
 log_spot = st.empty()
+# --- 🟢 初始化全域狀態機制 ---
+if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
+if 'wave_high_price' not in st.session_state: st.session_state.wave_high_price = 0.0    # 多頭進攻高點鎖
+if 'wave_low_price' not in st.session_state: st.session_state.wave_low_price = 999999.0  # 空頭拋售低點鎖
+if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
+if 'order_history' not in st.session_state: st.session_state.order_history = []
+if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
+if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
+
+if 'taiex_cache' not in st.session_state: st.session_state.taiex_cache = (0.0, 0.0)
+if 'otc_cache' not in st.session_state: st.session_state.otc_cache = (0.0, 0.0)
+if 'last_index_fetch_time' not in st.session_state: st.session_state.last_index_fetch_time = 0.0
+
+if st.session_state.last_stock_code != stock_code:
+    st.session_state.open_price = 0.0
+    st.session_state.wave_high_price = 0.0
+    st.session_state.wave_low_price = 999999.0
+    st.session_state.order_history = []
+    st.session_state.last_trade_key = None
+    st.session_state.last_stock_code = stock_code
+
 # --- 💡 核心演算法：精細化大戶規則多維矩陣 ---
 def get_dynamic_big_order_threshold(price, total_volume_lots):
     if price >= 1000: return 2       
@@ -93,8 +95,7 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
         elif total_volume_lots >= 50000: return 200
         elif total_volume_lots >= 10000: return 100
         else: return 30
-
-# --- 核心邏輯：當沖多空連續性辨識引擎（加入進攻波回撤 1% 清空機制） ---
+# --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空版） ---
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
@@ -106,22 +107,36 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     recent_buy_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Buy')
     recent_sell_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Sell')
 
-    # ⚡ 追蹤「連續上升進攻波」的局部最高點
+    # ⚡ 1. 多頭追蹤：連續上升進攻波最高點
     if recent_buy_cnt > 0:
         if current_price > st.session_state.wave_high_price:
             st.session_state.wave_high_price = current_price
     else:
         st.session_state.wave_high_price = 0.0
 
-    # ⚡ 轉折判定：只要股價自這波攻擊高點往下回撤達到 1%，立刻抹除紀錄
-    DROP_THRESHOLD = 0.01  
+    # ⚡ 2. 空頭追蹤：連續下跌拋售波最低點
+    if recent_sell_cnt > 0:
+        if current_price < st.session_state.wave_low_price and current_price > 0:
+            st.session_state.wave_low_price = current_price
+    else:
+        st.session_state.wave_low_price = 999999.0
+
+    # ⚡ 3. 多頭轉折判定：自高點回撤 1% ➔ 清空多頭
+    RETRACEMENT = 0.01  
     if st.session_state.wave_high_price > 0:
         drop_ratio = (st.session_state.wave_high_price - current_price) / st.session_state.wave_high_price
-        if drop_ratio >= DROP_THRESHOLD:
+        if drop_ratio >= RETRACEMENT:
             st.session_state.order_history = []
-            st.session_state.wave_high_price = 0.0  
-            recent_buy_cnt = 0  
-            return f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！大戶連續上升趨勢打破，強制清空籌碼，轉為觀望。"
+            st.session_state.wave_high_price = 0.0
+            return f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空籌碼，轉為觀望。"
+
+    # ⚡ 4. 空頭轉折判定：自低點反彈 1% ➔ 清空空頭 (止跌回升測試)
+    if st.session_state.wave_low_price < 999999.0:
+        rebound_ratio = (current_price - st.session_state.wave_low_price) / st.session_state.wave_low_price
+        if rebound_ratio >= RETRACEMENT:
+            st.session_state.order_history = []
+            st.session_state.wave_low_price = 999999.0
+            return f"💥 空頭止跌：股價自這波低點 {st.session_state.wave_low_price} 元強彈達 {rebound_ratio*100:.2f}%！空方針對性遭到攻破，強制擦除砸貨明細，全力防守。"
 
     # 渲染計分板
     counter_html = f"<table style='width:100%; text-align:center; font-size:13px;'><tr><td style='width:49%; background-color:#221215; padding:5px; border-radius:4px;'><span style='color:#ff4466;font-size:11px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:18px;'>{recent_buy_cnt} 次</b></td><td style='width:2%;'></td><td style='width:49%; background-color:#112215; padding:5px; border-radius:4px;'><span style='color:#00ff88;font-size:11px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:18px;'>{recent_sell_cnt} 次</b></td></tr></table>"
@@ -162,18 +177,40 @@ if api_key or test_mode:
             if test_mode:
                 taiex_price, taiex_change = 22135.45, -150.32
                 otc_price, otc_change = 265.12, 1.45
-                current_price, open_price, total_volume_lots = 29.05, 29.00, 95459
+                open_price = 29.00
                 stock_name = "友達" if code == "2409" else f"股票 {code}"
-                bids = [{'price': 29.05, 'size': 3472}, {'price': 29.00, 'size': 14373}, {'price': 28.95, 'size': 1419}, {'price': 28.90, 'size': 2476}, {'price': 28.85, 'size': 1445}]
-                asks = [{'price': 29.10, 'size': 652}, {'price': 29.15, 'size': 180}, {'price': 29.20, 'size': 131}, {'price': 29.25, 'size': 745}, {'price': 29.30, 'size': 437}]
+                total_volume_lots = 95459
+                trade_time = int(current_now * 1000)
                 
-                if int(current_now) % 4 == 0:
-                    tick_qty = 550
-                    tick_price = 29.10
-                    last_bid, last_ask = 29.05, 29.10
-                    trade_time = int(current_now * 1000)
+                # 🟢 40秒全自動多空雙向折返全功能壓力測試劇本
+                cycle = int(current_now) % 40
+                if cycle < 10:
+                    current_price = 29.05 + (cycle * 0.04) 
+                    tick_qty = 550 if cycle % 2 == 0 else 0
+                    tick_price = current_price
+                    bids_base, asks_base = 1000, 3000 
+                    last_bid, last_ask = current_price - 0.05, current_price
+                elif cycle < 20:
+                    current_price = 29.41 - ((cycle - 10) * 0.04)
+                    tick_qty = 0
+                    tick_price = current_price
+                    bids_base, asks_base = 2000, 2000
+                    last_bid, last_ask = current_price, current_price + 0.05
+                elif cycle < 30:
+                    current_price = 28.90 - ((cycle - 20) * 0.05)
+                    tick_qty = 600 if cycle % 2 == 0 else 0
+                    tick_price = current_price
+                    bids_base, asks_base = 4000, 1000 
+                    last_bid, last_ask = current_price, current_price + 0.05
                 else:
-                    tick_qty, tick_price, last_bid, last_ask, trade_time = 0, 29.05, 29.05, 29.10, int(current_now * 1000)
+                    current_price = 28.45 + ((cycle - 30) * 0.04)
+                    tick_qty = 0
+                    tick_price = current_price
+                    bids_base, asks_base = 2000, 2000
+                    last_bid, last_ask = current_price - 0.05, current_price
+
+                bids = [{'price': round(current_price - 0.05 * i, 2), 'size': bids_base - i * 100} for i in range(1, 6)]
+                asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
             else:
                 if current_now - st.session_state.last_index_fetch_time > 30.0:
                     try:
@@ -200,7 +237,6 @@ if api_key or test_mode:
                 
                 total_info = quote.get('total', {})
                 raw_volume = total_info.get('unit') or total_info.get('volume', 0)
-                
                 if raw_volume == 0:
                     try:
                         ticker_info = client.stock.intraday.ticker(symbol=code)
@@ -218,14 +254,12 @@ if api_key or test_mode:
                 tick_qty = int(last_trade.get('unit') or last_trade.get('size', 0))
                 tick_price = last_trade.get('price', current_price)
                 trade_time = last_trade.get('time', 0)
-                
-                last_bid = bids[0].get('price', 0.0) if bids else 0.0
-                last_ask = asks[0].get('price', 0.0) if asks else 0.0
+                last_bid = bids.get('price', 0.0) if bids else 0.0
+                last_ask = asks.get('price', 0.0) if asks else 0.0
 
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
                 return
-                
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
@@ -259,7 +293,6 @@ if api_key or test_mode:
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
             current_trade_key = (trade_time, tick_qty, tick_price)
-            # 🚀 關鍵過濾修正：結合動態矩陣，且強制規定最低 150 張才寫入歷史紀錄
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= max(dynamic_threshold, 150):
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
                 elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
