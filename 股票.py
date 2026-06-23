@@ -55,7 +55,6 @@ if 'order_history' not in st.session_state: st.session_state.order_history = []
 if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
 if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
 
-# 🧠 核心新增：全域指數快取記憶體
 if 'taiex_cache' not in st.session_state: st.session_state.taiex_cache = (0.0, 0.0)
 if 'otc_cache' not in st.session_state: st.session_state.otc_cache = (0.0, 0.0)
 if 'last_index_fetch_time' not in st.session_state: st.session_state.last_index_fetch_time = 0.0
@@ -80,20 +79,38 @@ st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
 st.write("🔥 **30秒大戶進攻火網**")
 history_counter_spot = st.empty()
 
+# 🟢 新增：大戶進攻流水帳看板
+st.write("📜 **大戶進攻即時紀錄 (30秒內明細)**")
+log_spot = st.empty()
+
 # --- 核心邏輯：當沖多空連續性辨識引擎 ---
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
     tw_now_str = time.strftime('%H:%M:%S', time.gmtime(now_time + 28800))
     
+    # 清除超過 30 秒的老舊紀錄
     st.session_state.order_history = [
         x for x in st.session_state.order_history if now_time - x['timestamp'] <= 30
     ]
     recent_buy_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Buy')
     recent_sell_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Sell')
     
+    # 渲染計分板
     counter_html = f"<table style='width:100%; text-align:center; font-size:14px;'><tr><td style='width:50%; background-color:#1e261e; padding:6px; border-radius:4px;'><span style='color:#ff4466;font-size:12px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:20px;'>{recent_buy_cnt} 次</b></td><td style='width:4px;'></td><td style='width:50%; background-color:#19222a; padding:6px; border-radius:4px;'><span style='color:#00ff88;font-size:12px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:20px;'>{recent_sell_cnt} 次</b></td></tr></table>"
     history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
+
+    # 🟢 【新功能】渲染大戶進攻流水帳黑盒子
+    if st.session_state.order_history:
+        log_html = "<div style='background-color:#111; padding:8px; border-radius:4px; font-family:monospace; font-size:12px; max-height:120px; overflow-y:auto; text-align:left;'>"
+        for order in reversed(st.session_state.order_history):
+            color = "#ff4466" if order['side'] == 'Buy' else "#00ff88"
+            action = "外盤搶吃" if order['side'] == 'Buy' else "內盤砸貨"
+            log_html += f"<p style='margin:3px 0; color:{color};'>⏱️ {order['time_str']} | {action} <b style='font-size:13px;'>{order['qty']}</b> 張 @ {order['price']} 元</p>"
+        log_html += "</div>"
+        log_spot.markdown(log_html, unsafe_allow_html=True)
+    else:
+        log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
 
     if current_price >= open_p and open_p > 0:
         if total_ask_vol > (total_bid_vol * 1.3) and recent_buy_cnt >= 3:
@@ -109,7 +126,6 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
-    # 🎯 ⚙️ 調整點二：從極端的 1.0 秒安全微調為一樣極速流暢的 2.0 秒，瞬間砍掉一半連線量！
     @st.fragment(run_every=2.0)
     def start_streaming(code):
         try:
@@ -125,10 +141,16 @@ if api_key or test_mode:
                 stock_name = "友達" if code == "2409" else f"股票 {code}"
                 bids = [{'price': 29.05, 'size': 3472000}, {'price': 29.00, 'size': 14373000}, {'price': 28.95, 'size': 1419000}, {'price': 28.90, 'size': 2476000}, {'price': 28.85, 'size': 1445000}]
                 asks = [{'price': 29.10, 'size': 652000}, {'price': 29.15, 'size': 180000}, {'price': 29.20, 'size': 131000}, {'price': 29.25, 'size': 745000}, {'price': 29.30, 'size': 437000}]
-                tick_qty, tick_price, last_bid, last_ask, trade_time = 550, 29.00, 29.05, 29.10, time.time()
+                
+                # 🟢 【模擬黑科技】每4秒鐘自動「生成」一筆真的會動的外盤大單，讓你看到流水帳刷新！
+                if int(current_now) % 4 == 0:
+                    tick_qty = 550
+                    tick_price = 29.10
+                    last_bid, last_ask = 29.05, 29.10
+                    trade_time = current_now
+                else:
+                    tick_qty, tick_price, last_bid, last_ask, trade_time = 0, 29.05, 29.05, 29.10, current_now
             else:
-                # 🧠 ⚙️ 調整點一：法人大盤快取機制控制
-                # 只有距離上一次抓大盤超過 30 秒，才真的發送 API 請求；其餘時間直接用快取，省下 2/3 的連線量
                 if current_now - st.session_state.last_index_fetch_time > 30.0:
                     try:
                         tx_q = client.stock.intraday.quote(symbol='IX0001')
@@ -136,21 +158,17 @@ if api_key or test_mode:
                         tx_o = tx_q.get('openPrice') or tx_p
                         st.session_state.taiex_cache = (tx_p, round(tx_p - tx_o, 2))
                     except: pass
-                    
                     try:
                         otc_q = client.stock.intraday.quote(symbol='IX0043')
                         otc_p = otc_q.get('closePrice') or otc_q.get('lastPrice') or 0.0
                         otc_o = otc_q.get('openPrice') or otc_p
                         st.session_state.otc_cache = (otc_p, round(otc_p - otc_o, 2))
                     except: pass
-                    
                     st.session_state.last_index_fetch_time = current_now
                 
-                # 從記憶體讀出大盤與櫃買快取數據
                 taiex_price, taiex_change = st.session_state.taiex_cache
                 otc_price, otc_change = st.session_state.otc_cache
                 
-                # C. 正常抓取個股（維持高敏感度更新）
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('closePrice') or quote.get('lastPrice') or 0.0
                 open_price = quote.get('openPrice') or current_price
@@ -185,7 +203,6 @@ if api_key or test_mode:
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
-            # HTML 雙指數面板渲染
             tx_color = "#ff4466" if taiex_change >= 0 else "#00ff88"
             tx_sign = "+" if taiex_change > 0 else ""
             otc_color = "#ff4466" if otc_change >= 0 else "#00ff88"
@@ -215,12 +232,22 @@ if api_key or test_mode:
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
+            # 🚀 寫入歷史紀錄（擴充儲存資訊以供流水帳顯示）
             current_trade_key = (trade_time, tick_qty, tick_price)
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
                 elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
                 else: current_side = 'Buy' if tick_price >= st.session_state.open_price else 'Sell'
-                st.session_state.order_history.append({'timestamp': time.time(), 'side': current_side})
+                
+                # 紀錄台灣當下時間字串
+                tw_tick_time = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
+                st.session_state.order_history.append({
+                    'timestamp': time.time(),
+                    'time_str': tw_tick_time,
+                    'side': current_side,
+                    'qty': tick_qty,
+                    'price': tick_price
+                })
                 st.session_state.last_trade_key = current_trade_key
             
             tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
@@ -236,10 +263,9 @@ if api_key or test_mode:
                 
         except FugleAPIError as e:
             if "Rate limit exceeded" in e.message:
-                st.error("🚨 偵測到富果限制頻率，系統正在自動降速降壓防守中，請稍候 30 秒...")
+                st.error("🚨 偵測到富果限制頻率，系統正在自動降速防守中，請稍候 30 秒...")
                 time.sleep(5)
-            else:
-                st.error(f"富果 API 錯誤: {e.message}")
+            else: st.error(f"富果 API 錯誤: {e.message}")
         except Exception as e: st.error(f"連線異常: {e}")
 
     start_streaming(stock_code)
