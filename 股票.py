@@ -11,7 +11,7 @@ st.write("本程式已成功對接富果 API，全面解鎖秒級『最佳五檔
 # --- 側邊欄設定 ---
 st.sidebar.header("🔑 權限與標的設定")
 api_key = st.sidebar.text_input("輸入你的富果 API Key", type="password")
-stock_code = st.sidebar.text_input("監控股票代號", value="3481")
+stock_code = st.sidebar.text_input("監控股票代號", value="2409")
 
 # --- 💡 核心演算法：動態計算大戶門檻 ---
 def get_dynamic_big_order_threshold(price, total_volume_lots):
@@ -19,7 +19,8 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
     elif price >= 100: return 20      
     elif price >= 50: return 50      
     else:
-        if total_volume_lots >= 100000: return 400 
+        # 低價股(如友達、群創)，依當日實際總量動態調整
+        if total_volume_lots >= 100000: return 400 # 總量破10萬張(今天友達近百萬張)，400張才算大單
         elif total_volume_lots >= 50000: return 200 
         elif total_volume_lots >= 10000: return 100 
         else: return 30  
@@ -59,7 +60,6 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     open_p = st.session_state.open_price
     now_time = time.time()
     
-    # 修正為台灣時間顯示
     tw_now_str = time.strftime('%H:%M:%S', time.gmtime(now_time + 28800))
     
     st.session_state.order_history = [
@@ -76,13 +76,13 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 
     if current_price >= open_p and open_p > 0:
         if total_ask_vol > (total_bid_vol * 1.3) and recent_buy_cnt >= 3:
-            return f"🎯 【🔥 訊號：強烈做多】\n\n**觸發時間（台）**：{tw_now_str}\n\n**火力全開**：五檔外盤高掛假壓盤，且大戶在 30 秒內連續進行了 **{recent_buy_cnt} 次** 大單吃貨！\n\n**實戰建議**：主力強勢突破，順勢現股做多。"
+            return f"🎯 【🔥 訊號：強烈做多】\n\n**觸發時間（台）**：{tw_now_str}\n\n**火力全開**：大戶在 30 秒內連續進行了 **{recent_buy_cnt} 次** 破壞性大單吃貨（每筆皆達 {big_order_vol} 張門檻）！"
             
     if current_price < open_p and open_p > 0:
         if total_bid_vol > (total_ask_vol * 1.3) and recent_sell_cnt >= 3:
-            return f"🎯 【💥 訊號：強烈做空】\n\n**觸發時間（台）**：{tw_now_str}\n\n**全面崩盤**：五檔內盤高掛假撐盤，且大戶在 30 秒內密集連續砸出 **{recent_sell_cnt} 次** 內盤大單！\n\n**實戰建議**：防線已被打爛，順勢現券放空。"
+            return f"🎯 【💥 訊號：強烈做空】\n\n**觸發時間（台）**：{tw_now_str}\n\n**全面崩盤**：大戶在 30 秒內密集連續瘋狂砸出 **{recent_sell_cnt} 次** 內盤出貨大單！"
 
-    return "⏳ 偵測中：未出現『30秒內連續3筆以上大單』，主力尚未全面攤牌..."
+    return f"⏳ 偵測中：未出現『30秒內連續3筆以上大單 ({big_order_vol}張)』，大戶尚未全面攤牌..."
 
 # --- API 自動連線機制 ---
 if api_key:
@@ -95,7 +95,9 @@ if api_key:
             current_price = quote.get('closePrice') or quote.get('lastPrice') or 0.0
             open_price = quote.get('openPrice') or current_price
             
-            raw_volume = quote.get('volume', 0)
+            # 🟢 【重大修復】從正確的 quote['total']['volume'] 抽取富果即時總成交量(股)，並除以1000換算成張
+            total_info = quote.get('total', {})
+            raw_volume = total_info.get('volume', 0)
             total_volume_lots = int(raw_volume / 1000) if raw_volume > 0 else 0
             
             if current_price == 0.0:
@@ -105,8 +107,9 @@ if api_key:
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
+            # 🎯 由於總量精準抓到了，這裡會正確噴出「400張」的大戶定義！
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
-            threshold_spot.write(f"⚙️ **智慧系統動態設定**：目前 `{code}` 大戶定義為單筆成交達 **{dynamic_threshold} 張** 以上。 (今日總量: {total_volume_lots} 張)")
+            threshold_spot.write(f"⚙️ **智慧系統動態設定**：目前 `{code}` 大戶定義為單筆成交達 **{dynamic_threshold} 張** 以上。 (今日總量: {total_volume_lots:,} 張)")
             
             bids = quote.get('bids', [])
             asks = quote.get('asks', [])
@@ -125,12 +128,12 @@ if api_key:
                     c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
                     b_price = bids[i].get('price', 0.0)
                     b_vol = int(bids[i].get('size', 0) / 1000)
-                    c1.text(f"{b_vol} 張" if b_vol > 0 else "-")
+                    c1.text(f"{b_vol:,} 張" if b_vol > 0 else "-")
                     c2.text(f"{b_price}" if b_price > 0 else "-")
                     a_price = asks[i].get('price', 0.0)
                     a_vol = int(asks[i].get('size', 0) / 1000)
                     c3.text(f"{a_price}" if a_price > 0 else "-")
-                    c4.text(f"{a_vol} 張" if a_vol > 0 else "-")
+                    c4.text(f"{a_vol:,} 張" if a_vol > 0 else "-")
             
             last_trade = quote.get('lastTrade', {})
             tick_qty = int(last_trade.get('size', 0) / 1000)
@@ -155,7 +158,6 @@ if api_key:
                 })
                 st.session_state.last_trade_key = current_trade_key
             
-            # 1. 修正數據時間為台灣時間 (UTC+8)
             tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
             
             price_spot.metric(
