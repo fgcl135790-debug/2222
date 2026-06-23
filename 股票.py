@@ -13,16 +13,50 @@ with st.expander("⚙️ 點我展開：輸入金鑰 / 更換股票 / 模擬測�
     stock_code = st.text_input("股票代號", value="2409")
     test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
 
-# --- 💡 核心演算法：動態計算大戶門檻 ---
+# --- 💡 核心演算法：精細化大戶規則多維矩陣 ---
 def get_dynamic_big_order_threshold(price, total_volume_lots):
-    if price >= 500: return 5       
-    elif price >= 100: return 20      
-    elif price >= 50: return 50      
-    else:
-        if total_volume_lots >= 100000: return 400 
-        elif total_volume_lots >= 50000: return 200 
-        elif total_volume_lots >= 10000: return 100 
-        else: return 30  
+    """
+    台股實戰精細化矩陣：交叉驗證『股價級距』與『當日即時總量』
+    """
+    # 1. 超高價股區（千金、高價股以精準千萬元價值鎖定，不看量）
+    if price >= 1000:
+        return 2       
+    elif price >= 500:
+        return 5 if total_volume_lots >= 10000 else 3
+        
+    # 2. 中高價位與百元股區
+    elif price >= 200:
+        if total_volume_lots >= 500000: return 50
+        elif total_volume_lots >= 100000: return 40
+        elif total_volume_lots >= 50000: return 30
+        elif total_volume_lots >= 10000: return 15
+        else: return 5
+    elif price >= 100:
+        if total_volume_lots >= 500000: return 100
+        elif total_volume_lots >= 100000: return 80
+        elif total_volume_lots >= 50000: return 50
+        elif total_volume_lots >= 10000: return 30
+        else: return 10
+        
+    # 3. 中低價熱門股區（最容易出現天量散戶雜訊，必須切分極細）
+    elif price >= 50:
+        if total_volume_lots >= 500000: return 200
+        elif total_volume_lots >= 100000: return 150
+        elif total_volume_lots >= 50000: return 100
+        elif total_volume_lots >= 10000: return 50
+        else: return 20
+    elif price >= 20: # 友達、群創主要在此戰區
+        if total_volume_lots >= 500000: return 500 # 突破50萬張天量(如今天友達95萬張)，拉高到500張真大戶防線
+        elif total_volume_lots >= 100000: return 300
+        elif total_volume_lots >= 50000: return 150
+        elif total_volume_lots >= 10000: return 80
+        else: return 25
+    else: # 20元以下銅板股
+        if total_volume_lots >= 500000: return 600
+        elif total_volume_lots >= 100000: return 400
+        elif total_volume_lots >= 50000: return 200
+        elif total_volume_lots >= 10000: return 100
+        else: return 30
 
 # --- 🟢 初始化全域狀態 ---
 if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
@@ -66,13 +100,13 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 
     if current_price >= open_p and open_p > 0:
         if total_ask_vol > (total_bid_vol * 1.3) and recent_buy_cnt >= 3:
-            return f"🎯【🔥 做多訊號】{stock_name} 大戶30秒內爆買 {recent_buy_cnt} 次！主力突破吃貨，順勢現股做多！"
+            return f"🎯【🔥 做多訊號】{stock_name} 精確大戶30秒爆買 {recent_buy_cnt} 次！主力突破吃貨，順勢做多！"
             
     if current_price < open_p and open_p > 0:
         if total_bid_vol > (total_ask_vol * 1.3) and recent_sell_cnt >= 3:
-            return f"🎯【💥 做空訊號】{stock_name} 大戶30秒內爆賣 {recent_sell_cnt} 次！多頭防線潰散，順勢放空！"
+            return f"🎯【💥 做空訊號】{stock_name} 精確大戶30秒爆賣 {recent_sell_cnt} 次！多頭防線潰散，順勢放空！"
 
-    return f"⏳ 偵測中：未出現30秒內連續3筆以上大單 ({big_order_vol}張)，保持觀望..."
+    return f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望..."
 
 # --- API 連線與測試模式控制機制 ---
 if api_key or test_mode:
@@ -83,17 +117,14 @@ if api_key or test_mode:
         try:
             if test_mode:
                 current_price, open_price, total_volume_lots = 29.05, 31.10, 954591
-                # 🟢 深夜模擬模式：如果是 2409 就預設友達，其餘自動帶出
                 stock_name = "友達" if code == "2409" else f"股票 {code}"
                 bids = [{'price': 29.05, 'size': 3472000}, {'price': 29.00, 'size': 14373000}, {'price': 28.95, 'size': 1419000}, {'price': 28.90, 'size': 2476000}, {'price': 28.85, 'size': 1445000}]
                 asks = [{'price': 29.10, 'size': 652000}, {'price': 29.15, 'size': 180000}, {'price': 29.20, 'size': 131000}, {'price': 29.25, 'size': 745000}, {'price': 29.30, 'size': 437000}]
-                tick_qty, tick_price, last_bid, last_ask, trade_time = 450, 29.00, 29.05, 29.10, time.time()
+                tick_qty, tick_price, last_bid, last_ask, trade_time = 550, 29.00, 29.05, 29.10, time.time() # 模擬一筆高達550張的超級大單
             else:
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('closePrice') or quote.get('lastPrice') or 0.0
                 open_price = quote.get('openPrice') or current_price
-                
-                # 🟢 【新功能】直接從富果 API 最外層抽取該代號的「繁體中文股名」
                 stock_name = quote.get('name') or f"股票 {code}"
                 
                 total_info = quote.get('total', {})
@@ -103,7 +134,6 @@ if api_key or test_mode:
                     try:
                         ticker_info = client.stock.intraday.ticker(symbol=code)
                         raw_volume = ticker_info.get('volume', 0)
-                        # 如果 quote 被洗成 0 抓不到名字，改去 ticker 補抓名字
                         if stock_name == f"股票 {code}":
                             stock_name = ticker_info.get('name') or f"股票 {code}"
                     except: pass
@@ -126,9 +156,10 @@ if api_key or test_mode:
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
+            # 🎯 核心調用：精細化門檻計算
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            threshold_spot.caption(f"⚙️ 大戶定義：單筆 {dynamic_threshold} 張以上 | 今日總量: {total_volume_lots:,} 張{mode_prefix}")
+            threshold_spot.caption(f"⚙️ 矩陣大戶定義：單筆 {dynamic_threshold} 張以上 | 今日總量: {total_volume_lots:,} 張{mode_prefix}")
             
             total_bid_vol = sum([b.get('size', 0) for b in bids])
             total_ask_vol = sum([a.get('size', 0) for a in asks])
@@ -164,7 +195,6 @@ if api_key or test_mode:
             
             with price_block.container():
                 cp1, cp2 = st.columns([5, 4])
-                # 🟢 【重大優化】這裡成功改為將股名與代號一起融合噴出來！
                 cp1.header(f"📈 {stock_name} ({code}) : {current_price} 元")
                 cp2.subheader(f"⏱️ {tw_time_str}")
             
