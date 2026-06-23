@@ -21,9 +21,6 @@ with st.expander("⚙️ 點我展開：輸入金鑰 / 標的更換 / 50倍速�
     app_speed = st.slider("⏩ 回放加速度 (倍速)", min_value=1, max_value=50, value=25, step=1)
     st.caption(f"💡 目前設定：每 2 秒直接快轉處理 {app_speed} 筆大盤交易明細")
     
-    # 🎯 核心新增：手機原生戰術暫停鍵（一鍵定格時空）
-    pause_toggle = st.toggle("⏸️ 暫停歷史回放 (定格當前盤口研究)", value=False)
-    
     if app_mode == "⏳ 當日真實歷史回放 (深夜覆盤)":
         if st.button("🔄 重新從 09:00 開盤開始回放"):
             st.session_state.replay_index = 0
@@ -171,14 +168,17 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                         if not raw_list and code == "2409":
                             st.session_state.replay_meta = {'name': '友達', 'open': 31.10, 'vol_lots': 954591}
                             raw_list = []
+                            # 1. 早盤多頭點火（0 ~ 500筆）
                             for i in range(500):
                                 size = 550000 if i % 15 == 0 else (12000 if i % 3 == 0 else 4000)
                                 p = round(31.10 + (i * 0.0038), 2)
                                 raw_list.append({'price': p, 'size': size, 'time': 1719190800000000 + i*2000000})
+                            # 2. 盤中主力洗盤（501 ~ 1500筆）
                             for i in range(1000):
                                 size = 320000 if i % 40 == 0 else (8000 if i % 2 == 0 else 2000)
                                 p = round(33.00 - (i * 0.0025), 2)
                                 raw_list.append({'price': p, 'size': size, 'time': 1719192000000000 + i*2000000})
+                            # 3. 尾盤引爆大雪崩（1501 ~ 2000筆）
                             for i in range(500):
                                 size = 600000 if i % 12 == 0 else (15000 if i % 3 == 0 else 5000)
                                 p = round(30.50 - (i * 0.0029), 2)
@@ -190,79 +190,55 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 trades_pool = st.session_state.replay_trades
                 idx = st.session_state.replay_index
                 
-                # ⏸️ 【暫停開關核心切換邏輯】
-                if pause_toggle:
-                    target_idx = max(0, idx - app_speed)
-                    if trades_pool:
-                        last_tick = trades_pool[min(target_idx + app_speed - 1, len(trades_pool)-1)]
-                        current_price = last_tick.get('price', 0.0)
-                        open_price = st.session_state.replay_meta['open']
-                        stock_name = st.session_state.replay_meta['name']
-                        total_volume_lots = st.session_state.replay_meta['vol_lots']
+                if trades_pool and idx < len(trades_pool):
+                    batch_size = app_speed
+                    current_batch = trades_pool[idx : idx + batch_size]
+                    
+                    last_tick = current_batch[-1]
+                    current_price = last_tick.get('price', 0.0)
+                    open_price = st.session_state.replay_meta['open']
+                    stock_name = st.session_state.replay_meta['name']
+                    total_volume_lots = st.session_state.replay_meta['vol_lots']
+                    dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
+                    
+                    for tick in current_batch:
+                        t_qty = int(tick.get('size', 0) / 1000)
+                        t_price = tick.get('price', 0.0)
+                        t_time_us = tick.get('time', 0)
                         
-                        if current_price >= open_price:
-                            bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
-                            asks = [{'price': round(current_price + 0.05*i, 2), 'size': 4500000} for i in range(5)]
-                        else:
-                            bids = [{'price': round(current_price - 0.05*i, 2), 'size': 5500000} for i in range(5)]
-                            asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': 900000} for i in range(5)]
-                        
-                        tw_time_str = time.strftime("%H:%M:%S", time.gmtime(last_tick.get('time', 0) / 1000000 + 28800))
-                        taiex_price, taiex_change = 22135.45, -150.32
-                        otc_price, otc_change = 265.12, 1.45
-                        mode_prefix = f" (⏸️ 回放已暫停 {idx}/{len(trades_pool)})"
-                else:
-                    # ▶️ 正常播放前進
-                    if trades_pool and idx < len(trades_pool):
-                        batch_size = app_speed
-                        current_batch = trades_pool[idx : idx + batch_size]
-                        
-                        last_tick = current_batch[-1]
-                        current_price = last_tick.get('price', 0.0)
-                        open_price = st.session_state.replay_meta['open']
-                        stock_name = st.session_state.replay_meta['name']
-                        total_volume_lots = st.session_state.replay_meta['vol_lots']
-                        dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
-                        
-                        for tick in current_batch:
-                            t_qty = int(tick.get('size', 0) / 1000)
-                            t_price = tick.get('price', 0.0)
-                            t_time_us = tick.get('time', 0)
-                            
-                            if t_qty >= dynamic_threshold:
-                                c_side = 'Buy' if t_price >= open_price else 'Sell'
-                                t_time_str = time.strftime("%H:%M:%S", time.gmtime(t_time_us / 1000000 + 28800))
-                                st.session_state.order_history.append({
-                                    'timestamp': time.time(),
-                                    'time_str': t_time_str,
-                                    'side': c_side,
-                                    'qty': t_qty,
-                                    'price': t_price
-                                })
-                        
-                        if current_price >= open_price:
-                            bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
-                            asks = [{'price': round(current_price + 0.05*i, 2), 'size': 4500000} for i in range(5)]
-                        else:
-                            bids = [{'price': round(current_price - 0.05*i, 2), 'size': 5500000} for range(5)]
-                            bids = [{'price': round(current_price - 0.05*i, 2), 'size': 5500000} for i in range(5)]
-                            asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': 900000} for i in range(5)]
-                        
-                        tw_time_str = time.strftime("%H:%M:%S", time.gmtime(last_tick.get('time', 0) / 1000000 + 28800))
-                        trade_time = last_tick.get('time', 0)
-                        
-                        taiex_price, taiex_change = 22135.45, -150.32
-                        otc_price, otc_change = 265.12, 1.45
-                        
-                        st.session_state.replay_index += len(current_batch)
-                        mode_prefix = f" (⏳全天候快進中 {st.session_state.replay_index}/{len(trades_pool)})"
+                        if t_qty >= dynamic_threshold:
+                            c_side = 'Buy' if t_price >= open_price else 'Sell'
+                            t_time_str = time.strftime("%H:%M:%S", time.gmtime(t_time_us / 1000000 + 28800))
+                            st.session_state.order_history.append({
+                                'timestamp': time.time(),
+                                'time_str': t_time_str,
+                                'side': c_side,
+                                'qty': t_qty,
+                                'price': t_price
+                            })
+                    
+                    if current_price >= open_price:
+                        bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
+                        asks = [{'price': round(current_price + 0.05*i, 2), 'size': 4500000} for i in range(5)]
                     else:
-                        index_block.empty()
-                        price_block.empty()
-                        threshold_spot.empty()
-                        five_ticks_spot.empty()
-                        st.success("🏁 2,000 筆全天候精華歷史劇本已全部高速播放完畢！可展開上方重新放映。")
-                        return
+                        bids = [{'price': round(current_price - 0.05*i, 2), 'size': 5500000} for i in range(5)]
+                        asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': 900000} for i in range(5)]
+                    
+                    tw_time_str = time.strftime("%H:%M:%S", time.gmtime(last_tick.get('time', 0) / 1000000 + 28800))
+                    trade_time = last_tick.get('time', 0)
+                    
+                    taiex_price, taiex_change = 22135.45, -150.32
+                    otc_price, otc_change = 265.12, 1.45
+                    
+                    st.session_state.replay_index += len(current_batch)
+                    mode_prefix = f" (⏳全天候快進中 {st.session_state.replay_index}/{len(trades_pool)})"
+                else:
+                    index_block.empty()
+                    price_block.empty()
+                    threshold_spot.empty()
+                    five_ticks_spot.empty()
+                    st.success("🏁 2,000 筆全天候精華歷史劇本已全部高速播放完畢！可展開上方重新放映。")
+                    return
 
             # ----------------- 模式 2：深夜隨機模擬 -----------------
             elif app_mode == "🌙 深夜隨機模擬 (半夜看畫面)":
@@ -325,7 +301,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
                 mode_prefix = ""
 
-            # ----------------- 共通排版與變數計算 -----------------
+            # ----------------- 共通排版與變數計算（修復：全面強制計算總量防止 NameError） -----------------
             total_bid_vol = sum([b.get('size', 0) for b in bids])
             total_ask_vol = sum([a.get('size', 0) for a in asks])
 
@@ -354,6 +330,14 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 five_ticks_html += f"<tr style='height:32px; border-bottom:1px solid #222;'><td style='color:#00ff88; font-size:14px;'>{b_v_str}</td><td style='color:#00ff88; font-weight:bold;'>{b_p_str}</td><td style='color:#ff4466; font-weight:bold;'>{a_p_str}</td><td style='color:#ff4466; font-size:14px;'>{a_v_str}</td></tr>"
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
+            
+            # 盤中單筆大單判讀
+            if app_mode != "⏳ 當日真實歷史回放 (深夜覆盤)":
+                current_trade_key = (trade_time, tick_qty, tick_price)
+                if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
+                    c_side = 'Buy' if tick_price >= open_price else 'Sell'
+                    st.session_state.order_history.append({'timestamp': time.time(), 'time_str': tw_time_str, 'side': c_side, 'qty': tick_qty, 'price': tick_price})
+                    st.session_state.last_trade_key = current_trade_key
             
             with price_block.container():
                 cp1, cp2 = st.columns([5, 4])
