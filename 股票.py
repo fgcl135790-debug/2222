@@ -19,8 +19,7 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
     elif price >= 100: return 20      
     elif price >= 50: return 50      
     else:
-        # 低價股(如友達、群創)，依當日實際總量動態調整
-        if total_volume_lots >= 100000: return 400 # 總量破10萬張(今天友達近百萬張)，400張才算大單
+        if total_volume_lots >= 100000: return 400 # 總量破10萬張(友達近百萬張)，400張才算大單
         elif total_volume_lots >= 50000: return 200 
         elif total_volume_lots >= 10000: return 100 
         else: return 30  
@@ -59,13 +58,11 @@ signal_spot = st.empty()
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol):
     open_p = st.session_state.open_price
     now_time = time.time()
-    
     tw_now_str = time.strftime('%H:%M:%S', time.gmtime(now_time + 28800))
     
     st.session_state.order_history = [
         x for x in st.session_state.order_history if now_time - x['timestamp'] <= 30
     ]
-    
     recent_buy_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Buy')
     recent_sell_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Sell')
     
@@ -76,7 +73,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 
     if current_price >= open_p and open_p > 0:
         if total_ask_vol > (total_bid_vol * 1.3) and recent_buy_cnt >= 3:
-            return f"🎯 【🔥 訊號：強烈做多】\n\n**觸發時間（台）**：{tw_now_str}\n\n**火力全開**：大戶在 30 秒內連續進行了 **{recent_buy_cnt} 次** 破壞性大單吃貨（每筆皆達 {big_order_vol} 張門檻）！"
+            return f"🎯 【🔥 訊號：強烈做多】\n\n**觸發時間（台）**：{tw_now_str}\n\n**火力全開**：大戶在 30 秒內連續進行了 **{recent_buy_cnt} 次** 大單吃貨（每筆皆達 {big_order_vol} 張門檻）！"
             
     if current_price < open_p and open_p > 0:
         if total_bid_vol > (total_ask_vol * 1.3) and recent_sell_cnt >= 3:
@@ -91,26 +88,39 @@ if api_key:
     @st.fragment(run_every=1.0)
     def start_streaming(code):
         try:
+            # 抓取即時報價
             quote = client.stock.intraday.quote(symbol=code)
+            
             current_price = quote.get('closePrice') or quote.get('lastPrice') or 0.0
             open_price = quote.get('openPrice') or current_price
             
-            # 🟢 【重大修復】從正確的 quote['total']['volume'] 抽取富果即時總成交量(股)，並除以1000換算成張
+            # 1. 抽取即時總成交量(股)
             total_info = quote.get('total', {})
             raw_volume = total_info.get('volume', 0)
+            
+            # 🟢 【盤後防呆黑科技】如果半夜即時量被伺服器重設為 0，改調用當日匯總 Ticker 資料
+            if raw_volume == 0:
+                try:
+                    ticker_info = client.stock.intraday.ticker(symbol=code)
+                    raw_volume = ticker_info.get('volume', 0)
+                except:
+                    pass
+            
+            # 換算為「張」
             total_volume_lots = int(raw_volume / 1000) if raw_volume > 0 else 0
             
             if current_price == 0.0:
-                price_spot.warning("⏳ 盤後時間或目前無即時成交數據...")
+                price_spot.warning("⏳ 目前無即時成交數據...")
                 return
                 
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
-            # 🎯 由於總量精準抓到了，這裡會正確噴出「400張」的大戶定義！
+            # 2. 自動動態門檻計算
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
             threshold_spot.write(f"⚙️ **智慧系統動態設定**：目前 `{code}` 大戶定義為單筆成交達 **{dynamic_threshold} 張** 以上。 (今日總量: {total_volume_lots:,} 張)")
             
+            # 五檔排隊數據處理
             bids = quote.get('bids', [])
             asks = quote.get('asks', [])
             while len(bids) < 5: bids.append({'price': 0.0, 'size': 0})
@@ -135,6 +145,7 @@ if api_key:
                     c3.text(f"{a_price}" if a_price > 0 else "-")
                     c4.text(f"{a_vol:,} 張" if a_vol > 0 else "-")
             
+            # 提取明細
             last_trade = quote.get('lastTrade', {})
             tick_qty = int(last_trade.get('size', 0) / 1000)
             tick_price = last_trade.get('price', current_price)
