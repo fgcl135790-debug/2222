@@ -104,7 +104,7 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
 
     elif price >= 20: 
 
-        if total_volume_lots >= 500000: return 500 
+        if total_volume_lots >= 500000: return 400 
 
         elif total_volume_lots >= 100000: return 300
 
