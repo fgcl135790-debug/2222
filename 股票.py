@@ -15,16 +15,10 @@ with st.expander("⚙️ 點我展開：輸入金鑰 / 更換股票 / 模擬測�
 
 # --- 💡 核心演算法：精細化大戶規則多維矩陣 ---
 def get_dynamic_big_order_threshold(price, total_volume_lots):
-    """
-    台股實戰精細化矩陣：交叉驗證『股價級距』與『當日即時總量』
-    """
-    # 1. 超高價股區（千金、高價股以精準千萬元價值鎖定，不看量）
     if price >= 1000:
         return 2       
     elif price >= 500:
         return 5 if total_volume_lots >= 10000 else 3
-        
-    # 2. 中高價位與百元股區
     elif price >= 200:
         if total_volume_lots >= 500000: return 50
         elif total_volume_lots >= 100000: return 40
@@ -37,21 +31,19 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
         elif total_volume_lots >= 50000: return 50
         elif total_volume_lots >= 10000: return 30
         else: return 10
-        
-    # 3. 中低價熱門股區（最容易出現天量散戶雜訊，必須切分極細）
     elif price >= 50:
         if total_volume_lots >= 500000: return 200
         elif total_volume_lots >= 100000: return 150
         elif total_volume_lots >= 50000: return 100
         elif total_volume_lots >= 10000: return 50
         else: return 20
-    elif price >= 20: # 友達、群創主要在此戰區
-        if total_volume_lots >= 500000: return 500 # 突破50萬張天量(如今天友達95萬張)，拉高到500張真大戶防線
+    elif price >= 20: 
+        if total_volume_lots >= 500000: return 500 
         elif total_volume_lots >= 100000: return 300
         elif total_volume_lots >= 50000: return 150
         elif total_volume_lots >= 10000: return 80
         else: return 25
-    else: # 20元以下銅板股
+    else: 
         if total_volume_lots >= 500000: return 600
         elif total_volume_lots >= 100000: return 400
         elif total_volume_lots >= 50000: return 200
@@ -70,7 +62,8 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
 
-# --- 📱 定義即時擦除容器 ---
+# --- 📱 定義即時擦除容器（依手機視覺權重由上往下排列） ---
+index_block = st.empty()  # 🟢 新增：最頂層大盤與櫃買雙權指看板
 price_block = st.empty()  
 signal_spot = st.empty()
 threshold_spot = st.empty()
@@ -87,6 +80,7 @@ history_counter_spot = st.empty()
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
+    tw_now_str = time.strftime('%H:%M('%S', time.gmtime(now_time + 28800))
     tw_now_str = time.strftime('%H:%M:%S', time.gmtime(now_time + 28800))
     
     st.session_state.order_history = [
@@ -116,12 +110,33 @@ if api_key or test_mode:
     def start_streaming(code):
         try:
             if test_mode:
+                # 🌙 模擬測試模式數據 (含大盤、櫃買)
+                taiex_price, taiex_change = 22135.45, -150.32
+                otc_price, otc_change = 265.12, 1.45
+                
                 current_price, open_price, total_volume_lots = 29.05, 31.10, 954591
                 stock_name = "友達" if code == "2409" else f"股票 {code}"
                 bids = [{'price': 29.05, 'size': 3472000}, {'price': 29.00, 'size': 14373000}, {'price': 28.95, 'size': 1419000}, {'price': 28.90, 'size': 2476000}, {'price': 28.85, 'size': 1445000}]
                 asks = [{'price': 29.10, 'size': 652000}, {'price': 29.15, 'size': 180000}, {'price': 29.20, 'size': 131000}, {'price': 29.25, 'size': 745000}, {'price': 29.30, 'size': 437000}]
-                tick_qty, tick_price, last_bid, last_ask, trade_time = 550, 29.00, 29.05, 29.10, time.time() # 模擬一筆高達550張的超級大單
+                tick_qty, tick_price, last_bid, last_ask, trade_time = 550, 29.00, 29.05, 29.10, time.time()
             else:
+                # ☀️ 開盤實Streaming數據
+                # A. 抓取大盤 (IX0001) 與 櫃買 (IX0043)
+                try:
+                    tx_q = client.stock.intraday.quote(symbol='IX0001')
+                    taiex_price = tx_q.get('closePrice') or tx_q.get('lastPrice') or 0.0
+                    tx_open = tx_q.get('openPrice') or taiex_price
+                    taiex_change = round(taiex_price - tx_open, 2)
+                except: taiex_price, taiex_change = 0.0, 0.0
+                
+                try:
+                    otc_q = client.stock.intraday.quote(symbol='IX0043')
+                    otc_price = otc_q.get('closePrice') or otc_q.get('lastPrice') or 0.0
+                    otc_open = otc_q.get('openPrice') or otc_price
+                    otc_change = round(otc_price - otc_open, 2)
+                except: otc_price, otc_change = 0.0, 0.0
+                
+                # B. 抓取個股資訊
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('closePrice') or quote.get('lastPrice') or 0.0
                 open_price = quote.get('openPrice') or current_price
@@ -156,7 +171,32 @@ if api_key or test_mode:
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
-            # 🎯 核心調用：精細化門檻計算
+            # --- 📱 渲染大盤與櫃買雙權指看板（HTML 抗變形對稱排版） ---
+            tx_color = "#ff4466" if taiex_change >= 0 else "#00ff88"
+            tx_sign = "+" if taiex_change > 0 else ""
+            otc_color = "#ff4466" if otc_change >= 0 else "#00ff88"
+            otc_sign = "+" if otc_change > 0 else ""
+            
+            index_html = f"""
+            <table style='width:100%; text-align:center; font-size:13px; margin-bottom:5px;'>
+                <tr>
+                    <td style='width:49%; background-color:#161b22; padding:6px; border-radius:4px;'>
+                        <span style='color:#888; font-size:11px;'>加權大盤</span><br>
+                        <b style='color:{tx_color}; font-size:15px;'>{taiex_price:,.2f}</b> 
+                        <span style='color:{tx_color}; font-size:11px;'>({tx_sign}{taiex_change})</span>
+                    </td>
+                    <td style='width:2%;'></td>
+                    <td style='width:49%; background-color:#161b22; padding:6px; border-radius:4px;'>
+                        <span style='color:#888; font-size:11px;'>櫃買指數</span><br>
+                        <b style='color:{otc_color}; font-size:15px;'>{otc_price:,.2f}</b> 
+                        <span style='color:{otc_color}; font-size:11px;'>({otc_sign}{otc_change})</span>
+                    </td>
+                </tr>
+            </table>
+            """
+            index_block.markdown(index_html, unsafe_allow_html=True)
+
+            # 動態大戶文字渲染
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
             mode_prefix = " (🌙測試中)" if test_mode else ""
             threshold_spot.caption(f"⚙️ 矩陣大戶定義：單筆 {dynamic_threshold} 張以上 | 今日總量: {total_volume_lots:,} 張{mode_prefix}")
@@ -171,12 +211,10 @@ if api_key or test_mode:
                 b_vol = int(bids[i].get('size', 0) / 1000)
                 a_price = asks[i].get('price', 0.0)
                 a_vol = int(asks[i].get('size', 0) / 1000)
-                
                 b_v_str = f"{b_vol:,}" if b_vol > 0 else "-"
                 b_p_str = f"{b_price}" if b_price > 0 else "-"
                 a_p_str = f"{a_price}" if a_price > 0 else "-"
                 a_v_str = f"{a_vol:,}" if a_vol > 0 else "-"
-                
                 five_ticks_html += f"<tr style='height:32px; border-bottom:1px solid #222;'><td style='color:#00ff88; font-size:14px;'>{b_v_str}</td><td style='color:#00ff88; font-weight:bold;'>{b_p_str}</td><td style='color:#ff4466; font-weight:bold;'>{a_p_str}</td><td style='color:#ff4466; font-size:14px;'>{a_v_str}</td></tr>"
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
@@ -190,9 +228,8 @@ if api_key or test_mode:
                 st.session_state.order_history.append({'timestamp': time.time(), 'side': current_side})
                 st.session_state.last_trade_key = current_trade_key
             
-            # 更新頂部手機計分板
+            # 更新個股價格計分板
             tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
-            
             with price_block.container():
                 cp1, cp2 = st.columns([5, 4])
                 cp1.header(f"📈 {stock_name} ({code}) : {current_price} 元")
