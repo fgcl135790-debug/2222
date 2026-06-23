@@ -24,9 +24,34 @@ with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", e
     stock_code = st.text_input("股票代號", value="2409")
     test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
 
+# --- 🟢 初始化全域狀態 ---
+if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
+if 'wave_high_price' not in st.session_state: st.session_state.wave_high_price = 0.0
+if 'wave_low_price' not in st.session_state: st.session_state.wave_low_price = 999999.0
+if 'wave_alert_text' not in st.session_state: st.session_state.wave_alert_text = None       # 👈 新增：持久化警報文字
+if 'wave_alert_expires' not in st.session_state: st.session_state.wave_alert_expires = 0.0  # 👈 新增：警報過期時間戳
+if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
+if 'order_history' not in st.session_state: st.session_state.order_history = []
+if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
+if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
+
+if 'taiex_cache' not in st.session_state: st.session_state.taiex_cache = (0.0, 0.0)
+if 'otc_cache' not in st.session_state: st.session_state.otc_cache = (0.0, 0.0)
+if 'last_index_fetch_time' not in st.session_state: st.session_state.last_index_fetch_time = 0.0
+
+if st.session_state.last_stock_code != stock_code:
+    st.session_state.open_price = 0.0
+    st.session_state.wave_high_price = 0.0
+    st.session_state.wave_low_price = 999999.0
+    st.session_state.wave_alert_text = None
+    st.session_state.wave_alert_expires = 0.0
+    st.session_state.order_history = []
+    st.session_state.last_trade_key = None
+    st.session_state.last_stock_code = stock_code
+
 # --- 📱 定義手機單頁即時擦除動態容器鎖定 ---
 index_block = st.empty()  
-retracement_alert_spot = st.empty() # 👈 🟢 新增：完全與多空判定分離的獨立轉折警告專用欄位
+retracement_alert_spot = st.empty() 
 price_block = st.empty()  
 threshold_spot = st.empty()
 signal_spot = st.empty()
@@ -41,47 +66,11 @@ history_counter_spot = st.empty()
 
 st.markdown("<b style='font-size:14px; color:#ddd;'>📜 大戶進攻即時紀錄 (30秒內明細)</b>", unsafe_allow_html=True)
 log_spot = st.empty()
-# --- 💡 核心演算法：精細化大戶規則多維矩陣 ---
-def get_dynamic_big_order_threshold(price, total_volume_lots):
-    if price >= 1000: return 2       
-    elif price >= 500: return 5 if total_volume_lots >= 10000 else 3
-    elif price >= 200:
-        if total_volume_lots >= 500000: return 50
-        elif total_volume_lots >= 100000: return 40
-        elif total_volume_lots >= 50000: return 30
-        elif total_volume_lots >= 10000: return 15
-        else: return 5
-    elif price >= 100:
-        if total_volume_lots >= 500000: return 100
-        elif total_volume_lots >= 100000: return 80
-        elif total_volume_lots >= 50000: return 50
-        elif total_volume_lots >= 10000: return 30
-        else: return 10
-    elif price >= 50:
-        if total_volume_lots >= 500000: return 200
-        elif total_volume_lots >= 100000: return 150
-        elif total_volume_lots >= 50000: return 100
-        elif total_volume_lots >= 10000: return 50
-        else: return 20
-    elif price >= 20: 
-        if total_volume_lots >= 500000: return 500 
-        elif total_volume_lots >= 100000: return 300
-        elif total_volume_lots >= 50000: return 150
-        elif total_volume_lots >= 10000: return 80
-        else: return 25
-    else: 
-        if total_volume_lots >= 500000: return 600
-        elif total_volume_lots >= 100000: return 400
-        elif total_volume_lots >= 50000: return 200
-        elif total_volume_lots >= 10000: return 100
-        else: return 30
 
-# --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空版） ---
+# --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空 + 12秒警報留存版） ---
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
-    
-    if 'wave_low_price' not in st.session_state: st.session_state.wave_low_price = 999999.0
     
     st.session_state.order_history = [
         x for x in st.session_state.order_history if now_time - x['timestamp'] <= 30
@@ -101,25 +90,36 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     else:
         st.session_state.wave_low_price = 999999.0
 
-    alert_text = None  # 用於拋出獨立欄位的轉折文字
     RETRACEMENT = 0.01  
+    ALERT_DURATION = 12.0  # 👈 🟢 設定警告警報在手機螢幕上強制維持留存的時間（秒）
 
+    # 多頭轉折判定：自高點回撤 1%
     if st.session_state.wave_high_price > 0:
         drop_ratio = (st.session_state.wave_high_price - current_price) / st.session_state.wave_high_price
         if drop_ratio >= RETRACEMENT:
             st.session_state.order_history = []
             st.session_state.wave_high_price = 0.0
             recent_buy_cnt = 0
-            alert_text = f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空籌碼火網。"
+            # 寫入狀態鎖並設定過期時間
+            st.session_state.wave_alert_text = f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空籌碼火網。"
+            st.session_state.wave_alert_expires = now_time + ALERT_DURATION
 
-    if st.session_state.wave_low_price < 999999.0 and not alert_text:
+    # 空頭轉折判定：自低點反彈 1%
+    if st.session_state.wave_low_price < 999999.0:
         rebound_ratio = (current_price - st.session_state.wave_low_price) / st.session_state.wave_low_price
         if rebound_ratio >= RETRACEMENT:
             st.session_state.order_history = []
             st.session_state.wave_low_price = 999999.0
             recent_sell_cnt = 0
-            alert_text = f"💥 空頭止跌：股價自這波低點 {st.session_state.wave_low_price} 元強彈達 {rebound_ratio*100:.2f}%！空方針對性遭到攻破，強制擦除砸貨紀錄。"
+            # 寫入狀態鎖並設定過期時間
+            st.session_state.wave_alert_text = f"💥 空頭止跌：股價自這波低點 {st.session_state.wave_low_price} 元強彈達 {rebound_ratio*100:.2f}%！空方針對性遭到攻破，強制擦除砸貨紀錄。"
+            st.session_state.wave_alert_expires = now_time + ALERT_DURATION
 
+    # 檢查目前的警報是否過期
+    if now_time > st.session_state.wave_alert_expires:
+        st.session_state.wave_alert_text = None  # 時間到了才允許擦除隱藏
+
+    # 渲染計分板
     counter_html = f"<table style='width:100%; text-align:center; font-size:13px;'><tr><td style='width:49%; background-color:#221215; padding:5px; border-radius:4px;'><span style='color:#ff4466;font-size:11px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:18px;'>{recent_buy_cnt} 次</b></td><td style='width:2%;'></td><td style='width:49%; background-color:#112215; padding:5px; border-radius:4px;'><span style='color:#00ff88;font-size:11px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:18px;'>{recent_sell_cnt} 次</b></td></tr></table>"
     history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
 
@@ -142,12 +142,13 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
         if current_price < open_p and total_bid_vol > (total_ask_vol * 1.2) and recent_sell_cnt >= 3:
             decision_text = f"🎯【💥 做空訊號】{stock_name} 多頭防線潰散，順勢放空！"
 
-    return decision_text, alert_text  # 👈 🟢 回傳決策文字與突發警報文字
+    return decision_text, st.session_state.wave_alert_text  # 👈 🟢 改為直接拋出持久化警報變數
+
 # --- API 連線與測試模式控制機制 ---
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
-    # 🟢 安全調控防護：將即時串流刷新速度放寬至 5.0 秒，徹底迴避富果 HTTP 個人基本額度封鎖限制
+    # 🟢 速度修正：成功切換回您指定的每 2 秒高速無感重新整理看盤模式
     @st.fragment(run_every=2.0)
     def start_streaming(code):
         try:
@@ -156,9 +157,6 @@ if api_key or test_mode:
             if elapsed_speed > 10.0 or elapsed_speed <= 0: elapsed_speed = 2.00
             st.session_state.last_update_time = current_now
 
-            # =========================================================================
-            # 📌 模擬劇本模式（極端量比必發訊號與浮點數除錯造市劇本）
-            # =========================================================================
             if test_mode:
                 taiex_price, taiex_change = 22135.45, -150.32
                 otc_price, otc_change = 265.12, 1.45
@@ -168,36 +166,28 @@ if api_key or test_mode:
                 trade_time = int(current_now * 1000)
                 
                 cycle = int(current_now) % 40
-                
                 if cycle < 10:
-                    # 【階段 1：0~9秒】大戶外盤連續吃貨 ➔ 必定觸發【做多訊號】
                     raw_price = 29.05 + (cycle * 0.04) 
-                    current_price = round(raw_price, 2)  # ⚡ 強制去除 Python 浮點數微小溢出誤差
+                    current_price = round(raw_price, 2)  
                     tick_qty = 550  
                     tick_price = current_price
-                    bids_base, asks_base = 1000, 5000  # 賣盤是買盤 5 倍，完美符合做多委託量比要求
+                    bids_base, asks_base = 1000, 5000  
                     last_bid, last_ask = round(current_price - 0.05, 2), current_price
-                    
                 elif cycle < 20:
-                    # 【階段 2：10~19秒】高點折返下挫 ➔ 觸發【多頭波段高點下修 1% 獨立警報】
                     raw_price = 29.41 - ((cycle - 10) * 0.05)  
                     current_price = round(raw_price, 2)  
                     tick_qty = 0
                     tick_price = current_price
                     bids_base, asks_base = 2000, 2000
                     last_bid, last_ask = current_price, round(current_price + 0.05, 2)
-                    
                 elif cycle < 30:
-                    # 【階段 3：20~29秒】內盤大量砸貨 ➔ 必定觸發【做空訊號】
                     raw_price = 28.90 - ((cycle - 20) * 0.05)
                     current_price = round(raw_price, 2)  
                     tick_qty = 600  
                     tick_price = current_price
-                    bids_base, asks_base = 6000, 1000  # 買盤是賣盤 6 倍，完美符合做空委託量比要求
+                    bids_base, asks_base = 6000, 1000  
                     last_bid, last_ask = current_price, round(current_price + 0.05, 2)
-                    
                 else:
-                    # 【階段 4：30~39秒】止跌回升反彈 ➔ 觸發【空頭波段低點強彈 1% 獨立警報】
                     raw_price = 28.40 + ((cycle - 30) * 0.05)  
                     current_price = round(raw_price, 2)  
                     tick_qty = 0
@@ -207,6 +197,7 @@ if api_key or test_mode:
 
                 bids = [{'price': round(current_price - 0.05 * i, 2), 'size': bids_base - i * 100} for i in range(1, 6)]
                 asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
+
             # =========================================================================
             # 📌 盤中實時富果資料串接模式
             # =========================================================================
