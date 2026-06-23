@@ -1,6 +1,6 @@
 import streamlit as st
 import time
-from fugle_marketdata import RestClient, FugleAPIError
+import random # 🟢 新增：導入隨機變異模組讓五檔張數活起來
 
 # --- 手機版原生視窗最佳化配置 ---
 st.set_page_config(page_title="行動大戶籌碼監控", page_icon="⚡", layout="centered")
@@ -170,12 +170,10 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                         if not raw_list and code == "2409":
                             st.session_state.replay_meta = {'name': '友達', 'open': 31.10, 'vol_lots': 954591}
                             raw_list = []
-                            
                             # 1. 早盤多頭點火（0 ~ 400筆）➔ 31.10 到 33.00
                             for i in range(400):
-                                size = 560000 if i % 18 == 0 else (15000 if i % 3 == 0 else 3000)
+                                size = 560000 if i % 18 == 0 else (12000 if i % 3 == 0 else 4000)
                                 raw_p = 31.10 + (i * (33.00 - 31.10) / 400)
-                                # 🎯 修正點：強制將模擬價格對齊到台股標準的 0.05 升降單位！
                                 p = round(round(raw_p / 0.05) * 0.05, 2)
                                 t_stamp = 1719190800000000 + int(i * 1800000000 / 400)
                                 raw_list.append({'price': p, 'size': size, 'time': t_stamp})
@@ -206,21 +204,19 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 trades_pool = st.session_state.replay_trades
                 idx = st.session_state.replay_index
                 
+                # 固定當前步數防震盪
+                display_idx = idx
+                
                 if pause_toggle:
                     target_idx = max(0, idx - app_speed)
+                    display_idx = target_idx
                     if trades_pool:
                         last_tick = trades_pool[min(target_idx + app_speed - 1, len(trades_pool)-1)]
                         current_price = last_tick.get('price', 0.0)
                         open_price = st.session_state.replay_meta['open']
                         stock_name = st.session_state.replay_meta['name']
                         total_volume_lots = st.session_state.replay_meta['vol_lots']
-                        
-                        bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
-                        asks = [{'price': round(current_price + 0.05*i, 2), 'size': 4500000} for i in range(5)]
-                        
                         tw_time_str = time.strftime("%H:%M:%S", time.gmtime(last_tick.get('time', 0) / 1000000 + 28800))
-                        taiex_price, taiex_change = 22135.45, -150.32
-                        otc_price, otc_change = 265.12, 1.45
                         mode_prefix = f" (⏸️ 回放已暫停 {idx}/{len(trades_pool)})"
                 else:
                     if trades_pool and idx < len(trades_pool):
@@ -250,19 +246,8 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                                     'price': t_price
                                 })
                         
-                        if current_price >= open_price:
-                            bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
-                            asks = [{'price': round(current_price + 0.05*i, 2), 'size': 4500000} for i in range(5)]
-                        else:
-                            bids = [{'price': round(current_price - 0.05*i, 2), 'size': 5500000} for i in range(5)]
-                            asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': 900000} for i in range(5)]
-                        
                         tw_time_str = time.strftime("%H:%M:%S", time.gmtime(last_tick.get('time', 0) / 1000000 + 28800))
                         trade_time = last_tick.get('time', 0)
-                        
-                        taiex_price, taiex_change = 22135.45, -150.32
-                        otc_price, otc_change = 265.12, 1.45
-                        
                         st.session_state.replay_index += len(current_batch)
                         mode_prefix = f" (⏳全天候快進中 {st.session_state.replay_index}/{len(trades_pool)})"
                     else:
@@ -270,8 +255,24 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                         price_block.empty()
                         threshold_spot.empty()
                         five_ticks_spot.empty()
-                        st.success("🏁 今天全天候真實歷史走勢大劇本已完美播放完畢！可點擊上方按鈕重新回放。")
+                        st.success("🏁 今天全天候真實歷史走勢大劇本已全部高速播放完畢！可點擊上方按鈕重新回放。")
                         return
+
+                # 🎯 🟢 核心優化一：大盤與櫃買隨時間同步「快轉崩跌」時光機
+                progress = display_idx / 2000 if len(trades_pool) > 0 else 0
+                taiex_change = round(20.0 - (progress * 170.32), 2)  # 早盤一度翻紅+20，隨後一路急殺至收盤-150.32
+                taiex_price = 22285.77 + taiex_change
+                otc_change = round(0.5 - (progress * 13.6), 2)       # 櫃買同步從+0.5殺到收盤-13.10
+                otc_price = 453.91 + otc_change
+
+                # 🎯 🟢 核心優化二：五檔排隊張數導入呼吸演算法，解除結冰 frozen 狀態！
+                random.seed(display_idx) # 鎖定隨機種子，確保暫停定格時張數不會瘋狂亂閃
+                if current_price >= open_price:
+                    bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': int(random.randint(1000, 3500) * 1000)} for i in range(5)]
+                    asks = [{'price': round(current_price + 0.05*i, 2), 'size': int(random.randint(3000, 8000) * 1000)} for i in range(5)]
+                else:
+                    bids = [{'price': round(current_price - 0.05*i, 2), 'size': int(random.randint(4000, 9500) * 1000)} for i in range(5)]
+                    asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': int(random.randint(800, 2500) * 1000)} for i in range(5)]
 
             # ----------------- 模式 2：深夜隨機模擬 -----------------
             elif app_mode == "🌙 深夜隨機模擬 (半夜看畫面)":
@@ -281,7 +282,6 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 bids = [{'price': 29.05, 'size': 3472000}, {'price': 29.00, 'size': 14373000}, {'price': 28.95, 'size': 1419000}, {'price': 28.90, 'size': 2476000}, {'price': 28.85, 'size': 1445000}]
                 asks = [{'price': 29.10, 'size': 652000}, {'price': 29.15, 'size': 180000}, {'price': 29.20, 'size': 131000}, {'price': 29.25, 'size': 745000}, {'price': 29.30, 'size': 437000}]
                 tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
-                
                 if int(current_now) % 4 == 0:
                     tick_qty, tick_price, trade_time = 550, 29.10, current_now
                 else:
@@ -334,7 +334,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
                 mode_prefix = ""
 
-            # ----------------- 共通排版與變數計算 -----------------
+            # --- 共通排版與變數計算 ---
             total_bid_vol = sum([b.get('size', 0) for b in bids])
             total_ask_vol = sum([a.get('size', 0) for a in asks])
 
@@ -349,7 +349,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
             threshold_spot.caption(f"⚙️ 矩陣大戶：單筆 {dynamic_threshold} 張 | 總量: {total_volume_lots:,} 張 | ⚡ 速度: {elapsed_speed:.2f}s/次{mode_prefix}")
             
-            # 五檔 HTML 渲染
+            # 手機五檔 HTML 渲染
             five_ticks_html = "<table style='width:100%; text-align:center; font-size:15px; border-collapse:collapse; font-family:monospace;'><tr style='background-color:#111; height:28px;'><th style='color:#00ff88; width:25%; font-size:12px;'>買張</th><th style='color:#00ff88; width:25%; font-size:12px;'>買價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣張</th></tr>"
             for i in range(5):
                 b_price = bids[i].get('price', 0.0)
