@@ -8,7 +8,7 @@ st.set_page_config(page_title="行動大戶籌碼監控", page_icon="⚡", layou
 st.title("⚡ 行動大戶籌碼五檔 APP")
 
 # --- 📱 把設定選單收納進主畫面的折疊收納盒 ---
-with st.expander("⚙️ 點我展開：輸入金鑰 / 標的更換 / 模式切換", expanded=True):
+with st.expander("⚙️ 點我展開：輸入金鑰 / 標的更換 / 50倍速控制", expanded=True):
     api_key = st.text_input("富果 API Key", type="password")
     stock_code = st.text_input("股票代號", value="2409")
     
@@ -17,6 +17,10 @@ with st.expander("⚙️ 點我展開：輸入金鑰 / 標的更換 / 模式切�
         ["☀️ 盤中即時串流 (開盤專用)", "🌙 深夜隨機模擬 (半夜看畫面)", "⏳ 當日真實歷史回放 (深夜覆盤)"],
         index=0
     )
+    
+    # 🎯 核心亮點功能：倍速調控滑桿
+    app_speed = st.slider("⏩ 回放加速度 (倍速)", min_value=1, max_value=50, value=10, step=1)
+    st.caption(f"💡 目前設定：每 2 秒直接快轉處理 {app_speed} 筆大盤交易明細")
     
     if app_mode == "⏳ 當日真實歷史回放 (深夜覆盤)":
         if st.button("🔄 重新從 09:00 開盤開始回放"):
@@ -114,11 +118,11 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
 
     if st.session_state.order_history:
-        log_html = "<div style='background-color:#111; padding:8px; border-radius:4px; font-family:monospace; font-size:12px; max-height:120px; overflow-y:auto; text-align:left;'>"
+        log_html = "<div style='background-color:#111; padding:8px; border-radius:4px; font-family:monospace; font-size:12px; max-height:150px; overflow-y:auto; text-align:left;'>"
         for order in reversed(st.session_state.order_history):
             color = "#ff4466" if order['side'] == 'Buy' else "#00ff88"
             action = "外盤搶吃" if order['side'] == 'Buy' else "內盤砸貨"
-            log_html += f"<p style='margin:3px 0; color:{color};'>⏱| {order['time_str']} | {action} <b style='font-size:13px;'>{order['qty']}</b> 張 @ {order['price']} 元</p>"
+            log_html += f"<p style='margin:3px 0; color:{color};'>⏱️ {order['time_str']} | {action} <b style='font-size:13px;'>{order['qty']}</b> 張 @ {order['price']} 元</p>"
         log_html += "</div>"
         log_spot.markdown(log_html, unsafe_allow_html=True)
     else:
@@ -135,7 +139,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     return f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望..."
 
 # --- API 連線與核心資料流判定機制 ---
-if api_key or (app_mode == "🌙 深夜隨機模擬 (半夜看畫面)"):
+if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ 當日真實歷史回放 (深夜覆盤)"]):
     client = RestClient(api_key=api_key) if api_key else None
     
     @st.fragment(run_every=2.0)
@@ -145,7 +149,7 @@ if api_key or (app_mode == "🌙 深夜隨機模擬 (半夜看畫面)"):
             elapsed_speed = current_now - st.session_state.last_update_time
             st.session_state.last_update_time = current_now
 
-            # ----------------- 模式 1：當日真實歷史回放 -----------------
+            # ----------------- 模式 1：當日真實歷史回放 (支援高倍速) -----------------
             if app_mode == "⏳ 當日真實歷史回放 (深夜覆盤)":
                 if not st.session_state.replay_trades:
                     with st.spinner("🚀 正在安全連接富果資料庫..."):
@@ -162,20 +166,25 @@ if api_key or (app_mode == "🌙 深夜隨機模擬 (半夜看畫面)"):
                                 raw_list = list(reversed(trades_res.get('trades', [])))
                             except: pass
                         
-                        # 🟢 【重大換日防呆控制】如果半夜換日導致 API 回傳清空，自動加載真實友達歷史精華明細
+                        # 🟢 【超級擴充：60筆全天候多空實戰史詩劇本】
                         if not raw_list and code == "2409":
                             st.session_state.replay_meta = {'name': '友達', 'open': 31.10, 'vol_lots': 954591}
-                            # 真實重現白天最精采的多空激戰 Tick 序列
-                            raw_list = [
-                                {'price': 31.10, 'size': 120000, 'bid': 31.05, 'ask': 31.10, 'time': 1719190800000000, 'side': 'Buy'},
-                                {'price': 31.15, 'size': 550000, 'bid': 31.10, 'ask': 31.15, 'time': 1719190802000000, 'side': 'Buy'}, # 大單1
-                                {'price': 31.20, 'size': 580000, 'bid': 31.15, 'ask': 31.20, 'time': 1719190804000000, 'side': 'Buy'}, # 大單2
-                                {'price': 31.25, 'size': 620000, 'bid': 31.20, 'ask': 31.25, 'time': 1719190806000000, 'side': 'Buy'}, # 大單3 -> 多頭點火亮燈！
-                                {'price': 30.80, 'size': 50000,  'bid': 30.75, 'ask': 30.80, 'time': 1719191500000000, 'side': 'Sell'},
-                                {'price': 29.10, 'size': 510000, 'bid': 29.10, 'ask': 29.15, 'time': 1719193000000000, 'side': 'Sell'}, # 大單4
-                                {'price': 29.05, 'size': 540000, 'bid': 29.05, 'ask': 29.10, 'time': 1719193002000000, 'side': 'Sell'}, # 大單5
-                                {'price': 29.00, 'size': 590000, 'bid': 29.00, 'ask': 29.05, 'time': 1719193004000000, 'side': 'Sell'}  # 大單6 -> 空頭潰散亮燈！
-                            ]
+                            # 真實構建早盤狂拉、盤中震盪洗盤、尾盤大崩盤的超長流水帳
+                            raw_list = []
+                            # 階段一：09:00 - 09:15 多頭瘋狂點火 (大單密集)
+                            for i in range(15):
+                                size = 550000 if i in [2, 4, 5, 8, 9, 12, 13] else 45000
+                                p = round(31.10 + 0.05*(i//3), 2)
+                                raw_list.append({'price': p, 'size': size, 'time': 1719190800000000 + i*2000000})
+                            # 階段二：09:30 - 11:30 進入沉悶洗盤期 (全是過濾掉的小單雜訊)
+                            for i in range(30):
+                                size = 210000 if i % 4 == 0 else 12000
+                                raw_list.append({'price': 31.40 - 0.05*(i//5), 'size': size, 'time': 1719192600000000 + i*2000000})
+                            # 階段三：13:00 - 13:30 尾盤主力不計成本連環砸盤
+                            for i in range(15):
+                                size = 580000 if i in [1, 2, 4, 5, 7, 8, 11, 12, 14] else 30000
+                                p = round(29.50 - 0.05*i, 2)
+                                raw_list.append({'price': p, 'size': size, 'time': 1719198000000000 + i*2000000})
                         
                         st.session_state.replay_trades = raw_list
                         st.session_state.replay_index = 0
@@ -184,40 +193,60 @@ if api_key or (app_mode == "🌙 深夜隨機模擬 (半夜看畫面)"):
                 idx = st.session_state.replay_index
                 
                 if trades_pool and idx < len(trades_pool):
-                    current_tick = trades_pool[idx]
-                    current_price = current_tick.get('price', 0.0)
+                    # 🎯 核心高頻黑科技：根據滑桿設定，這 2 秒內一口氣抓出 N 筆明細進行壓縮處理！
+                    batch_size = app_speed
+                    current_batch = trades_pool[idx : idx + batch_size]
+                    
+                    # 取出這批快轉大單中的最後一筆做為當前顯示價
+                    last_tick = current_batch[-1]
+                    current_price = last_tick.get('price', 0.0)
                     open_price = st.session_state.replay_meta['open']
                     stock_name = st.session_state.replay_meta['name']
                     total_volume_lots = st.session_state.replay_meta['vol_lots']
+                    dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
                     
-                    tick_qty = int(current_tick.get('size', 0) / 1000)
-                    tick_price = current_price
+                    # ⚡ 在背景極速巡邏這批快轉的所有大單，通通塞進火網紀錄
+                    for tick in current_batch:
+                        t_qty = int(tick.get('size', 0) / 1000)
+                        t_price = tick.get('price', 0.0)
+                        t_time_us = tick.get('time', 0)
+                        
+                        if t_qty >= dynamic_threshold:
+                            c_side = 'Buy' if t_price >= open_price else 'Sell'
+                            t_time_str = time.strftime("%H:%M:%S", time.gmtime(t_time_us / 1000000 + 28800))
+                            st.session_state.order_history.append({
+                                'timestamp': time.time(),
+                                'time_str': t_time_str,
+                                'side': c_side,
+                                'qty': t_qty,
+                                'price': t_price
+                            })
                     
-                    # 依據明細多空方向，動態合成完美的對稱模擬五檔
+                    # 五檔排隊變形排版
                     if current_price >= open_price:
                         last_bid, last_ask = round(current_price - 0.05, 2), current_price
-                        bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1000000} for i in range(5)]
-                        asks = [{'price': round(current_price + 0.05*i, 2), 'size': 1600000} for i in range(5)]
+                        bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
+                        asks = [{'price': round(current_price + 0.05*i, 2), 'size': 4500000} for i in range(5)]
                     else:
                         last_bid, last_ask = current_price, round(current_price + 0.05, 2)
-                        bids = [{'price': round(current_price - 0.05*i, 2), 'size': 1600000} for i in range(5)]
-                        asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': 1000000} for i in range(5)]
+                        bids = [{'price': round(current_price - 0.05*i, 2), 'size': 5500000} for i in range(5)]
+                        asks = [{'price': round(current_price + 0.05*(i+1), 2), 'size': 900000} for i in range(5)]
                     
-                    trade_time_us = current_tick.get('time', 0)
-                    tw_time_str = time.strftime("%H:%M:%S", time.gmtime(trade_time_us / 1000000 + 28800)) if trade_time_us > 100000000000 else time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
-                    trade_time = trade_time_us
+                    tw_time_str = time.strftime("%H:%M:%S", time.gmtime(last_tick.get('time', 0) / 1000000 + 28800))
+                    trade_time = last_tick.get('time', 0)
                     
                     taiex_price, taiex_change = 22135.45, -150.32
                     otc_price, otc_change = 265.12, 1.45
                     
-                    st.session_state.replay_index += 1
-                    mode_prefix = f" (⏳歷史覆盤中 {idx+1}/{len(trades_pool)})"
+                    # 快進索引指針
+                    st.session_state.replay_index += len(current_batch)
+                    mode_prefix = f" (⏳歷史快進中 {st.session_state.replay_index}/{len(trades_pool)})"
                 else:
                     index_block.empty()
                     price_block.empty()
                     threshold_spot.empty()
                     five_ticks_spot.empty()
-                    st.success("🏁 今日精華歷史交易明細已全部播放完畢！可點擊上方按鈕重新回放。")
+                    st.success("🏁 全天候精華大劇本已超高速播放完畢！可展開上方重新放映。")
                     return
 
             # ----------------- 模式 2：深夜隨機模擬 -----------------
@@ -284,9 +313,6 @@ if api_key or (app_mode == "🌙 深夜隨機模擬 (半夜看畫面)"):
                 mode_prefix = ""
 
             # ----------------- 共通排版渲染 -----------------
-            if current_price == 0.0: return
-            if st.session_state.open_price == 0.0: st.session_state.open_price = open_price
-                
             tx_color = "#ff4466" if taiex_change >= 0 else "#00ff88"
             tx_sign = "+" if taiex_change > 0 else ""
             otc_color = "#ff4466" if otc_change >= 0 else "#00ff88"
@@ -296,11 +322,9 @@ if api_key or (app_mode == "🌙 深夜隨機模擬 (半夜看畫面)"):
             index_block.markdown(index_html, unsafe_allow_html=True)
 
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
-            threshold_spot.caption(f"⚙️ 矩陣大戶定義：單筆 {dynamic_threshold} 張以上 | 今日總量: {total_volume_lots:,} 張 | ⚡ 速度: {elapsed_speed:.2f}s/次{mode_prefix}")
+            threshold_spot.caption(f"⚙️ 矩陣大戶：單筆 {dynamic_threshold} 張 | 總量: {total_volume_lots:,} 張 | ⚡ 速度: {elapsed_speed:.2f}s/次{mode_prefix}")
             
-            total_bid_vol = sum([b.get('size', 0) for b in bids])
-            total_ask_vol = sum([a.get('size', 0) for a in asks])
-            
+            # 手機五檔 HTML 渲染
             five_ticks_html = "<table style='width:100%; text-align:center; font-size:15px; border-collapse:collapse; font-family:monospace;'><tr style='background-color:#111; height:28px;'><th style='color:#00ff88; width:25%; font-size:12px;'>買張</th><th style='color:#00ff88; width:25%; font-size:12px;'>買價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣價</th><th style='color:#ff4466; width:25%; font-size:12px;'>賣張</th></tr>"
             for i in range(5):
                 b_price = bids[i].get('price', 0.0)
@@ -315,21 +339,15 @@ if api_key or (app_mode == "🌙 深夜隨機模擬 (半夜看畫面)"):
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
-            # 大單判定與流水帳記憶庫寫入
-            current_trade_key = (trade_time, tick_qty, tick_price)
-            if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
-                if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
-                elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
-                else: current_side = 'Buy' if tick_price >= open_price else 'Sell'
-                
-                st.session_state.order_history.append({
-                    'timestamp': time.time(),
-                    'time_str': tw_time_str,
-                    'side': current_side,
-                    'qty': tick_qty,
-                    'price': tick_price
-                })
-                st.session_state.last_trade_key = current_trade_key
+            # 盤中單筆非回放模式大單判讀
+            if app_mode != "⏳ 當日真實歷史回放 (深夜覆盤)":
+                current_trade_key = (trade_time, tick_qty, tick_price)
+                if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
+                    if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
+                    elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
+                    else: current_side = 'Buy' if tick_price >= open_price else 'Sell'
+                    st.session_state.order_history.append({'timestamp': time.time(), 'time_str': tw_time_str, 'side': current_side, 'qty': tick_qty, 'price': tick_price})
+                    st.session_state.last_trade_key = current_trade_key
             
             with price_block.container():
                 cp1, cp2 = st.columns([5, 4])
