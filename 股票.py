@@ -165,20 +165,23 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                                 raw_list = list(reversed(trades_res.get('trades', [])))
                             except: pass
                         
+                        # 🟢 【黑科技核心：自動生成 2,000 筆全天候宏觀對戰大劇本】
                         if not raw_list and code == "2409":
                             st.session_state.replay_meta = {'name': '友達', 'open': 31.10, 'vol_lots': 954591}
-                            raw_list = []
-                            # 1. 早盤多頭點火（0 ~ 500筆）
+                            
+                            # 1. 早盤多頭瘋狂點火（0 ~ 500筆）：價格從 31.10 狂拉到 33.00
                             for i in range(500):
                                 size = 550000 if i % 15 == 0 else (12000 if i % 3 == 0 else 4000)
                                 p = round(31.10 + (i * 0.0038), 2)
                                 raw_list.append({'price': p, 'size': size, 'time': 1719190800000000 + i*2000000})
-                            # 2. 盤中主力洗盤（501 ~ 1500筆）
+                                
+                            # 2. 盤中主力對倒洗盤（501 ~ 1500筆）：價格在 33.00 到 30.50 之間大震盪
                             for i in range(1000):
                                 size = 320000 if i % 40 == 0 else (8000 if i % 2 == 0 else 2000)
                                 p = round(33.00 - (i * 0.0025), 2)
                                 raw_list.append({'price': p, 'size': size, 'time': 1719192000000000 + i*2000000})
-                            # 3. 尾盤引爆大雪崩（1501 ~ 2000筆）
+                                
+                            # 3. 尾盤多頭棄守引爆大雪崩（1501 ~ 2000筆）：價格從 30.50 一路慘崩到 29.05 終局
                             for i in range(500):
                                 size = 600000 if i % 12 == 0 else (15000 if i % 3 == 0 else 5000)
                                 p = round(30.50 - (i * 0.0029), 2)
@@ -191,6 +194,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 idx = st.session_state.replay_index
                 
                 if trades_pool and idx < len(trades_pool):
+                    # 🎯 批次壓縮吞吐技術：每次刷新直接吞掉滑桿設定的數量（例如 50 筆）
                     batch_size = app_speed
                     current_batch = trades_pool[idx : idx + batch_size]
                     
@@ -201,6 +205,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                     total_volume_lots = st.session_state.replay_meta['vol_lots']
                     dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
                     
+                    # 快轉掃描這批次裡面的所有 Tick
                     for tick in current_batch:
                         t_qty = int(tick.get('size', 0) / 1000)
                         t_price = tick.get('price', 0.0)
@@ -217,6 +222,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                                 'price': t_price
                             })
                     
+                    # 五檔排隊結構變形
                     if current_price >= open_price:
                         last_bid, last_ask = round(current_price - 0.05, 2), current_price
                         bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
@@ -239,7 +245,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                     price_block.empty()
                     threshold_spot.empty()
                     five_ticks_spot.empty()
-                    st.success("🏁 2,000 筆全天候精華歷史劇本已全部高速播放完畢！可展開上方重新放映。")
+                    st.success("🏁 2,000 筆全天候精華歷史劇本已全部高速播放完畢！可點擊上方重新放映。")
                     return
 
             # ----------------- 模式 2：深夜隨機模擬 -----------------
@@ -332,7 +338,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
-            # 🟢 【精確修復點】完美補齊先前被截斷的括號與變書，語法全面重回健康！
+            # 盤中單筆大單判讀
             if app_mode != "⏳ 當日真實歷史回放 (深夜覆盤)":
                 current_trade_key = (trade_time, tick_qty, tick_price)
                 if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
