@@ -98,4 +98,4 @@ if api_key:
 
     start_streaming()
 else:
-    st.warning("🔑 請先在左側邊欄輸入你的「富果 API Key」以啟動免手 Key 完全自動多空辨識功能
+    st.warning("🔑 請先在左側邊欄輸入你的「富果 API Key」以啟動免手 Key 完全自動多空辨識功能。")
