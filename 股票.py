@@ -18,8 +18,7 @@ with st.expander("⚙️ 點我展開：輸入金鑰 / 標的更換 / 50倍速�
         index=0
     )
     
-    # 🎯 核心亮點功能：倍速調控滑桿
-    app_speed = st.slider("⏩ 回放加速度 (倍速)", min_value=1, max_value=50, value=10, step=1)
+    app_speed = st.slider("⏩ 回放加速度 (倍速)", min_value=1, max_value=50, value=25, step=1)
     st.caption(f"💡 目前設定：每 2 秒直接快轉處理 {app_speed} 筆大盤交易明細")
     
     if app_mode == "⏳ 當日真實歷史回放 (深夜覆盤)":
@@ -152,7 +151,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
             # ----------------- 模式 1：當日真實歷史回放 (支援高倍速) -----------------
             if app_mode == "⏳ 當日真實歷史回放 (深夜覆盤)":
                 if not st.session_state.replay_trades:
-                    with st.spinner("🚀 正在安全連接富果資料庫..."):
+                    with st.spinner("🚀 正在生成全天候 2,000 筆機構級實戰流水帳..."):
                         raw_list = []
                         if api_key:
                             try:
@@ -166,24 +165,26 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                                 raw_list = list(reversed(trades_res.get('trades', [])))
                             except: pass
                         
-                        # 🟢 【超級擴充：60筆全天候多空實戰史詩劇本】
+                        # 🟢 【黑科技核心：自動生成 2,000 筆全天候宏觀對戰大劇本】
                         if not raw_list and code == "2409":
                             st.session_state.replay_meta = {'name': '友達', 'open': 31.10, 'vol_lots': 954591}
-                            # 真實構建早盤狂拉、盤中震盪洗盤、尾盤大崩盤的超長流水帳
-                            raw_list = []
-                            # 階段一：09:00 - 09:15 多頭瘋狂點火 (大單密集)
-                            for i in range(15):
-                                size = 550000 if i in [2, 4, 5, 8, 9, 12, 13] else 45000
-                                p = round(31.10 + 0.05*(i//3), 2)
+                            
+                            # 1. 早盤多頭瘋狂點火（0 ~ 500筆）：價格從 31.10 狂拉到 33.00
+                            for i in range(500):
+                                size = 550000 if i % 15 == 0 else (12000 if i % 3 == 0 else 4000)
+                                p = round(31.10 + (i * 0.0038), 2)
                                 raw_list.append({'price': p, 'size': size, 'time': 1719190800000000 + i*2000000})
-                            # 階段二：09:30 - 11:30 進入沉悶洗盤期 (全是過濾掉的小單雜訊)
-                            for i in range(30):
-                                size = 210000 if i % 4 == 0 else 12000
-                                raw_list.append({'price': 31.40 - 0.05*(i//5), 'size': size, 'time': 1719192600000000 + i*2000000})
-                            # 階段三：13:00 - 13:30 尾盤主力不計成本連環砸盤
-                            for i in range(15):
-                                size = 580000 if i in [1, 2, 4, 5, 7, 8, 11, 12, 14] else 30000
-                                p = round(29.50 - 0.05*i, 2)
+                                
+                            # 2. 盤中主力對倒洗盤（501 ~ 1500筆）：價格在 33.00 到 30.50 之間大震盪
+                            for i in range(1000):
+                                size = 320000 if i % 40 == 0 else (8000 if i % 2 == 0 else 2000)
+                                p = round(33.00 - (i * 0.0025), 2)
+                                raw_list.append({'price': p, 'size': size, 'time': 1719192000000000 + i*2000000})
+                                
+                            # 3. 尾盤多頭棄守引爆大雪崩（1501 ~ 2000筆）：價格從 30.50 一路慘崩到 29.05 終局
+                            for i in range(500):
+                                size = 600000 if i % 12 == 0 else (15000 if i % 3 == 0 else 5000)
+                                p = round(30.50 - (i * 0.0029), 2)
                                 raw_list.append({'price': p, 'size': size, 'time': 1719198000000000 + i*2000000})
                         
                         st.session_state.replay_trades = raw_list
@@ -193,11 +194,10 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                 idx = st.session_state.replay_index
                 
                 if trades_pool and idx < len(trades_pool):
-                    # 🎯 核心高頻黑科技：根據滑桿設定，這 2 秒內一口氣抓出 N 筆明細進行壓縮處理！
+                    # 🎯 批次壓縮吞吐技術：每次刷新直接吞掉滑桿設定的數量（例如 50 筆）
                     batch_size = app_speed
                     current_batch = trades_pool[idx : idx + batch_size]
                     
-                    # 取出這批快轉大單中的最後一筆做為當前顯示價
                     last_tick = current_batch[-1]
                     current_price = last_tick.get('price', 0.0)
                     open_price = st.session_state.replay_meta['open']
@@ -205,7 +205,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                     total_volume_lots = st.session_state.replay_meta['vol_lots']
                     dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
                     
-                    # ⚡ 在背景極速巡邏這批快轉的所有大單，通通塞進火網紀錄
+                    # 快轉掃描這批次裡面的所有 Tick
                     for tick in current_batch:
                         t_qty = int(tick.get('size', 0) / 1000)
                         t_price = tick.get('price', 0.0)
@@ -222,7 +222,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                                 'price': t_price
                             })
                     
-                    # 五檔排隊變形排版
+                    # 五檔排隊結構變形
                     if current_price >= open_price:
                         last_bid, last_ask = round(current_price - 0.05, 2), current_price
                         bids = [{'price': round(current_price - 0.05*(i+1), 2), 'size': 1200000} for i in range(5)]
@@ -238,15 +238,14 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
                     taiex_price, taiex_change = 22135.45, -150.32
                     otc_price, otc_change = 265.12, 1.45
                     
-                    # 快進索引指針
                     st.session_state.replay_index += len(current_batch)
-                    mode_prefix = f" (⏳歷史快進中 {st.session_state.replay_index}/{len(trades_pool)})"
+                    mode_prefix = f" (⏳全天候快進中 {st.session_state.replay_index}/{len(trades_pool)})"
                 else:
                     index_block.empty()
                     price_block.empty()
                     threshold_spot.empty()
                     five_ticks_spot.empty()
-                    st.success("🏁 全天候精華大劇本已超高速播放完畢！可展開上方重新放映。")
+                    st.success("🏁 2,000 筆全天候精華歷史劇本已全部高速播放完畢！可點擊上方重新放映。")
                     return
 
             # ----------------- 模式 2：深夜隨機模擬 -----------------
@@ -339,7 +338,7 @@ if api_key or (app_mode in ["🌙 深夜隨機模擬 (半夜看畫面)", "⏳ �
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
-            # 盤中單筆非回放模式大單判讀
+            # 盤中單筆大單判讀
             if app_mode != "⏳ 當日真實歷史回放 (深夜覆盤)":
                 current_trade_key = (trade_time, tick_qty, tick_price)
                 if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
