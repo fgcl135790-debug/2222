@@ -19,8 +19,6 @@ big_order_volume = st.sidebar.number_input("定義大戶單筆成交門檻 (張)
 # 初始化全域狀態（防止網頁洗價時資料中斷）
 if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
 if 'vwap' not in st.session_state: st.session_state.vwap = 0.0
-if 'total_volume' not in st.session_state: st.session_state.total_volume = 0
-if 'total_amount' not in st.session_state: st.session_state.total_amount = 0.0
 
 # --- 建立手機即時顯示看板 ---
 col_p, col_t = st.columns([2, 1])
@@ -33,39 +31,27 @@ signal_spot = st.empty()
 
 # --- 核心邏輯：當沖多空精準辨識引擎 ---
 def process_market_logic(current_price, tick_qty, side, total_bid_vol, total_ask_vol):
-    """
-    最高精準度多空特徵辨識
-    side: 'Buy' 代表外盤(紅字搶貨), 'Sell' 代表內盤(綠字砸貨)
-    """
     open_p = st.session_state.open_price
     vwap_p = st.session_state.vwap
-    
-    # 定義大單特徵
     is_big_order = tick_qty >= big_order_volume
     
     # ---------------- 🚨 【做多訊號提醒】 ----------------
-    # 條件：股價在開盤價與均價之上 + 主力假壓盤真吃貨（外盤掛單極多，但大單瘋狂外盤吃貨）
     if current_price >= open_p and current_price >= vwap_p:
         if total_ask_vol > (total_bid_vol * 1.3) and side == 'Buy' and is_big_order:
             return f"🎯 【🔥 訊號：強烈做多】\n\n**觸發時間**：{time.strftime('%H:%M:%S')}\n\n**主力動作**：五檔外盤高掛 {total_ask_vol} 張假壓盤，但明細出現主力敲進 {tick_qty} 張外盤大單（真吃貨）。\n\n**實戰建議**：多方控盤極強，順勢現股買進做多，停損設跌破今日開盤價。"
             
     # ---------------- 🚨 【做空訊號提醒】 ----------------
-    # 條件：股價在開盤價與均價之下 + 主力假撐盤真倒貨（內盤掛單極多，但大單瘋狂內盤砸貨）
     if current_price < open_p and current_price < vwap_p:
         if total_bid_vol > (total_ask_vol * 1.3) and side == 'Sell' and is_big_order:
-            return f"🎯 【💥 訊號：強烈做空】\n\n**觸發時間**：{time.strftime('%H:%M:%S')}\n\n**主力動作**：五檔內盤掛有 {total_bid_vol} 張假撐盤，但明細遭到主力不計代價砸出 {tick_qty} 張內盤大單（真倒貨）。\n\n**實戰建議**：多頭踩踏開始，順勢現券賣出做空（或買進反向部位），停損設突破當日均價線。"
+            return f"🎯 【💥 訊號：強烈做空】\n\n**觸發時間**：{time.strftime('%H:%M:%S')}\n\n**主力動作**：五檔內盤掛有 {total_bid_vol} 張假撐盤，但明細遭到主力不計代價砸出 {tick_qty} 張內盤大單（真倒貨）。\n\n**實戰建議**：多頭踩踏開始，順勢現券賣出做空，停損設突破當日均價線。"
 
-    return "⏳ 偵測中：目前屬於散戶交戰或橫盤洗盤，大戶尚未亮牌，請保持觀望..."
+    return "⏳ 偵測中：目前大戶尚未亮牌，請保持觀望..."
 
 # --- API 自動連線機制 ---
 if api_key:
-    # 這裡會透過 WebSocketClient 自動監聽富果雲端數據，完全不需手 Key
     @st.fragment(run_every=1.0)
     def start_streaming():
-        # 註：此處為 Streamlit 與異步 API 對接之視覺化邏輯封裝
-        # 實戰中 client.on_message 會自動將即時五檔與 Tick 資料倒進來
-        
-        # 模擬即時抓到 API 資料後的洗價與繪製（開盤後會被 API 真實數據覆蓋）
+        # 模擬開盤後的即時數據流入狀態
         fake_current_price = 29.85
         fake_tick_qty = 250
         fake_side = 'Sell'
@@ -98,4 +84,7 @@ if api_key:
 
     start_streaming()
 else:
-    st.warning("🔑 請先在左側邊欄輸入你的「富果 API Key」以啟動免手 Key 完全自動多空辨識功能。")
+    # 🔴 這裡把長文字拆開成兩行寫，確保安全不報錯
+    msg = "🔑 請先在左側邊欄輸入你的「富果 API Key」"
+    msg += "以啟動免手 Key 完全自動多空辨識功能。"
+    st.warning(msg)
