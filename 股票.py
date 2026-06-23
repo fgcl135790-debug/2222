@@ -55,6 +55,8 @@ if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
 if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
 if 'order_history' not in st.session_state: st.session_state.order_history = []
 if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
+# 新增：用來計算更新速度的時間戳記
+if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
 
 if st.session_state.last_stock_code != stock_code:
     st.session_state.open_price = 0.0
@@ -62,7 +64,7 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
 
-# --- 📱 定義即時擦除容器（依手機視覺權重由上往下排列） ---
+# --- 📱 定義即時擦除容器 ---
 index_block = st.empty()  
 price_block = st.empty()  
 signal_spot = st.empty()
@@ -108,10 +110,16 @@ if api_key or test_mode:
     @st.fragment(run_every=1.0)
     def start_streaming(code):
         try:
+            # ⏱️ 🟢 核心功能：計算與上一秒的真實時間差（更新速度）
+            current_now = time.time()
+            elapsed_speed = current_now - st.session_state.last_update_time
+            # 如果是第一次開機或切換防呆，強制修正為標準 1.0 秒
+            if elapsed_speed > 5.0: elapsed_speed = 1.00
+            st.session_state.last_update_time = current_now
+
             if test_mode:
                 taiex_price, taiex_change = 22135.45, -150.32
                 otc_price, otc_change = 265.12, 1.45
-                
                 current_price, open_price, total_volume_lots = 29.05, 31.10, 954591
                 stock_name = "友達" if code == "2409" else f"股票 {code}"
                 bids = [{'price': 29.05, 'size': 3472000}, {'price': 29.00, 'size': 14373000}, {'price': 28.95, 'size': 1419000}, {'price': 28.90, 'size': 2476000}, {'price': 28.85, 'size': 1445000}]
@@ -176,7 +184,9 @@ if api_key or test_mode:
 
             dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            threshold_spot.caption(f"⚙️ 矩陣大戶定義：單筆 {dynamic_threshold} 張以上 | 今日總量: {total_volume_lots:,} 張{mode_prefix}")
+            
+            # ⏱️ 🟢 將『刷新速度』完美呈現在副標題最右邊！
+            threshold_spot.caption(f"⚙️ 矩陣大戶定義：單筆 {dynamic_threshold} 張以上 | 今日總量: {total_volume_lots:,} 張 | ⚡ 刷新速度: {elapsed_speed:.2f} 秒/次{mode_prefix}")
             
             total_bid_vol = sum([b.get('size', 0) for b in bids])
             total_ask_vol = sum([a.get('size', 0) for a in asks])
@@ -198,7 +208,6 @@ if api_key or test_mode:
             current_trade_key = (trade_time, tick_qty, tick_price)
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= dynamic_threshold:
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
-                # 🟢 【精準修復點】移除不小心多打的 Document 幽靈單字，語法重回完美
                 elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
                 else: current_side = 'Buy' if tick_price >= st.session_state.open_price else 'Sell'
                 st.session_state.order_history.append({'timestamp': time.time(), 'side': current_side})
