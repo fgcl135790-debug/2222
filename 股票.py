@@ -224,7 +224,7 @@ if api_key or test_mode:
                 asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
             else:
                 # 🟢 優化防禦 1：將大盤與櫃買指數的更新頻率從 30 秒放寬至 180 秒（3分鐘），大幅省下 API 額度
-                if current_now - st.session_state.last_index_fetch_time > 60.0:
+                if current_now - st.session_state.last_index_fetch_time > 120.0:
                     try:
                         tx_q = client.stock.intraday.quote(symbol='IX0001')
                         tx_p = tx_q.get('lastTrade', {}).get('price') or tx_q.get('closePrice') or 0.0
