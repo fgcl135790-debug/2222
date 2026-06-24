@@ -5,7 +5,6 @@ from fugle_marketdata import RestClient, FugleAPIError
 # --- 📱 手機版原生視窗最佳化配置 ---
 st.set_page_config(page_title="行動大戶籌碼監控", page_icon="⚡", layout="centered")
 
-# 使用 CSS 壓縮手機端元件間距，並固定深色底色提高戶外辨識度
 st.markdown("""
     <style>
     .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem; max-width: 100% !important;}
@@ -18,27 +17,22 @@ st.markdown("""
 
 st.title("⚡ 行動大戶籌碼五檔 APP")
 
-# --- 📱 把設定選單收納進主畫面的折疊收納盒 ---
 with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", expanded=False):
     api_key = st.text_input("富果 API Key", type="password")
     stock_code = st.text_input("股票代號", value="2409")
     
-    # 建立雙欄位手動輸入區，完美適配手機單手操作
     col_u1, col_u2 = st.columns(2)
     with col_u1:
         manual_big_order_lots = st.number_input(
-            "🔥 大戶定義 (張)", 
-            min_value=1, max_value=5000, value=150, step=10
+            "🔥 大戶定義 (張)", min_value=1, max_value=5000, value=150, step=10
         )
     with col_u2:
         manual_ratio = st.number_input(
-            "📊 參考量比 (倍)", 
-            min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f"
+            "📊 參考量比 (倍)", min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f"
         )
         
     test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
 
-# --- 📱 定義手機單頁即時擦除動態容器鎖定 ---
 retracement_alert_spot = st.empty() 
 price_block = st.empty()  
 threshold_spot = st.empty()
@@ -99,8 +93,9 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
         st.session_state.wave_low_price = 999999.0
 
     RETRACEMENT = 0.01  
-    ALERT_DURATION = 12.0  
+    ALERT_DURATION = 5.0  
 
+    # 多頭轉折判定：自高點回撤 1%
     if st.session_state.wave_high_price > 0:
         drop_ratio = (st.session_state.wave_high_price - current_price) / st.session_state.wave_high_price
         if drop_ratio >= RETRACEMENT:
@@ -110,6 +105,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
             st.session_state.wave_alert_text = f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空籌碼火網。"
             st.session_state.wave_alert_expires = now_time + ALERT_DURATION
 
+    # 空頭轉折判定：自低點反彈 1%
     if st.session_state.wave_low_price < 999999.0:
         rebound_ratio = (current_price - st.session_state.wave_low_price) / st.session_state.wave_low_price
         if rebound_ratio >= RETRACEMENT:
@@ -172,7 +168,7 @@ if api_key or test_mode:
                     # 【階段 1：0~9秒】大戶外盤連續吃貨 ➔ 必定觸發【做多訊號】
                     raw_price = 29.05 + (cycle * 0.04) 
                     current_price = round(raw_price, 2)  
-                    tick_qty = 550  
+                    tick_qty = manual_big_order_lots + 10 # 確保測試單大於手動設定門檻
                     tick_price = current_price
                     bids_base, asks_base = 1000, int(1000 * manual_ratio * 1.5)
                     last_bid, last_ask = round(current_price - 0.05, 2), current_price
@@ -190,7 +186,7 @@ if api_key or test_mode:
                     # 【階段 3：20~29秒】內盤大量砸貨 ➔ 必定觸發【做空訊號】
                     raw_price = 28.90 - ((cycle - 20) * 0.05)
                     current_price = round(raw_price, 2)  
-                    tick_qty = 600  
+                    tick_qty = manual_big_order_lots + 20 # 確保測試單大於手動設定門檻
                     tick_price = current_price
                     bids_base, asks_base = int(1000 * manual_ratio * 1.5), 1000
                     last_bid, last_ask = current_price, round(current_price + 0.05, 2)
@@ -250,7 +246,7 @@ if api_key or test_mode:
                 last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
             # =========================================================================
-            # 📌 畫面渲染、即時量比雙色計算防線
+            # 📌 畫面渲染與雙手動設定最終攔截防線
             # =========================================================================
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
@@ -273,7 +269,7 @@ if api_key or test_mode:
                 ratio_html = "量比: 0.00 倍 (⏳ 計算中)"
 
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            # UI 提示：將即時算出的雙色量比結果漂亮地同步顯示在副標題提示列中
+            # UI 提示：解析 HTML 乾淨量比，徹底消除原始碼
             threshold_spot.markdown(
                 f"<div style='font-size:12px; color:#aaa;'>⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}</div>", 
                 unsafe_allow_html=True
@@ -288,7 +284,6 @@ if api_key or test_mode:
                 b_v_str = f"{b_vol:,}" if b_vol > 0 else "-"
                 b_p_str = f"{b_price:.2f}" if b_price > 0 else "-"
                 a_p_str = f"{a_price:.2f}" if a_price > 0 else "-"
-                # 🟢 修正打字錯誤：將原本誤寫的 a_v_str 改為正確判斷變數 a_vol
                 a_v_str = f"{a_vol:,}" if a_vol > 0 else "-"
                 five_ticks_html += f"<tr style='height:24px; border-bottom:1px solid #1c1c1c;'><td style='color:#00ff88;'>{b_v_str}</td><td style='color:#00ff88; font-weight:bold;'>{b_p_str}</td><td style='color:#ff4466; font-weight:bold;'>{a_p_str}</td><td style='color:#ff4466;'>{a_v_str}</td></tr>"
             five_ticks_html += "</table>"
@@ -317,6 +312,7 @@ if api_key or test_mode:
                 f"</div>", unsafe_allow_html=True
             )
             
+            # ⚡ 🟢 核心 BUG 修正：將原本誤傳的 dynamic_threshold 改為手動指定的 manual_big_order_lots
             decision, alert = process_market_logic(current_price, total_bid_vol, total_ask_vol, manual_big_order_lots, manual_ratio, stock_name)
             
             if alert:
