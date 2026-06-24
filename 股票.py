@@ -305,8 +305,17 @@ if api_key or test_mode:
             # =========================================================================
             # 📌 畫面獨立渲染、最少150張過濾與頻率保護防禦
             # =========================================================================
-            if current_price == 0.0 and not test_mode:
-                st.warning("⏳ 目前無即時成交數據...")
+                if current_price == 0.0 and not test_mode:
+        from datetime import datetime, time
+        current_time = datetime.now().time()
+        
+        # 判定是否為 08:30 ~ 09:00 的盤前試撮時間
+        if time(8, 30) <= current_time < time(9, 0):
+            st.info("📊 **目前為盤前試撮階段（08:30 ~ 09:00）**\n\n富果 API 於此時段不提供逐筆成交明細。大戶進攻火網將於 **09:00 正式開盤** 後自動啟動！")
+        else:
+            st.warning("⏳ 目前非盤中交易時段，無即時成交數據...")
+        return
+
                 return
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
