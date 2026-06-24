@@ -5,6 +5,7 @@ from fugle_marketdata import RestClient, FugleAPIError
 # --- 📱 手機版原生視窗最佳化配置 ---
 st.set_page_config(page_title="行動大戶籌碼監控", page_icon="⚡", layout="centered")
 
+# 使用 CSS 壓縮手機端元件間距，並固定深色底色提高戶外辨識度
 st.markdown("""
     <style>
     .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem; max-width: 100% !important;}
@@ -17,23 +18,28 @@ st.markdown("""
 
 st.title("⚡ 行動大戶籌碼五檔 APP")
 
+# --- 📱 把設定選單收納進主畫面的折疊收納盒 ---
 with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", expanded=False):
     api_key = st.text_input("富果 API Key", type="password")
     stock_code = st.text_input("股票代號", value="2409")
     
+    # 建立雙欄位手動輸入區，完美適配手機單手操作
     col_u1, col_u2 = st.columns(2)
     with col_u1:
         manual_big_order_lots = st.number_input(
-            "🔥 大戶定義 (張)", min_value=1, max_value=5000, value=150, step=10
+            "🔥 大戶定義 (張)", 
+            min_value=1, max_value=5000, value=150, step=10
         )
     with col_u2:
         manual_ratio = st.number_input(
-            "📊 參考量比 (倍)", min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f"
+            "📊 參考量比 (倍)", 
+            min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f"
         )
         
     test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
 
-retracement_alert_spot = st.empty() 
+# --- 📱 定義手機單頁即時擦除動態容器鎖定 ---
+retracement_alert_spot = st.empty() # 獨立轉折警告專用欄位（與多空常規燈完全分離，留存 12 秒不被洗掉）
 price_block = st.empty()  
 threshold_spot = st.empty()
 signal_spot = st.empty()
@@ -52,8 +58,8 @@ log_spot = st.empty()
 if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
 if 'wave_high_price' not in st.session_state: st.session_state.wave_high_price = 0.0
 if 'wave_low_price' not in st.session_state: st.session_state.wave_low_price = 999999.0
-if 'wave_alert_text' not in st.session_state: st.session_state.wave_alert_text = None       
-if 'wave_alert_expires' not in st.session_state: st.session_state.wave_alert_expires = 0.0  
+if 'wave_alert_text' not in st.session_state: st.session_state.wave_alert_text = None       # 持久化警報內文
+if 'wave_alert_expires' not in st.session_state: st.session_state.wave_alert_expires = 0.0  # 警報停留時間戳
 if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
 if 'order_history' not in st.session_state: st.session_state.order_history = []
 if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
@@ -68,8 +74,7 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.order_history = []
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
-
-# --- 核心邏輯：當沖多空連續性辨識引擎 ---
+# --- 核心邏輯：當沖多空連續性辨識引擎（精簡純粹版：只看價格與頻率） ---
 def process_market_logic(current_price, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
@@ -93,9 +98,9 @@ def process_market_logic(current_price, big_order_vol, stock_name):
         st.session_state.wave_low_price = 999999.0
 
     RETRACEMENT = 0.01  
-    ALERT_DURATION = 12.0  
+    ALERT_DURATION = 12.0  # 設定警告警報在手機螢幕上強制維持留存的時間（秒）
 
-    # 多頭轉折
+    # 多頭轉折判定：自高點回撤 1%
     if st.session_state.wave_high_price > 0:
         drop_ratio = (st.session_state.wave_high_price - current_price) / st.session_state.wave_high_price
         if drop_ratio >= RETRACEMENT:
@@ -105,7 +110,7 @@ def process_market_logic(current_price, big_order_vol, stock_name):
             st.session_state.wave_alert_text = f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空籌碼火網。"
             st.session_state.wave_alert_expires = now_time + ALERT_DURATION
 
-    # 空頭轉折
+    # 空頭轉折判定：自低點反彈 1%
     if st.session_state.wave_low_price < 999999.0:
         rebound_ratio = (current_price - st.session_state.wave_low_price) / st.session_state.wave_low_price
         if rebound_ratio >= RETRACEMENT:
@@ -116,8 +121,9 @@ def process_market_logic(current_price, big_order_vol, stock_name):
             st.session_state.wave_alert_expires = now_time + ALERT_DURATION
 
     if now_time > st.session_state.wave_alert_expires:
-        st.session_state.wave_alert_text = None  
+        st.session_state.wave_alert_text = None  # 時間到了才允許擦除隱藏
 
+    # 渲染計分板
     counter_html = f"<table style='width:100%; text-align:center; font-size:13px;'><tr><td style='width:49%; background-color:#221215; padding:5px; border-radius:4px;'><span style='color:#ff4466;font-size:11px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:18px;'>{recent_buy_cnt} 次</b></td><td style='width:2%;'></td><td style='width:49%; background-color:#112215; padding:5px; border-radius:4px;'><span style='color:#00ff88;font-size:11px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:18px;'>{recent_sell_cnt} 次</b></td></tr></table>"
     history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
 
@@ -132,13 +138,13 @@ def process_market_logic(current_price, big_order_vol, stock_name):
     else:
         log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
 
-    # 🟢 修正：動態調配提示文字。當大單在砸貨時，自動切換為提示內盤大單
+    # 動態變更未發信號時的沙漏提示文字
     if recent_sell_cnt > recent_buy_cnt:
         decision_text = f"⏳ 偵測中：未出現30秒內連續3筆精確內盤大單 ({big_order_vol}張)，保持觀望..."
     else:
         decision_text = f"⏳ 偵測中：未出現30秒內連續3筆精確外盤大單 ({big_order_vol}張)，保持觀望..."
         
-    # 🟢 修正：放寬多空門檻為「包含平盤（>= / <=）」，徹底杜絕卡在開盤價不亮燈的盲點！
+    # 多空訊號判定（🟢 已放寬多空門檻為包含平盤在內的 >= 與 <=，解決平盤不亮燈BUG）
     if open_p > 0:
         if current_price >= open_p and recent_buy_cnt >= 3:
             decision_text = f"🎯【🔥 做多訊號】{stock_name} 主力突破吃貨，順勢做多！"
@@ -160,7 +166,7 @@ if api_key or test_mode:
             st.session_state.last_update_time = current_now
 
             # =========================================================================
-            # 📌 模擬劇本模式
+            # 📌 模擬劇本模式（🟢 測試單價格與量比生成邏輯已與五檔撮合價量完美同步）
             # =========================================================================
             if test_mode:
                 open_price = 29.00
@@ -174,8 +180,9 @@ if api_key or test_mode:
                     raw_price = 29.05 + (cycle * 0.04) 
                     current_price = round(raw_price, 2)  
                     tick_qty = manual_big_order_lots + 10 
-                    tick_price = current_price
                     bids_base, asks_base = 1000, int(1000 * manual_ratio * 1.5)
+                    # 做多段：成交在外盤第一檔（asks第一檔 = current_price）
+                    tick_price = current_price
                     last_bid, last_ask = round(current_price - 0.05, 2), current_price
                     
                 elif cycle < 20:
@@ -187,13 +194,13 @@ if api_key or test_mode:
                     last_bid, last_ask = current_price, round(current_price + 0.05, 2)
                     
                 elif cycle < 30:
-                    # 🟢 修正：讓做空主跌段的模擬價格一路挫到 28.40，確保絕對滿足破平盤邏輯
                     raw_price = 28.90 - ((cycle - 20) * 0.05)
                     current_price = round(raw_price, 2)  
                     tick_qty = manual_big_order_lots + 20 
-                    tick_price = current_price
-                    bids_base, asks_base = 1000, int(1000 * manual_ratio * 1.5)
-                    last_bid, last_ask = current_price, round(current_price + 0.05, 2)
+                    bids_base, asks_base = int(1000 * manual_ratio * 1.5), 1000
+                    # 🟢 做空段：成交價同步為買盤第一檔（bids第一檔 = current_price - 0.05），實現真正的內盤砸貨
+                    tick_price = round(current_price - 0.05, 2)
+                    last_bid, last_ask = round(current_price - 0.05, 2), current_price
                     
                 else:
                     raw_price = 28.40 + ((cycle - 30) * 0.05)  
@@ -249,7 +256,7 @@ if api_key or test_mode:
                 last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
             # =========================================================================
-            # 📌 畫面渲染與雙手動設定最終攔截防線
+            # 📌 畫面渲染與手動大戶張數最終攔截防線
             # =========================================================================
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
@@ -260,6 +267,7 @@ if api_key or test_mode:
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
             
+            # 🟢 計算精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
             if total_bid_vol > 0 and total_ask_vol > 0:
                 if total_ask_vol >= total_bid_vol:
                     current_real_ratio = total_ask_vol / total_bid_vol
@@ -271,6 +279,7 @@ if api_key or test_mode:
                 ratio_html = "量比: 0.00 倍 (⏳ 計算中)"
 
             mode_prefix = " (🌙測試中)" if test_mode else ""
+            # UI 提示：解析 HTML 乾淨量比，徹底消除原始碼
             threshold_spot.markdown(
                 f"<div style='font-size:12px; color:#aaa;'>⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}</div>", 
                 unsafe_allow_html=True
@@ -313,6 +322,7 @@ if api_key or test_mode:
                 f"</div>", unsafe_allow_html=True
             )
             
+            # 🟢 精準接收自訂大戶張數，徹底解除因果衝突
             decision, alert = process_market_logic(current_price, manual_big_order_lots, stock_name)
             
             if alert:
@@ -320,12 +330,15 @@ if api_key or test_mode:
             else:
                 retracement_alert_spot.empty()
                 
+            # =========================================================================
+            # 🎯 台股自訂紅漲綠跌 HTML 高對比訊號燈塊渲染
+            # =========================================================================
             if "做多" in decision:
                 signal_spot.markdown(
                     f"<div style='background-color:#2e1518; padding:8px; border-radius:4px; border-left:5px solid #ff4466; color:#ff4466; font-size:14px; font-weight:bold;'>{decision}</div>", 
                     unsafe_allow_html=True
                 )
-            elif "做空" in decision:
+            elif "做做多" in decision or "做空" in decision:
                 signal_spot.markdown(
                     f"<div style='background-color:#122618; padding:8px; border-radius:4px; border-left:5px solid #00ff88; color:#00ff88; font-size:14px; font-weight:bold;'>{decision}</div>", 
                     unsafe_allow_html=True
