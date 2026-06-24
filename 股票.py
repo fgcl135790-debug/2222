@@ -319,7 +319,7 @@ if api_key or test_mode:
             index_html = f"<table style='width:100%; text-align:center; font-size:12px; margin-bottom:2px;'><tr><td style='width:49%; background-color:#161b22; padding:4px; border-radius:4px;'><span style='color:#888; font-size:10px;'>加權大盤</span><br><b style='color:{tx_color}; font-size:14px;'>{taiex_price:,.2f}</b> <span style='color:{tx_color}; font-size:10px;'>({tx_sign}{taiex_change})</span></td><td style='width:2%;'></td><td style='width:49%; background-color:#161b22; padding:4px; border-radius:4px;'><span style='color:#888; font-size:10px;'>櫃買指數</span><br><b style='color:{otc_color}; font-size:14px;'>{otc_price:,.2f}</b> <span style='color:{otc_color}; font-size:10px;'>({otc_sign}{otc_change})</span></td></tr></table>"
             index_block.markdown(index_html, unsafe_allow_html=True)
 
-            dynamic_threshold = get_dynamic_big_order_threshold(current_price, total_volume_lots)
+            dynamic_threshold = 30.0
             mode_prefix = " (🌙測試中)" if test_mode else ""
             threshold_spot.caption(f"⚙️ 門檻: 單筆 {dynamic_threshold} 張 | 總量: {total_volume_lots:,} 張 | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}")
             
