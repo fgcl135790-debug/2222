@@ -305,7 +305,7 @@ if api_key or test_mode:
             # =========================================================================
             # 📌 畫面獨立渲染、最少150張過濾與頻率保護防禦
             # =========================================================================
-                if current_price == 0.0 and not test_mode:
+    if current_price == 0.0 and not test_mode:
         from datetime import datetime, time
         current_time = datetime.now().time()
         
@@ -315,6 +315,8 @@ if api_key or test_mode:
         else:
             st.warning("⏳ 目前非盤中交易時段，無即時成交數據...")
         return
+
+
 
                 return
             if st.session_state.open_price == 0.0:
