@@ -23,18 +23,22 @@ with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", e
     api_key = st.text_input("富果 API Key", type="password")
     stock_code = st.text_input("股票代號", value="2409")
     
-    # 手動大戶張數輸入介面
-    manual_big_order_lots = st.number_input(
-        "🔥 手動設定大戶定義 (單位：張)", 
-        min_value=1, 
-        max_value=5000, 
-        value=150, 
-        step=10
-    )
-    
+    # 建立雙欄位手動輸入區，完美適配手機單手操作
+    col_u1, col_u2 = st.columns(2)
+    with col_u1:
+        manual_big_order_lots = st.number_input(
+            "🔥 大戶定義 (張)", 
+            min_value=1, max_value=5000, value=150, step=10
+        )
+    with col_u2:
+        manual_ratio = st.number_input(
+            "📊 委託量比 (倍)", 
+            min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f"
+        )
+        
     test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
 
-# --- 📱 定義手機單頁即時擦除動態容器鎖定（已拿掉大盤與櫃買容器） ---
+# --- 📱 定義手機單頁即時擦除動態容器鎖定 ---
 retracement_alert_spot = st.empty() 
 price_block = st.empty()  
 threshold_spot = st.empty()
@@ -70,8 +74,8 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.order_history = []
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
-# --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空 + 12秒警報留存版） ---
-def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
+# --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空 + 12秒警報留存版 + 量比判定已移除） ---
+def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, target_ratio, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
     
@@ -137,12 +141,12 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     else:
         log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
 
-    # 核心訊號判定
+    # 核心訊號判定（🟢 修正：已完全拔除量比限制，多空訊號只看價格與 30s 大戶連續頻率）
     decision_text = f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望..."
     if open_p > 0:
-        if current_price >= open_p and total_ask_vol > (total_bid_vol * 1.2) and recent_buy_cnt >= 3:
+        if current_price >= open_p and recent_buy_cnt >= 3:
             decision_text = f"🎯【🔥 做多訊號】{stock_name} 主力突破吃貨，順勢做多！"
-        if current_price < open_p and total_bid_vol > (total_ask_vol * 1.2) and recent_sell_cnt >= 3:
+        if current_price < open_p and recent_sell_cnt >= 3:
             decision_text = f"🎯【💥 做空訊號】{stock_name} 多頭防線潰散，順勢放空！"
 
     return decision_text, st.session_state.wave_alert_text
@@ -150,7 +154,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
-    # 🟢 速度修正：成功切換回您指定的每 2 秒高速無感重新整理看盤模式
+    # 🟢 速度配置：成功切換回每 2 秒高速無感重新整理看盤模式
     @st.fragment(run_every=2.0)
     def start_streaming(code):
         try:
@@ -160,7 +164,7 @@ if api_key or test_mode:
             st.session_state.last_update_time = current_now
 
             # =========================================================================
-            # 📌 模擬劇本模式（已完全拿掉大盤與櫃買數據計算）
+            # 📌 模擬劇本模式（五檔掛單比例依舊根據 manual_ratio 動態跳動以供視覺參考）
             # =========================================================================
             if test_mode:
                 open_price = 29.00
@@ -171,12 +175,12 @@ if api_key or test_mode:
                 cycle = int(current_now) % 40
                 
                 if cycle < 10:
-                    # 【階段 1：0~9秒】大戶外盤連續吃貨 ➔ 必定觸發【做多訊號】
+                    # 【階段 1：0~9秒】大戶外盤連續吃貨 ➔ 觸發【做多訊號】
                     raw_price = 29.05 + (cycle * 0.04) 
-                    current_price = round(raw_price, 2)  # ⚡ 強制去除 Python 浮點數微小溢出誤差
+                    current_price = round(raw_price, 2)  
                     tick_qty = 550  
                     tick_price = current_price
-                    bids_base, asks_base = 1000, 5000  # 賣盤是買盤 5 倍，完美符合做多委託量比要求
+                    bids_base, asks_base = 1000, int(1000 * manual_ratio * 1.5)
                     last_bid, last_ask = round(current_price - 0.05, 2), current_price
                     
                 elif cycle < 20:
@@ -189,12 +193,12 @@ if api_key or test_mode:
                     last_bid, last_ask = current_price, round(current_price + 0.05, 2)
                     
                 elif cycle < 30:
-                    # 【階段 3：20~29秒】內盤大量砸貨 ➔ 必定觸發【做空訊號】
+                    # 【階段 3：20~29秒】內盤大量砸貨 ➔ 觸發【做空訊號】
                     raw_price = 28.90 - ((cycle - 20) * 0.05)
                     current_price = round(raw_price, 2)  
                     tick_qty = 600  
                     tick_price = current_price
-                    bids_base, asks_base = 6000, 1000  # 買盤是賣盤 6 倍，完美符合做空委託量比要求
+                    bids_base, asks_base = int(1000 * manual_ratio * 1.5), 1000
                     last_bid, last_ask = current_price, round(current_price + 0.05, 2)
                     
                 else:
@@ -252,7 +256,7 @@ if api_key or test_mode:
                 last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
             # =========================================================================
-            # 📌 畫面渲染與手動大戶張數最終攔截防線
+            # 📌 畫面渲染與雙手動設定最終攔截防線
             # =========================================================================
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
@@ -261,7 +265,8 @@ if api_key or test_mode:
                 st.session_state.open_price = open_price
                 
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            threshold_spot.caption(f"⚙️ 門檻: 完全依手動指定為 {manual_big_order_lots} 張 | 總量: {total_volume_lots:,} 張 | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}")
+            # UI 提示：同步動態展示您指定的大戶張數與自訂量比（量比改為僅供畫面參考）
+            threshold_spot.caption(f"⚙️ 門檻: 依手動自訂為 {manual_big_order_lots} 張 (參考量比 {manual_ratio} 倍) | 總量: {total_volume_lots:,} 張 | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}")
             
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
@@ -303,13 +308,16 @@ if api_key or test_mode:
                 f"</div>", unsafe_allow_html=True
             )
             
-            decision, alert = process_market_logic(current_price, total_bid_vol, total_ask_vol, manual_big_order_lots, stock_name)
+            # 執行解耦雙回傳決策（將手動調整的門檻與參考用量比同時拋入，內部已解除限制）
+            decision, alert = process_market_logic(current_price, total_bid_vol, total_ask_vol, manual_big_order_lots, manual_ratio, stock_name)
             
+            # 獨立警報區渲染：若盤中出現 1% 折返則以黃色專區醒目固化，維持 12 秒絕不被任何數據洗掉
             if alert:
                 retracement_alert_spot.warning(alert)
             else:
                 retracement_alert_spot.empty()
                 
+            # 渲染一般多空狀態燈
             if "做多" in decision: signal_spot.success(decision)
             elif "做空" in decision: signal_spot.error(decision)
             else: signal_spot.info(decision)
