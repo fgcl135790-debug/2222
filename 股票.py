@@ -252,18 +252,42 @@ def start_streaming(code):
             while len(bids) < 5: bids.append({'price': 0.0, 'volume': 0})
             while len(asks) < 5: asks.append({'price': 0.0, 'volume': 0})
 
-            last_trade_raw = quote.get('lastTrade')
-            if isinstance(last_trade_raw, list) and len(last_trade_raw) > 0:
-                last_trade = last_trade_raw[0]
-            elif isinstance(last_trade_raw, dict):
-                last_trade = last_trade_raw
+             # 確保有從 RestClient 精準呼叫 .get() 取得字典資料
+            if callable(quote):
+                quote_data = quote(code)
             else:
+                quote_data = quote if isinstance(quote, dict) else {}
+
+            # 優化富果 API v1.0 lastTrade 的安全提煉機制
+            last_trade = quote_data.get('lastTrade', {})
+            if isinstance(last_trade, list) and len(last_trade) > 0:
+                last_trade = last_trade[0]
+            elif not isinstance(last_trade, dict):
                 last_trade = {}
 
-            tick_qty = int(last_trade.get('unit', 0) / 1000) if last_trade.get('unit') else 0
             tick_price = last_trade.get('price', 0.0)
-            trade_time = last_trade.get('time', 0)
-            current_price = tick_price
+            
+            # 安全防禦機制：如果剛開盤 lastTrade 還是空值，先拿開盤價(openPrice)或昨收價(referencePrice)頂替作為 current_price
+            if tick_price and tick_price > 0:
+                current_price = tick_price
+            else:
+                current_price = quote_data.get('openPrice', 0.0)
+                if current_price == 0.0:
+                    current_price = quote_data.get('referencePrice', 0.0)
+
+            tick_qty = int(last_trade.get('unit', 0) / 1000) if last_trade.get('unit') else 0
+            trade_time = last_trade.get('time', int(time_module.time() * 1000))
+
+            raw_bids = quote_data.get('bids', [])
+            raw_asks = quote_data.get('asks', [])
+            bids = raw_bids if isinstance(raw_bids, list) else []
+            asks = raw_asks if isinstance(raw_asks, list) else []
+            while len(bids) < 5: bids.append({'price': current_price, 'volume': 0})
+            while len(asks) < 5: asks.append({'price': current_price, 'volume': 0})
+            
+            # 更新 trades_data
+            trades_data = [{'price': current_price, 'volume': last_trade.get('unit', 0), 'time': trade_time}] if current_price > 0.0 else []
+
 
             last_bid = bids[0].get('price', 0.0) if bids and bids[0] else 0.0
             last_ask = asks[0].get('price', 0.0) if asks and asks[0] else 0.0
