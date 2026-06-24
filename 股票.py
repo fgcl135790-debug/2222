@@ -144,7 +144,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
-    # 速度配置：每 1.5 秒高速無感重新整理看盤模式
+    # 🟢 速度配置：每 1.5 秒高速無感重新整理看盤模式
     @st.fragment(run_every=1.5)
     def start_streaming(code):
         try:
@@ -168,7 +168,7 @@ if api_key or test_mode:
                     # 【階段 1：0~9秒】大戶外盤連續吃貨 ➔ 必定觸發【做多訊號】
                     raw_price = 29.05 + (cycle * 0.04) 
                     current_price = round(raw_price, 2)  
-                    tick_qty = manual_big_order_lots + 10 # 確保測試單大於手動設定門檻
+                    tick_qty = manual_big_order_lots + 10 
                     tick_price = current_price
                     bids_base, asks_base = 1000, int(1000 * manual_ratio * 1.5)
                     last_bid, last_ask = round(current_price - 0.05, 2), current_price
@@ -186,7 +186,7 @@ if api_key or test_mode:
                     # 【階段 3：20~29秒】內盤大量砸貨 ➔ 必定觸發【做空訊號】
                     raw_price = 28.90 - ((cycle - 20) * 0.05)
                     current_price = round(raw_price, 2)  
-                    tick_qty = manual_big_order_lots + 20 # 確保測試單大於手動設定門檻
+                    tick_qty = manual_big_order_lots + 20 
                     tick_price = current_price
                     bids_base, asks_base = int(1000 * manual_ratio * 1.5), 1000
                     last_bid, last_ask = current_price, round(current_price + 0.05, 2)
@@ -246,50 +246,7 @@ if api_key or test_mode:
                 last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
             # =========================================================================
-            # 📌 盤中實時富果資料串接模式（已完全移除大盤與櫃買指數請求）
-            # =========================================================================
-            else:
-                quote = client.stock.intraday.quote(symbol=code)
-                current_price = quote.get('lastTrade', {}).get('price') or quote.get('closePrice') or 0.0
-                open_price = quote.get('priceOpen') or quote.get('openPrice') or current_price
-                stock_name = quote.get('name') or f"股票 {code}"
-                
-                total_info = quote.get('total', {})
-                raw_volume = total_info.get('unit') or total_info.get('volume', 0)
-                if raw_volume == 0:
-                    try:
-                        ticker_info = client.stock.intraday.ticker(symbol=code)
-                        raw_volume = ticker_info.get('volume', 0)
-                        if stock_name == f"股票 {code}":
-                            stock_name = ticker_info.get('name') or f"股票 {code}"
-                    except: pass
-                
-                total_volume_lots = int(raw_volume) if raw_volume > 0 else 0
-                
-                raw_bids = quote.get('bids', [])
-                raw_asks = quote.get('asks', [])
-                bids = raw_bids if isinstance(raw_bids, list) else []
-                asks = raw_asks if isinstance(raw_asks, list) else []
-                while len(bids) < 5: bids.append({'price': 0.0, 'size': 0})
-                while len(asks) < 5: asks.append({'price': 0.0, 'size': 0})
-                
-                last_trade_raw = quote.get('lastTrade')
-                if isinstance(last_trade_raw, list) and len(last_trade_raw) > 0:
-                    last_trade = last_trade_raw
-                elif isinstance(last_trade_raw, dict):
-                    last_trade = last_trade_raw
-                else:
-                    last_trade = {}
-
-                tick_qty = int(last_trade.get('unit') or last_trade.get('size', 0))
-                tick_price = last_trade.get('price', current_price)
-                trade_time = last_trade.get('time', 0)
-                
-                last_bid = bids.get('price', 0.0) if bids and isinstance(bids, dict) else 0.0
-                last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
-
-            # =========================================================================
-            # 📌 畫面渲染與雙手動設定最終攔截防線
+            # 📌 畫面渲染、即時量比雙色計算防線
             # =========================================================================
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
@@ -312,7 +269,6 @@ if api_key or test_mode:
                 ratio_html = "量比: 0.00 倍 (⏳ 計算中)"
 
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            # UI 提示：將即時算出的雙色量比結果漂亮地同步顯示在副標題提示列中
             threshold_spot.markdown(
                 f"<div style='font-size:12px; color:#aaa;'>⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}</div>", 
                 unsafe_allow_html=True
@@ -363,7 +319,7 @@ if api_key or test_mode:
                 retracement_alert_spot.empty()
                 
             # =========================================================================
-            # 🎯 🟢 終極修正：拋棄美式綠漲紅跌，改用「自訂高亮度 HTML 燈號」完美回歸台股紅漲綠跌
+            # 🎯 台股自訂紅漲綠跌 HTML 高對比訊號燈塊
             # =========================================================================
             if "做多" in decision:
                 signal_spot.markdown(
@@ -376,7 +332,6 @@ if api_key or test_mode:
                     unsafe_allow_html=True
                 )
             else:
-                # 觀望中維持原本中性的精緻深藍灰黑底色
                 signal_spot.markdown(
                     f"<div style='background-color:#161b22; padding:8px; border-radius:4px; border-left:5px solid #58a6ff; color:#c9d1d9; font-size:13px;'>{decision}</div>", 
                     unsafe_allow_html=True
