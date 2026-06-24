@@ -54,63 +54,28 @@ history_counter_spot = st.empty()
 
 st.markdown("<b style='font-size:14px; color:#ddd;'>📜 大戶進攻即時紀錄 (30秒內明細)</b>", unsafe_allow_html=True)
 log_spot = st.empty()
-import streamlit st
-import time
-from fugle_marketdata import RestClient, FugleAPIError
+# --- 🟢 初始化全域狀態機制 ---
+if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
+if 'wave_high_price' not in st.session_state: st.session_state.wave_high_price = 0.0
+if 'wave_low_price' not in st.session_state: st.session_state.wave_low_price = 999999.0
+if 'wave_alert_text' not in st.session_state: st.session_state.wave_alert_text = None       
+if 'wave_alert_expires' not in st.session_state: st.session_state.wave_alert_expires = 0.0  
+if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
+if 'order_history' not in st.session_state: st.session_state.order_history = []
+if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
+if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
 
-# --- 📱 手機版原生視窗最佳化配置 ---
-st.set_page_config(page_title="行動大戶籌碼監控", page_icon="⚡", layout="centered")
+if st.session_state.last_stock_code != stock_code:
+    st.session_state.open_price = 0.0
+    st.session_state.wave_high_price = 0.0
+    st.session_state.wave_low_price = 999999.0
+    st.session_state.wave_alert_text = None
+    st.session_state.wave_alert_expires = 0.0
+    st.session_state.order_history = []
+    st.session_state.last_trade_key = None
+    st.session_state.last_stock_code = stock_code
 
-# 使用 CSS 壓縮手機端元件間距，並固定深色底色提高戶外辨識度
-st.markdown("""
-    <style>
-    .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem; max-width: 100% !important;}
-    h1 {font-size: 22px !important; margin-bottom: 5px !important;}
-    div[data-testid="stExpander"] {margin-bottom: 0.5rem;}
-    hr {margin: 6px 0 !important;}
-    p, span, label {font-size: 13px !important;}
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("⚡ 行動大戶籌碼五檔 APP")
-
-# --- 📱 把設定選單收納進主畫面的折疊收納盒 ---
-with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", expanded=False):
-    api_key = st.text_input("富果 API Key", type="password")
-    stock_code = st.text_input("股票代號", value="2409")
-    
-    # 建立雙欄位手動輸入區，完美適配手機單手操作
-    col_u1, col_u2 = st.columns(2)
-    with col_u1:
-        manual_big_order_lots = st.number_input(
-            "🔥 大戶定義 (張)", 
-            min_value=1, max_value=5000, value=150, step=10
-        )
-    with col_u2:
-        manual_ratio = st.number_input(
-            "📊 參考量比 (倍)", 
-            min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f"
-        )
-        
-    test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
-
-# --- 📱 定義手機單頁即時擦除動態容器鎖定 ---
-retracement_alert_spot = st.empty() 
-price_block = st.empty()  
-threshold_spot = st.empty()
-signal_spot = st.empty()
-st.markdown("<hr>", unsafe_allow_html=True)
-
-st.markdown("<b style='font-size:14px; color:#ddd;'>📋 盤口最佳五檔</b>", unsafe_allow_html=True)
-five_ticks_spot = st.empty()
-st.markdown("<hr>", unsafe_allow_html=True)
-
-st.markdown("<b style='font-size:14px; color:#ddd;'>🔥 30秒大戶進攻火網</b>", unsafe_allow_html=True)
-history_counter_spot = st.empty()
-
-st.markdown("<b style='font-size:14px; color:#ddd;'>📜 大戶進攻即時紀錄 (30秒內明細)</b>", unsafe_allow_html=True)
-log_spot = st.empty()
-# --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空 + 12秒警報留存版 + 量比判定已移除） ---
+# --- 核心邏輯：當沖多空連續性辨識引擎 ---
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, target_ratio, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
@@ -134,35 +99,29 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
         st.session_state.wave_low_price = 999999.0
 
     RETRACEMENT = 0.01  
-    ALERT_DURATION = 12.0  # 設定警告警報在手機螢幕上強制維持留存的時間（秒）
+    ALERT_DURATION = 12.0  
 
-    # 多頭轉折判定：自高點回撤 1%
     if st.session_state.wave_high_price > 0:
         drop_ratio = (st.session_state.wave_high_price - current_price) / st.session_state.wave_high_price
         if drop_ratio >= RETRACEMENT:
             st.session_state.order_history = []
             st.session_state.wave_high_price = 0.0
             recent_buy_cnt = 0
-            # 寫入狀態鎖並設定過期時間
             st.session_state.wave_alert_text = f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空籌碼火網。"
             st.session_state.wave_alert_expires = now_time + ALERT_DURATION
 
-    # 空頭轉折判定：自低點反彈 1%
     if st.session_state.wave_low_price < 999999.0:
         rebound_ratio = (current_price - st.session_state.wave_low_price) / st.session_state.wave_low_price
         if rebound_ratio >= RETRACEMENT:
             st.session_state.order_history = []
             st.session_state.wave_low_price = 999999.0
             recent_sell_cnt = 0
-            # 寫入狀態鎖並設定過期時間
             st.session_state.wave_alert_text = f"💥 空頭止跌：股價自這波低點 {st.session_state.wave_low_price} 元強彈達 {rebound_ratio*100:.2f}%！空方針對性遭到攻破，強制擦除砸貨紀錄。"
             st.session_state.wave_alert_expires = now_time + ALERT_DURATION
 
-    # 檢查目前的警報是否過期
     if now_time > st.session_state.wave_alert_expires:
-        st.session_state.wave_alert_text = None  # 時間到了才允許擦除隱藏
+        st.session_state.wave_alert_text = None  
 
-    # 渲染計分板
     counter_html = f"<table style='width:100%; text-align:center; font-size:13px;'><tr><td style='width:49%; background-color:#221215; padding:5px; border-radius:4px;'><span style='color:#ff4466;font-size:11px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:18px;'>{recent_buy_cnt} 次</b></td><td style='width:2%;'></td><td style='width:49%; background-color:#112215; padding:5px; border-radius:4px;'><span style='color:#00ff88;font-size:11px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:18px;'>{recent_sell_cnt} 次</b></td></tr></table>"
     history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
 
@@ -177,7 +136,6 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     else:
         log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
 
-    # 核心訊號判定（🟢 已完全拔除量比限制，多空訊號只看價格與 30s 大戶連續頻率）
     decision_text = f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望..."
     if open_p > 0:
         if current_price >= open_p and recent_buy_cnt >= 3:
@@ -190,7 +148,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
-    # 🟢 速度配置：成功切換回每 2 秒高速無感重新整理看盤模式
+    # 速度配置：每 2 秒高速無感重新整理看盤模式
     @st.fragment(run_every=2.0)
     def start_streaming(code):
         try:
@@ -200,7 +158,7 @@ if api_key or test_mode:
             st.session_state.last_update_time = current_now
 
             # =========================================================================
-            # 📌 模擬劇本模式（五檔掛單比例依舊根據 manual_ratio 動態跳動以供視覺參考）
+            # 📌 模擬劇本模式
             # =========================================================================
             if test_mode:
                 open_price = 29.00
@@ -211,7 +169,7 @@ if api_key or test_mode:
                 cycle = int(current_now) % 40
                 
                 if cycle < 10:
-                    # 【階段 1：0~9秒】大戶外盤連續吃貨 ➔ 觸發【做多訊號】
+                    # 【階段 1：0~9秒】大戶外盤連續吃貨 ➔ 必定觸發【做多訊號】
                     raw_price = 29.05 + (cycle * 0.04) 
                     current_price = round(raw_price, 2)  
                     tick_qty = 550  
@@ -303,16 +261,16 @@ if api_key or test_mode:
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
             
-            # 🟢 核心新功能：計算當下精確的五檔委託量比，並透過顏色與文字指引多空策略
+            # 🟢 計算精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
             if total_bid_vol > 0 and total_ask_vol > 0:
                 if total_ask_vol >= total_bid_vol:
                     current_real_ratio = total_ask_vol / total_bid_vol
-                    ratio_html = f"比值: <b style='color:#ff4466; font-size:14px;'>{current_real_ratio:.2f} 倍</b> (🔴 賣盤壓境：適合突破做多)"
+                    ratio_html = f"量比: <b style='color:#ff4466; font-size:14px;'>{current_real_ratio:.2f} 倍</b> (🔴 賣盤壓境：適合突破做多)"
                 else:
                     current_real_ratio = total_bid_vol / total_ask_vol
-                    ratio_html = f"比值: <b style='color:#00ff88; font-size:14px;'>{current_real_ratio:.2f} 倍</b> (🟢 買盤托底：適合主力誘多做空)"
+                    ratio_html = f"量比: <b style='color:#00ff88; font-size:14px;'>{current_real_ratio:.2f} 倍</b> (🟢 買盤托底：適合主力誘多做空)"
             else:
-                ratio_html = "比值: 0.00 倍 (⏳ 計算中)"
+                ratio_html = "量比: 0.00 倍 (⏳ 計算中)"
 
             mode_prefix = " (🌙測試中)" if test_mode else ""
             # UI 提示：將即時算出的雙色量比結果漂亮地同步顯示在提示列中
