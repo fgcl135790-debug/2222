@@ -207,7 +207,7 @@ if api_key or test_mode:
                 bids = [{'price': round(current_price - 0.05 * i, 2), 'size': bids_base - i * 100} for i in range(1, 6)]
                 asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
             # =========================================================================
-            # 📌 盤中實時富果資料串接模式（已完全移除大盤與櫃買指數請求）
+            # 📌 盤中實時富果資料串接模式
             # =========================================================================
             else:
                 quote = client.stock.intraday.quote(symbol=code)
@@ -261,20 +261,23 @@ if api_key or test_mode:
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
             
-            # 🟢 計算精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
+            # 🟢 計算當下精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
             if total_bid_vol > 0 and total_ask_vol > 0:
                 if total_ask_vol >= total_bid_vol:
                     current_real_ratio = total_ask_vol / total_bid_vol
-                    ratio_html = f"量比: <b style='color:#ff4466; font-size:14px;'>{current_real_ratio:.2f} 倍</b> (🔴 賣盤壓境：適合突破做多)"
+                    ratio_html = f"量比: <b style='color:#ff4466; font-size:13px;'>{current_real_ratio:.2f} 倍</b> (<span style='color:#ff4466;'>🔴 賣盤壓境：適合突破做多</span>)"
                 else:
                     current_real_ratio = total_bid_vol / total_ask_vol
-                    ratio_html = f"量比: <b style='color:#00ff88; font-size:14px;'>{current_real_ratio:.2f} 倍</b> (🟢 買盤托底：適合主力誘多做空)"
+                    ratio_html = f"量比: <b style='color:#00ff88; font-size:13px;'>{current_real_ratio:.2f} 倍</b> (<span style='color:#00ff88;'>🟢 買盤托底：適合主力誘多做空</span>)"
             else:
                 ratio_html = "量比: 0.00 倍 (⏳ 計算中)"
 
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            # UI 提示：將即時算出的雙色量比結果漂亮地同步顯示在提示列中
-            threshold_spot.caption(f"⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}")
+            # 🟢 修正：將 threshold_spot 從 .caption() 換成支援 HTML 解析的 .markdown()，一秒清除藍色原始碼髒字
+            threshold_spot.markdown(
+                f"<div style='font-size:12px; color:#aaa;'>⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}</div>", 
+                unsafe_allow_html=True
+            )
             
             five_ticks_html = "<table style='width:100%; text-align:center; font-size:13px; border-collapse:collapse; font-family:monospace;'><tr style='background-color:#111; height:22px;'><th style='color:#00ff88; width:25%; font-size:11px;'>買張</th><th style='color:#00ff88; width:25%; font-size:11px;'>買價</th><th style='color:#ff4466; width:25%; font-size:11px;'>賣價</th><th style='color:#ff4466; width:25%; font-size:11px;'>賣張</th></tr>"
             for i in range(5):
