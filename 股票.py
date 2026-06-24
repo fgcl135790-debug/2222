@@ -256,7 +256,7 @@ if api_key or test_mode:
                 last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
             # =========================================================================
-            # 📌 畫面渲染與手動大戶張數最終攔截防線
+            # 📌 畫面渲染與雙手動設定最終攔截防線
             # =========================================================================
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
@@ -267,7 +267,7 @@ if api_key or test_mode:
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
             
-            # 🟢 計算精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
+            # 計算精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
             if total_bid_vol > 0 and total_ask_vol > 0:
                 if total_ask_vol >= total_bid_vol:
                     current_real_ratio = total_ask_vol / total_bid_vol
@@ -279,7 +279,6 @@ if api_key or test_mode:
                 ratio_html = "量比: 0.00 倍 (⏳ 計算中)"
 
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            # UI 提示：解析 HTML 乾淨量比，徹底消除原始碼
             threshold_spot.markdown(
                 f"<div style='font-size:12px; color:#aaa;'>⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}</div>", 
                 unsafe_allow_html=True
@@ -322,7 +321,6 @@ if api_key or test_mode:
                 f"</div>", unsafe_allow_html=True
             )
             
-            # 🟢 精準接收自訂大戶張數，徹底解除因果衝突
             decision, alert = process_market_logic(current_price, manual_big_order_lots, stock_name)
             
             if alert:
@@ -331,14 +329,14 @@ if api_key or test_mode:
                 retracement_alert_spot.empty()
                 
             # =========================================================================
-            # 🎯 台股自訂紅漲綠跌 HTML 高對比訊號燈塊渲染
+            # 🎯 台股自訂紅漲綠跌 HTML 高對比訊號燈塊渲染（🟢 修正：已移除 "做做多" 錯字）
             # =========================================================================
             if "做多" in decision:
                 signal_spot.markdown(
                     f"<div style='background-color:#2e1518; padding:8px; border-radius:4px; border-left:5px solid #ff4466; color:#ff4466; font-size:14px; font-weight:bold;'>{decision}</div>", 
                     unsafe_allow_html=True
                 )
-            elif "做做多" in decision or "做空" in decision:
+            elif "做空" in decision:
                 signal_spot.markdown(
                     f"<div style='background-color:#122618; padding:8px; border-radius:4px; border-left:5px solid #00ff88; color:#00ff88; font-size:14px; font-weight:bold;'>{decision}</div>", 
                     unsafe_allow_html=True
@@ -359,3 +357,4 @@ if api_key or test_mode:
     start_streaming(stock_code)
 else:
     st.warning("🔑 請先展開上方選單輸入「富果 API Key」或勾選「模擬測試」以啟動功能。")
+
