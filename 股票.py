@@ -148,7 +148,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
-    # 🟢 步伐修正：完美切換至您指定的每 1.5 秒高速局部重新整理看盤模式
+    # 速度配置：每 1.5 秒高速無感重新整理看盤模式
     @st.fragment(run_every=1.5)
     def start_streaming(code):
         try:
@@ -261,7 +261,7 @@ if api_key or test_mode:
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
             
-            # 🟢 計算精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
+            # 計算精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
             if total_bid_vol > 0 and total_ask_vol > 0:
                 if total_ask_vol >= total_bid_vol:
                     current_real_ratio = total_ask_vol / total_bid_vol
@@ -288,7 +288,8 @@ if api_key or test_mode:
                 b_v_str = f"{b_vol:,}" if b_vol > 0 else "-"
                 b_p_str = f"{b_price:.2f}" if b_price > 0 else "-"
                 a_p_str = f"{a_price:.2f}" if a_price > 0 else "-"
-                a_v_str = f"{a_vol:,}" if a_v_str > 0 else "-"
+                # 🟢 修正打字錯誤：將原本誤寫的 a_v_str 改為正確判斷變數 a_vol
+                a_v_str = f"{a_vol:,}" if a_vol > 0 else "-"
                 five_ticks_html += f"<tr style='height:24px; border-bottom:1px solid #1c1c1c;'><td style='color:#00ff88;'>{b_v_str}</td><td style='color:#00ff88; font-weight:bold;'>{b_p_str}</td><td style='color:#ff4466; font-weight:bold;'>{a_p_str}</td><td style='color:#ff4466;'>{a_v_str}</td></tr>"
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
