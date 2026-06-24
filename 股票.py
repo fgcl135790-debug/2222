@@ -72,7 +72,19 @@ big_order_threshold = st.number_input(
 # 2. 註解掉（或刪除）原本自動計算的函數呼叫
 # 原本可能是：threshold = get_dynamic_big_order_threshold(...)
 # 現在直接讓系統套用您輸入的數值：
-threshold = big_order_threshold
+# 1. 先建立手動輸入框（建議放在 st.sidebar 或程式前端設定區）
+big_order_threshold = st.number_input(
+    "請輸入大戶判斷門檻（張數）", 
+    min_value=1, 
+    value=15,  # 畫面上顯示的 15 張
+    step=5
+)
+
+# 2. 修改原本的函式（第 73 行附近），強迫它直接套用您手動輸入的張數
+def get_dynamic_big_order_threshold(*args, **kwargs):
+    return big_order_threshold
+
+
 
 
 # --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空版） ---
