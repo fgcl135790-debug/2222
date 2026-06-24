@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta
 import time as time_module
 import requests
 
@@ -55,11 +55,12 @@ class RestClient:
             @property
             def tickers(self): return RestClient.SubResource(self.parent, "tickers")
         return IntradayService(self)
+
 # 3. 核心邏輯計算函式
 def calculate_metrics(bids, asks, total_volume, last_price):
     """計算最佳五檔的買賣盤氣勢與不平衡度"""
-    total_bid_vol = sum([b.get('size', b.get('volume', 0)) for b in bids])
-    total_ask_vol = sum([a.get('size', a.get('volume', 0)) for a in asks])
+    total_bid_vol = sum([b.get('volume', 0) for b in bids])
+    total_ask_vol = sum([a.get('volume', 0) for a in asks])
     
     if total_bid_vol + total_ask_vol > 0:
         order_imbalance = (total_bid_vol - total_ask_vol) / (total_bid_vol + total_ask_vol) * 100
@@ -105,15 +106,14 @@ def process_large_orders(trades_data, large_threshold_lots, reference_price):
             st.session_state.cumulative_buy_large = 0.0
             
     return large_df.to_dict('records'), buy_large_total, sell_large_total, decision_text
-
 # 4. 圖表渲染函式
 def render_order_book_chart(bids, asks):
     """使用 Plotly 繪製水平條形圖，直觀呈現五檔買賣盤委託量對決"""
     bid_prices = [b.get('price', 0) for b in bids][::-1]
-    bid_vols = [b.get('size', b.get('volume', 0)) / 1000.0 for b in bids][::-1]
+    bid_vols = [b.get('volume', 0) / 1000.0 for b in bids][::-1]
     
     ask_prices = [a.get('price', 0) for a in asks]
-    ask_vols = [a.get('size', a.get('volume', 0)) / 1000.0 for a in asks]
+    ask_vols = [a.get('volume', 0) / 1000.0 for a in asks]
     
     fig = go.Figure()
     
@@ -143,8 +143,9 @@ def render_order_book_chart(bids, asks):
         font=dict(color='#ffffff')
     )
     st.plotly_chart(fig, use_container_width=True)
+
 # ==============================================================================
-# 5. 主應用程式進入點與側邊欄設定 (100% 恢復你原始的變數架構與版面)
+# 5. 主應用程式進入點與側邊欄設定
 # ==============================================================================
 st.title("⚡ 行動大戶籌碼五檔 APP")
 
@@ -153,7 +154,7 @@ with st.sidebar.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬�
     code = st.text_input("股票代號", value="2409")
     test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
 
-api_key_to_use = api_key
+api_key_to_use = api_key 
 client = RestClient(api_key=api_key) if api_key else None
 
 @st.fragment(run_every=2.0)
@@ -176,11 +177,10 @@ def start_streaming(code):
             tick_qty = 155
             tick_price = 28.50
             
-            bids = [{'price': 28.45 - i*0.05, 'size': (250-i*30)*1000} for i in range(5)]
-            asks = [{'price': 28.55 + i*0.05, 'size': (180-i*20)*1000} for i in range(5)]
+            bids = [{'price': 28.45 - i*0.05, 'volume': (250-i*30)*1000} for i in range(5)]
+            asks = [{'price': 28.55 + i*0.05, 'volume': (180-i*20)*1000} for i in range(5)]
             
             trades_data = [{'price': 28.50, 'volume': 155000, 'time': trade_time}]
-            dynamic_threshold = 25.0
 
         else:
             if not client:
@@ -213,8 +213,6 @@ def start_streaming(code):
             stock_name = ticker.get('name', code)
             open_price = quote.get('openPrice', 0.0)
             reference_price = quote.get('referencePrice', open_price)
-            
-            # 【總量修正】直接精準提取真實成交總量
             raw_volume = quote.get('total', {}).get('volume', 0)
             total_volume_lots = int(raw_volume / 1000) if raw_volume else 0
 
@@ -222,55 +220,41 @@ def start_streaming(code):
             raw_asks = quote.get('asks', [])
             bids = raw_bids if isinstance(raw_bids, list) else []
             asks = raw_asks if isinstance(raw_asks, list) else []
-            while len(bids) < 5: bids.append({'price': 0.0, 'size': 0})
-            while len(asks) < 5: asks.append({'price': 0.0, 'size': 0})
+            while len(bids) < 5: bids.append({'price': 0.0, 'volume': 0})
+            while len(asks) < 5: asks.append({'price': 0.0, 'volume': 0})
 
-            # 【最新 Trades 明細端點引進】直接用 requests 安全撈取富果成交明細，確保訊號不漏接
-            try:
-                url = f"https://fugle.tw{code}"
-                headers = {"X-API-KEY": api_key} if api_key else {}
-                res = requests.get(url, headers=headers, timeout=3)
-                raw_trades_list = res.json().get('trades', []) if res.status_code == 200 else []
-            except:
-                raw_trades_list = []
+            last_trade_raw = quote.get('lastTrade')
+            if isinstance(last_trade_raw, list) and len(last_trade_raw) > 0:
+                last_trade = last_trade_raw
+            elif isinstance(last_trade_raw, dict):
+                last_trade = last_trade_raw
+            else:
+                last_trade = {}
 
-            last_trade_raw = quote.get('lastTrade', {})
-            tick_price = last_trade_raw.get('price', 0.0) if isinstance(last_trade_raw, dict) else 0.0
+            tick_qty = int(last_trade.get('unit', 0) / 1000) if last_trade.get('unit') else 0
+            tick_price = last_trade.get('price', 0.0)
+            trade_time = last_trade.get('time', 0)
             
+            # 【完美保底防護機制】如果開盤瞬間 tick_price 為 0，拿開盤價或昨收頂替，確保絕不變 0 崩潰
             if tick_price and tick_price > 0:
                 current_price = tick_price
-            elif len(raw_trades_list) > 0:
-                current_price = raw_trades_list.get('price', reference_price)
             else:
-                current_price = quote.get('lastPrice', reference_price)
+                current_price = open_price if open_price > 0 else reference_price
 
-            trade_time = int(time_module.time() * 1000)
-
-            if raw_trades_list:
-                trades_data = []
-                for t in raw_trades_list:
-                    trades_data.append({
-                        'price': t.get('price', current_price),
-                        'volume': t.get('size', t.get('volume', 0)),
-                        'time': t.get('time', trade_time)
-                    })
-            else:
-                unit_val = last_trade_raw.get('size', last_trade_raw.get('unit', 0)) if isinstance(last_trade_raw, dict) else 0
-                trades_data = [{'price': current_price, 'volume': unit_val, 'time': trade_time}] if current_price > 0.0 else []
+            last_bid = bids[0].get('price', 0.0) if bids and len(bids) > 0 else 0.0
+            last_ask = asks[0].get('price', 0.0) if asks and len(asks) > 0 else 0.0
             
-            # 【關鍵變數保底對齊】確保後續 UI 元件呼叫到 dynamic_threshold 時絕不報錯
-            dynamic_threshold = 25.0
+            trades_data = [{'price': current_price, 'volume': last_trade.get('unit', 0), 'time': trade_time}] if current_price > 0.0 else []
+
         # ==============================================================================
-        # 🎨 畫面獨立渲染、最少150張過濾與頻率保護防禦
+        # 画面独立渲染、最少150張過濾與頻率保護防禦
         # ==============================================================================
         if current_price == 0.0 and not test_mode:
             st.warning("⏳ 目前無即時成交數據...")
             return
 
         ref_price_final = open_price if open_price > 0 else current_price
-        
-        # 100% 恢復你原本設計的動態門檻變數命名與綁定
-        large_threshold_lots = dynamic_threshold
+        large_threshold_lots = 150.0
 
         large_list, b_total, s_total, decision = process_large_orders(
             trades_data, large_threshold_lots, ref_price_final
@@ -280,9 +264,6 @@ def start_streaming(code):
             bids, asks, total_volume_lots, current_price
         )
 
-        # ----------------------------------------------------------------------
-        # 👑 以下完全原封不動輸出你親自設計的 UI 元件與排版看板 👑
-        # ----------------------------------------------------------------------
         m_col1, m_col2, m_col3 = st.columns(3)
         with m_col1:
             st.metric("🇹🇼 加權指數", f"{taiex_price:,.2f}", f"{taiex_change:+.2f}")
@@ -331,12 +312,9 @@ def start_streaming(code):
                 rec_df['屬性'] = rec_df['type']
                 st.dataframe(rec_df[['時間', '價格', '張數', '屬性']], use_container_width=True, hide_index=True)
             else:
-                st.caption(f"⏳ 暫無超過 {large_threshold_lots} 張之大戶特大單成交...")
+                st.caption("⏳ 暫無超過 150 張之大戶特大單成交...")
 
     except Exception as e:
         st.error(f"系統執行發生異常: {str(e)}")
 
-# ==============================================================================
-# 7. 啟動 Streamlit 執行引擎
-# ==============================================================================
 start_streaming(code)
