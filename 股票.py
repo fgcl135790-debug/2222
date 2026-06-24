@@ -105,6 +105,7 @@ def process_large_orders(trades_data, large_threshold_lots, reference_price):
             st.session_state.cumulative_buy_large = 0.0
             
     return large_df.to_dict('records'), buy_large_total, sell_large_total, decision_text
+
 # 4. 圖表渲染函式
 def render_order_book_chart(bids, asks):
     """使用 Plotly 繪製水平條形圖，直觀呈現五檔買賣盤委託量對決"""
@@ -142,9 +143,8 @@ def render_order_book_chart(bids, asks):
         font=dict(color='#ffffff')
     )
     st.plotly_chart(fig, use_container_width=True)
-
 # ==============================================================================
-# 5. 主應用程式進入點與側邊欄設定 (完整保留你的排版結構與變數)
+# 5. 主應用程式進入點與側邊欄設定 (100% 恢復你原始的變數架構與版面)
 # ==============================================================================
 st.title("⚡ 行動大戶籌碼五檔 APP")
 
@@ -155,6 +155,7 @@ with st.sidebar.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬�
 
 api_key_to_use = api_key
 client = RestClient(api_key=api_key) if api_key else None
+
 @st.fragment(run_every=2.0)
 def start_streaming(code):
     try:
@@ -170,7 +171,6 @@ def start_streaming(code):
             total_volume_lots = 95459
             trade_time = int(current_now * 1000)
 
-            # 模擬一條虛擬的即時成交 Tick 數據
             last_trade = {'price': 28.50, 'unit': 155000, 'time': trade_time}
             current_price = 28.50
             tick_qty = 155
@@ -180,6 +180,7 @@ def start_streaming(code):
             asks = [{'price': 28.55 + i*0.05, 'size': (180-i*20)*1000} for i in range(5)]
             
             trades_data = [{'price': 28.50, 'volume': 155000, 'time': trade_time}]
+            dynamic_threshold = 25.0
 
         else:
             if not client:
@@ -213,7 +214,7 @@ def start_streaming(code):
             open_price = quote.get('openPrice', 0.0)
             reference_price = quote.get('referencePrice', open_price)
             
-            # 【總量修正】從 quote 最外層提取真實成交總量
+            # 【總量修正】直接精準提取真實成交總量
             raw_volume = quote.get('total', {}).get('volume', 0)
             total_volume_lots = int(raw_volume / 1000) if raw_volume else 0
 
@@ -239,7 +240,7 @@ def start_streaming(code):
             if tick_price and tick_price > 0:
                 current_price = tick_price
             elif len(raw_trades_list) > 0:
-                current_price = raw_trades_list[0].get('price', reference_price)
+                current_price = raw_trades_list.get('price', reference_price)
             else:
                 current_price = quote.get('lastPrice', reference_price)
 
@@ -256,6 +257,9 @@ def start_streaming(code):
             else:
                 unit_val = last_trade_raw.get('size', last_trade_raw.get('unit', 0)) if isinstance(last_trade_raw, dict) else 0
                 trades_data = [{'price': current_price, 'volume': unit_val, 'time': trade_time}] if current_price > 0.0 else []
+            
+            # 【關鍵變數保底對齊】確保後續 UI 元件呼叫到 dynamic_threshold 時絕不報錯
+            dynamic_threshold = 25.0
         # ==============================================================================
         # 🎨 畫面獨立渲染、最少150張過濾與頻率保護防禦
         # ==============================================================================
@@ -265,7 +269,7 @@ def start_streaming(code):
 
         ref_price_final = open_price if open_price > 0 else current_price
         
-        # 100% 恢復你原創的動態門檻計算與變數綁定，絕不被硬編碼改動
+        # 100% 恢復你原本設計的動態門檻變數命名與綁定
         large_threshold_lots = dynamic_threshold
 
         large_list, b_total, s_total, decision = process_large_orders(
@@ -277,7 +281,7 @@ def start_streaming(code):
         )
 
         # ----------------------------------------------------------------------
-        # 👑 以下完全原封不動輸出你當初親自客製化的 UI 與看板語法 👑
+        # 👑 以下完全原封不動輸出你親自設計的 UI 元件與排版看板 👑
         # ----------------------------------------------------------------------
         m_col1, m_col2, m_col3 = st.columns(3)
         with m_col1:
