@@ -18,12 +18,12 @@ st.markdown("""
 
 st.title("⚡ 行動大戶籌碼五檔 APP")
 
-# --- 📱 把設定選單收納進主畫面的折疊收納盒（🟢 已新增：手動大戶張數輸入介面） ---
+# --- 📱 把設定選單收納進主畫面的折疊收納盒 ---
 with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", expanded=False):
     api_key = st.text_input("富果 API Key", type="password")
     stock_code = st.text_input("股票代號", value="2409")
     
-    # 讓您在手機上可以滑動調整，也可以直接按左右加減輸入
+    # 手動大戶張數輸入介面
     manual_big_order_lots = st.number_input(
         "🔥 手動設定大戶定義 (單位：張)", 
         min_value=1, 
@@ -34,8 +34,7 @@ with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", e
     
     test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
 
-# --- 📱 定義手機單頁即時擦除動態容器鎖定 ---
-index_block = st.empty()  
+# --- 📱 定義手機單頁即時擦除動態容器鎖定（已拿掉大盤與櫃買容器） ---
 retracement_alert_spot = st.empty() 
 price_block = st.empty()  
 threshold_spot = st.empty()
@@ -61,10 +60,6 @@ if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code =
 if 'order_history' not in st.session_state: st.session_state.order_history = []
 if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
 if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
-
-if 'taiex_cache' not in st.session_state: st.session_state.taiex_cache = (0.0, 0.0)
-if 'otc_cache' not in st.session_state: st.session_state.otc_cache = (0.0, 0.0)
-if 'last_index_fetch_time' not in st.session_state: st.session_state.last_index_fetch_time = 0.0
 
 if st.session_state.last_stock_code != stock_code:
     st.session_state.open_price = 0.0
@@ -165,11 +160,9 @@ if api_key or test_mode:
             st.session_state.last_update_time = current_now
 
             # =========================================================================
-            # 📌 模擬劇本模式（極端量比必發訊號與浮點數除錯造市劇本）
+            # 📌 模擬劇本模式（已完全拿掉大盤與櫃買數據計算）
             # =========================================================================
             if test_mode:
-                taiex_price, taiex_change = 22135.45, -150.32
-                otc_price, otc_change = 265.12, 1.45
                 open_price = 29.00
                 stock_name = "友達" if code == "2409" else f"股票 {code}"
                 total_volume_lots = 95459
@@ -216,28 +209,9 @@ if api_key or test_mode:
                 bids = [{'price': round(current_price - 0.05 * i, 2), 'size': bids_base - i * 100} for i in range(1, 6)]
                 asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
             # =========================================================================
-            # 📌 盤中實時富果資料串接模式
+            # 📌 盤中實時富果資料串接模式（已完全移除大盤與櫃買指數請求）
             # =========================================================================
             else:
-                # 限制大盤更新頻率為 180 秒（3分鐘），大幅省下 API 流量額度
-                if current_now - st.session_state.last_index_fetch_time > 180.0:
-                    try:
-                        tx_q = client.stock.intraday.quote(symbol='IX0001')
-                        tx_p = tx_q.get('lastTrade', {}).get('price') or tx_q.get('closePrice') or 0.0
-                        tx_ref = tx_q.get('referencePrice', tx_p)
-                        st.session_state.taiex_cache = (tx_p, round(tx_p - tx_ref, 2))
-                    except: pass
-                    try:
-                        otc_q = client.stock.intraday.quote(symbol='IX0043')
-                        otc_p = otc_q.get('lastTrade', {}).get('price') or otc_q.get('closePrice') or 0.0
-                        otc_ref = otc_q.get('referencePrice', otc_p)
-                        st.session_state.otc_cache = (otc_p, round(otc_p - otc_ref, 2))
-                    except: pass
-                    st.session_state.last_index_fetch_time = current_now
-                
-                taiex_price, taiex_change = st.session_state.taiex_cache
-                otc_price, otc_change = st.session_state.otc_cache
-                
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('lastTrade', {}).get('price') or quote.get('closePrice') or 0.0
                 open_price = quote.get('priceOpen') or quote.get('openPrice') or current_price
@@ -286,16 +260,7 @@ if api_key or test_mode:
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
-            tx_color = "#ff4466" if taiex_change >= 0 else "#00ff88"
-            tx_sign = "+" if taiex_change > 0 else ""
-            otc_color = "#ff4466" if otc_change >= 0 else "#00ff88"
-            otc_sign = "+" if otc_change > 0 else ""
-            
-            index_html = f"<table style='width:100%; text-align:center; font-size:12px; margin-bottom:2px;'><tr><td style='width:49%; background-color:#161b22; padding:4px; border-radius:4px;'><span style='color:#888; font-size:10px;'>加權大盤</span><br><b style='color:{tx_color}; font-size:14px;'>{taiex_price:,.2f}</b> <span style='color:{tx_color}; font-size:10px;'>({tx_sign}{taiex_change})</span></td><td style='width:2%;'></td><td style='width:49%; background-color:#161b22; padding:4px; border-radius:4px;'><span style='color:#888; font-size:10px;'>櫃買指數</span><br><b style='color:{otc_color}; font-size:14px;'>{otc_price:,.2f}</b> <span style='color:{otc_color}; font-size:10px;'>({otc_sign}{otc_change})</span></td></tr></table>"
-            index_block.markdown(index_html, unsafe_allow_html=True)
-
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            # 🟢 UI 提示：當前指派門檻直接顯示您在摺疊選單中所設定的手動張數
             threshold_spot.caption(f"⚙️ 門檻: 完全依手動指定為 {manual_big_order_lots} 張 | 總量: {total_volume_lots:,} 張 | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}")
             
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
@@ -316,7 +281,6 @@ if api_key or test_mode:
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
             
             current_trade_key = (trade_time, tick_qty, tick_price)
-            # 🎯 🟢 關鍵過濾修正：大戶判定基準完全對接手動輸入的 manual_big_order_lots
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= manual_big_order_lots:
                 if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
                 elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
@@ -339,7 +303,6 @@ if api_key or test_mode:
                 f"</div>", unsafe_allow_html=True
             )
             
-            # ⚡ 執行解耦雙回傳決策（將手動調整的門檻同時拋入演算法提示中）
             decision, alert = process_market_logic(current_price, total_bid_vol, total_ask_vol, manual_big_order_lots, stock_name)
             
             if alert:
