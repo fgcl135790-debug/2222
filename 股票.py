@@ -236,47 +236,26 @@ def start_streaming(code):
             otc_price, otc_change = st.session_state.otc_cache
 
             # 抓取個股報價與基本資料
-            quote = client.stock.intraday.quote(code)
+            quote_data = client.stock.intraday.quote(code)
             ticker = client.stock.intraday.tickers(code)
             
             stock_name = ticker.get('name', code)
-            open_price = quote.get('openPrice', 0.0)
-            reference_price = quote.get('referencePrice', open_price)
-            raw_volume = quote.get('total', {}).get('volume', 0)
+            open_price = quote_data.get('openPrice', 0.0)
+            reference_price = quote_data.get('referencePrice', open_price)
+            raw_volume = quote_data.get('total', {}).get('volume', 0)
             total_volume_lots = int(raw_volume / 1000) if raw_volume else 0
 
-            raw_bids = quote.get('bids', [])
-            raw_asks = quote.get('asks', [])
-            bids = raw_bids if isinstance(raw_bids, list) else []
-            asks = raw_asks if isinstance(raw_asks, list) else []
-            while len(bids) < 5: bids.append({'price': 0.0, 'volume': 0})
-            while len(asks) < 5: asks.append({'price': 0.0, 'volume': 0})
-
-             # 確保有從 RestClient 精準呼叫 .get() 取得字典資料
-            if callable(quote):
-                quote_data = quote(code)
-            else:
-                quote_data = quote if isinstance(quote, dict) else {}
-
-            # 優化富果 API v1.0 lastTrade 的安全提煉機制
+            # 提煉最新價 (current_price)
             last_trade = quote_data.get('lastTrade', {})
-            if isinstance(last_trade, list) and len(last_trade) > 0:
-                last_trade = last_trade[0]
-            elif not isinstance(last_trade, dict):
-                last_trade = {}
-
-            tick_price = last_trade.get('price', 0.0)
+            tick_price = last_trade.get('price', 0.0) if isinstance(last_trade, dict) else 0.0
             
-            # 安全防禦機制：如果剛開盤 lastTrade 還是空值，先拿開盤價(openPrice)或昨收價(referencePrice)頂替作為 current_price
             if tick_price and tick_price > 0:
                 current_price = tick_price
             else:
-                current_price = quote_data.get('openPrice', 0.0)
-                if current_price == 0.0:
-                    current_price = quote_data.get('referencePrice', 0.0)
+                current_price = open_price if open_price > 0 else reference_price
 
-            tick_qty = int(last_trade.get('unit', 0) / 1000) if last_trade.get('unit') else 0
-            trade_time = last_trade.get('time', int(time_module.time() * 1000))
+            tick_qty = int(last_trade.get('unit', 0) / 1000) if isinstance(last_trade, dict) and last_trade.get('unit') else 0
+            trade_time = last_trade.get('time', int(time_module.time() * 1000)) if isinstance(last_trade, dict) else int(time_module.time() * 1000)
 
             raw_bids = quote_data.get('bids', [])
             raw_asks = quote_data.get('asks', [])
@@ -285,30 +264,23 @@ def start_streaming(code):
             while len(bids) < 5: bids.append({'price': current_price, 'volume': 0})
             while len(asks) < 5: asks.append({'price': current_price, 'volume': 0})
             
-            # 更新 trades_data
-            trades_data = [{'price': current_price, 'volume': last_trade.get('unit', 0), 'time': trade_time}] if current_price > 0.0 else []
-
-
-            last_bid = bids[0].get('price', 0.0) if bids and bids[0] else 0.0
-            last_ask = asks[0].get('price', 0.0) if asks and asks[0] else 0.0
-            
             # 使用當前 Tick 的資料來模擬 30 秒內的成交陣列
-            trades_data = [{'price': current_price, 'volume': last_trade.get('unit', 0), 'time': trade_time}] if current_price > 0.0 else []
+            trades_data = [{'price': current_price, 'volume': last_trade.get('unit', 0) if isinstance(last_trade, dict) else 0, 'time': trade_time}] if current_price > 0.0 else []
 
         # ==============================================================================
-        # 🎨 畫面獨立渲染、最少150張過濾與頻率保護防禦 (已加入盤前試撮邏輯防禦)
+        # 🎨 畫面獨立渲染、最少150張過濾與頻率保護防禦
         # ==============================================================================
         if current_price == 0.0 and not test_mode:
             current_time = datetime.now().time()
-            # 判定是否為 08:30 ~ 09:00 的盤前試撮時間
             if time(8, 30) <= current_time < time(9, 0):
                 st.info("📊 **目前為盤前試撮階段（08:30 ~ 09:00）**\n\n富果 API 於此時段不提供逐筆成交明細。大戶進攻火網將於 **09:00 正式開盤** 後自動啟動！")
             else:
-                st.warning("⏳ 目前非盤中交易時段，無即時成交數據...")
+                st.warning("⏳ 盤中無即時成交數據，正在等待第一筆撮合成交回傳...")
             return
+
         # 6. 計算與展開上半部資訊欄位
         ref_price_final = open_price if open_price > 0 else current_price
-        large_threshold_lots = 150.0  # 您指定的最少150張門檻大單防禦機制
+        large_threshold_lots = 150.0
 
         large_list, b_total, s_total, decision = process_large_orders(
             trades_data, large_threshold_lots, ref_price_final
@@ -330,14 +302,12 @@ def start_streaming(code):
 
         st.markdown("---")
 
-        # 核心佈局：手機版單欄、電腦版雙欄
-        layout_col1, layout_col2 = st.columns([1, 1])
+        # 核心佈局
+        layout_col1, layout_col2 = st.columns()
 
         with layout_col1:
             st.subheader("📋 盤口最佳五檔")
             render_order_book_chart(bids, asks)
-            
-            # 五檔量能數據面板
             st.markdown(f"""
             *   **買盤總委託**：`{int(t_bid_vol/1000)}` 張 (均量: `{b_pow/1000:.1f}` 張)
             *   **賣盤總委託**：`{int(t_ask_vol/1000)}` 張 (均量: `{a_pow/1000:.1f}` 張)
@@ -346,8 +316,6 @@ def start_streaming(code):
 
         with layout_col2:
             st.subheader("🔥 30秒大戶進攻火網")
-            
-            # 訊號狀態看板
             if "🚀" in decision:
                 st.success(decision)
             elif "💥" in decision:
@@ -366,7 +334,6 @@ def start_streaming(code):
             st.subheader("📜 大戶進攻即時紀錄 (30秒內明細)")
             if large_list:
                 rec_df = pd.DataFrame(large_list)
-                # 美化顯示欄位
                 rec_df['時間'] = pd.to_datetime(rec_df['time'], unit='ms').dt.strftime('%H:%M:%S')
                 rec_df['價格'] = rec_df['price'].map('{:.2f}'.format)
                 rec_df['張數'] = rec_df['lots'].map('{:.1f}'.format)
@@ -377,6 +344,12 @@ def start_streaming(code):
 
     except Exception as e:
         st.error(f"系統執行發生異常: {str(e)}")
+
+# ==============================================================================
+# 7. 啟動 Streamlit 渲染引擎
+# ==============================================================================
+start_streaming(code)
+
 
 # ==============================================================================
 # 7. 啟動 Streamlit 渲染引擎
