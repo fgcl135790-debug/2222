@@ -89,10 +89,10 @@ def get_dynamic_big_order_threshold(price, total_volume_lots):
         elif total_volume_lots >= 10000: return 50
         else: return 20
     elif price >= 20: 
-        if total_volume_lots >= 500000: return 150 
-        elif total_volume_lots >= 100000: return 300
-        elif total_volume_lots >= 50000: return 150
-        elif total_volume_lots >= 10000: return 80
+        if total_volume_lots >= 500000: return 50 
+        elif total_volume_lots >= 100000: return 30
+        elif total_volume_lots >= 50000: return 15
+        elif total_volume_lots >= 10000: return 8
         else: return 25
     else: 
         if total_volume_lots >= 500000: return 600
