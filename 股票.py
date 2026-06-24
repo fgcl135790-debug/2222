@@ -21,7 +21,7 @@ if 'initialized' not in st.session_state:
     st.session_state.cumulative_buy_large = 0.0
     st.session_state.cumulative_sell_large = 0.0
 
-# 2. 定義富果 REST 用戶端 (輕量封裝)
+# 2. 定義富果 REST 用戶端 (精準修正版)
 class RestClient:
     def __init__(self, api_key):
         self.api_key = api_key
@@ -45,16 +45,22 @@ class RestClient:
 
     @property
     def stock(self):
-        class IntradayService:
+        class StockService:
             def __init__(self, parent):
                 self.parent = parent
             @property
-            def quote(self): return RestClient.SubResource(self.parent, "quote")
-            @property
-            def candles(self): return RestClient.SubResource(self.parent, "candles")
-            @property
-            def tickers(self): return RestClient.SubResource(self.parent, "tickers")
-        return IntradayService(self)
+            def intraday(self):
+                class IntradayService:
+                    def __init__(self, p): self.p = p
+                    @property
+                    def quote(self): return RestClient.SubResource(self.p, "quote").get
+                    @property
+                    def candles(self): return RestClient.SubResource(self.p, "candles").get
+                    @property
+                    def tickers(self): return RestClient.SubResource(self.p, "tickers").get
+                return IntradayService(self.parent)
+        return StockService(self)
+
 # 3. 核心邏輯計算函式
 def calculate_metrics(bids, asks, total_volume, last_price):
     """計算最佳五檔的買賣盤氣勢與不平衡度"""
