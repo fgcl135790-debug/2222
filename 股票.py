@@ -69,10 +69,15 @@ big_order_threshold = st.number_input(
     step=10
 )
 
-
+# 2. 註解掉（或刪除）原本自動計算的函數呼叫
+# 原本可能是：threshold = get_dynamic_big_order_threshold(...)
+# 現在直接讓系統套用您輸入的數值：
+# 1. 先建立手動輸入框（建議放在 st.sidebar 或程式前端
 )
 
 # 2. 修改原本的函式（第 73 行附近），強迫它直接套用您手動輸入的張數
+def get_dynamic_big_order_threshold(*args, **kwargs):
+    return big_order_threshold
 
 
 
