@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit st
 import time
 from fugle_marketdata import RestClient, FugleAPIError
 
@@ -32,7 +32,7 @@ with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", e
         )
     with col_u2:
         manual_ratio = st.number_input(
-            "📊 委託量比 (倍)", 
+            "📊 參考量比 (倍)", 
             min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f"
         )
         
@@ -54,26 +54,62 @@ history_counter_spot = st.empty()
 
 st.markdown("<b style='font-size:14px; color:#ddd;'>📜 大戶進攻即時紀錄 (30秒內明細)</b>", unsafe_allow_html=True)
 log_spot = st.empty()
-# --- 🟢 初始化全域狀態機制 ---
-if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
-if 'wave_high_price' not in st.session_state: st.session_state.wave_high_price = 0.0
-if 'wave_low_price' not in st.session_state: st.session_state.wave_low_price = 999999.0
-if 'wave_alert_text' not in st.session_state: st.session_state.wave_alert_text = None       # 持久化警報內文
-if 'wave_alert_expires' not in st.session_state: st.session_state.wave_alert_expires = 0.0  # 警報停留時間戳
-if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
-if 'order_history' not in st.session_state: st.session_state.order_history = []
-if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
-if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
+import streamlit st
+import time
+from fugle_marketdata import RestClient, FugleAPIError
 
-if st.session_state.last_stock_code != stock_code:
-    st.session_state.open_price = 0.0
-    st.session_state.wave_high_price = 0.0
-    st.session_state.wave_low_price = 999999.0
-    st.session_state.wave_alert_text = None
-    st.session_state.wave_alert_expires = 0.0
-    st.session_state.order_history = []
-    st.session_state.last_trade_key = None
-    st.session_state.last_stock_code = stock_code
+# --- 📱 手機版原生視窗最佳化配置 ---
+st.set_page_config(page_title="行動大戶籌碼監控", page_icon="⚡", layout="centered")
+
+# 使用 CSS 壓縮手機端元件間距，並固定深色底色提高戶外辨識度
+st.markdown("""
+    <style>
+    .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem; max-width: 100% !important;}
+    h1 {font-size: 22px !important; margin-bottom: 5px !important;}
+    div[data-testid="stExpander"] {margin-bottom: 0.5rem;}
+    hr {margin: 6px 0 !important;}
+    p, span, label {font-size: 13px !important;}
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("⚡ 行動大戶籌碼五檔 APP")
+
+# --- 📱 把設定選單收納進主畫面的折疊收納盒 ---
+with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", expanded=False):
+    api_key = st.text_input("富果 API Key", type="password")
+    stock_code = st.text_input("股票代號", value="2409")
+    
+    # 建立雙欄位手動輸入區，完美適配手機單手操作
+    col_u1, col_u2 = st.columns(2)
+    with col_u1:
+        manual_big_order_lots = st.number_input(
+            "🔥 大戶定義 (張)", 
+            min_value=1, max_value=5000, value=150, step=10
+        )
+    with col_u2:
+        manual_ratio = st.number_input(
+            "📊 參考量比 (倍)", 
+            min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f"
+        )
+        
+    test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
+
+# --- 📱 定義手機單頁即時擦除動態容器鎖定 ---
+retracement_alert_spot = st.empty() 
+price_block = st.empty()  
+threshold_spot = st.empty()
+signal_spot = st.empty()
+st.markdown("<hr>", unsafe_allow_html=True)
+
+st.markdown("<b style='font-size:14px; color:#ddd;'>📋 盤口最佳五檔</b>", unsafe_allow_html=True)
+five_ticks_spot = st.empty()
+st.markdown("<hr>", unsafe_allow_html=True)
+
+st.markdown("<b style='font-size:14px; color:#ddd;'>🔥 30秒大戶進攻火網</b>", unsafe_allow_html=True)
+history_counter_spot = st.empty()
+
+st.markdown("<b style='font-size:14px; color:#ddd;'>📜 大戶進攻即時紀錄 (30秒內明細)</b>", unsafe_allow_html=True)
+log_spot = st.empty()
 # --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空 + 12秒警報留存版 + 量比判定已移除） ---
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, target_ratio, stock_name):
     open_p = st.session_state.open_price
@@ -141,7 +177,7 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
     else:
         log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
 
-    # 核心訊號判定（🟢 修正：已完全拔除量比限制，多空訊號只看價格與 30s 大戶連續頻率）
+    # 核心訊號判定（🟢 已完全拔除量比限制，多空訊號只看價格與 30s 大戶連續頻率）
     decision_text = f"⏳ 偵測中：未出現30秒內連續3筆精確大戶單 ({big_order_vol}張)，保持觀望..."
     if open_p > 0:
         if current_price >= open_p and recent_buy_cnt >= 3:
@@ -193,7 +229,7 @@ if api_key or test_mode:
                     last_bid, last_ask = current_price, round(current_price + 0.05, 2)
                     
                 elif cycle < 30:
-                    # 【階段 3：20~29秒】內盤大量砸貨 ➔ 觸發【做空訊號】
+                    # 【階段 3：20~29秒】內盤大量砸貨 ➔ 必定觸發【做空訊號】
                     raw_price = 28.90 - ((cycle - 20) * 0.05)
                     current_price = round(raw_price, 2)  
                     tick_qty = 600  
@@ -256,7 +292,7 @@ if api_key or test_mode:
                 last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
             # =========================================================================
-            # 📌 畫面渲染與雙手動設定最終攔截防線
+            # 📌 畫面渲染、即時量比雙色計算防線
             # =========================================================================
             if current_price == 0.0 and not test_mode:
                 st.warning("⏳ 目前無即時成交數據...")
@@ -264,12 +300,23 @@ if api_key or test_mode:
             if st.session_state.open_price == 0.0:
                 st.session_state.open_price = open_price
                 
-            mode_prefix = " (🌙測試中)" if test_mode else ""
-            # UI 提示：同步動態展示您指定的大戶張數與自訂量比（量比改為僅供畫面參考）
-            threshold_spot.caption(f"⚙️ 門檻: 依手動自訂為 {manual_big_order_lots} 張 (參考量比 {manual_ratio} 倍) | 總量: {total_volume_lots:,} 張 | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}")
-            
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
+            
+            # 🟢 核心新功能：計算當下精確的五檔委託量比，並透過顏色與文字指引多空策略
+            if total_bid_vol > 0 and total_ask_vol > 0:
+                if total_ask_vol >= total_bid_vol:
+                    current_real_ratio = total_ask_vol / total_bid_vol
+                    ratio_html = f"比值: <b style='color:#ff4466; font-size:14px;'>{current_real_ratio:.2f} 倍</b> (🔴 賣盤壓境：適合突破做多)"
+                else:
+                    current_real_ratio = total_bid_vol / total_ask_vol
+                    ratio_html = f"比值: <b style='color:#00ff88; font-size:14px;'>{current_real_ratio:.2f} 倍</b> (🟢 買盤托底：適合主力誘多做空)"
+            else:
+                ratio_html = "比值: 0.00 倍 (⏳ 計算中)"
+
+            mode_prefix = " (🌙測試中)" if test_mode else ""
+            # UI 提示：將即時算出的雙色量比結果漂亮地同步顯示在提示列中
+            threshold_spot.caption(f"⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}")
             
             five_ticks_html = "<table style='width:100%; text-align:center; font-size:13px; border-collapse:collapse; font-family:monospace;'><tr style='background-color:#111; height:22px;'><th style='color:#00ff88; width:25%; font-size:11px;'>買張</th><th style='color:#00ff88; width:25%; font-size:11px;'>買價</th><th style='color:#ff4466; width:25%; font-size:11px;'>賣價</th><th style='color:#ff4466; width:25%; font-size:11px;'>賣張</th></tr>"
             for i in range(5):
@@ -308,16 +355,13 @@ if api_key or test_mode:
                 f"</div>", unsafe_allow_html=True
             )
             
-            # 執行解耦雙回傳決策（將手動調整的門檻與參考用量比同時拋入，內部已解除限制）
             decision, alert = process_market_logic(current_price, total_bid_vol, total_ask_vol, manual_big_order_lots, manual_ratio, stock_name)
             
-            # 獨立警報區渲染：若盤中出現 1% 折返則以黃色專區醒目固化，維持 12 秒絕不被任何數據洗掉
             if alert:
                 retracement_alert_spot.warning(alert)
             else:
                 retracement_alert_spot.empty()
                 
-            # 渲染一般多空狀態燈
             if "做多" in decision: signal_spot.success(decision)
             elif "做空" in decision: signal_spot.error(decision)
             else: signal_spot.info(decision)
