@@ -148,13 +148,13 @@ def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_
 if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
-    # 速度配置：每 2 秒高速無感重新整理看盤模式
-    @st.fragment(run_every=2.0)
+    # 🟢 步伐修正：完美切換至您指定的每 1.5 秒高速局部重新整理看盤模式
+    @st.fragment(run_every=1.5)
     def start_streaming(code):
         try:
             current_now = time.time()
             elapsed_speed = current_now - st.session_state.last_update_time
-            if elapsed_speed > 10.0 or elapsed_speed <= 0: elapsed_speed = 2.00
+            if elapsed_speed > 10.0 or elapsed_speed <= 0: elapsed_speed = 1.50
             st.session_state.last_update_time = current_now
 
             # =========================================================================
@@ -207,7 +207,7 @@ if api_key or test_mode:
                 bids = [{'price': round(current_price - 0.05 * i, 2), 'size': bids_base - i * 100} for i in range(1, 6)]
                 asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
             # =========================================================================
-            # 📌 盤中實時富果資料串接模式
+            # 📌 盤中實時富果資料串接模式（已完全移除大盤與櫃買指數請求）
             # =========================================================================
             else:
                 quote = client.stock.intraday.quote(symbol=code)
@@ -261,7 +261,7 @@ if api_key or test_mode:
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
             
-            # 🟢 計算當下精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
+            # 🟢 計算精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
             if total_bid_vol > 0 and total_ask_vol > 0:
                 if total_ask_vol >= total_bid_vol:
                     current_real_ratio = total_ask_vol / total_bid_vol
@@ -273,7 +273,7 @@ if api_key or test_mode:
                 ratio_html = "量比: 0.00 倍 (⏳ 計算中)"
 
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            # 🟢 修正：將 threshold_spot 從 .caption() 換成支援 HTML 解析的 .markdown()，一秒清除藍色原始碼髒字
+            # UI 提示：將即時算出的雙色量比結果漂亮地同步顯示在副標題提示列中
             threshold_spot.markdown(
                 f"<div style='font-size:12px; color:#aaa;'>⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}</div>", 
                 unsafe_allow_html=True
@@ -288,7 +288,7 @@ if api_key or test_mode:
                 b_v_str = f"{b_vol:,}" if b_vol > 0 else "-"
                 b_p_str = f"{b_price:.2f}" if b_price > 0 else "-"
                 a_p_str = f"{a_price:.2f}" if a_price > 0 else "-"
-                a_v_str = f"{a_vol:,}" if a_vol > 0 else "-"
+                a_v_str = f"{a_vol:,}" if a_v_str > 0 else "-"
                 five_ticks_html += f"<tr style='height:24px; border-bottom:1px solid #1c1c1c;'><td style='color:#00ff88;'>{b_v_str}</td><td style='color:#00ff88; font-weight:bold;'>{b_p_str}</td><td style='color:#ff4466; font-weight:bold;'>{a_p_str}</td><td style='color:#ff4466;'>{a_v_str}</td></tr>"
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
