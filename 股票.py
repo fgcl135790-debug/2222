@@ -1,4 +1,4 @@
-import streamlit st
+import streamlit as st
 import time
 from fugle_marketdata import RestClient, FugleAPIError
 
