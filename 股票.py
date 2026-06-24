@@ -246,6 +246,49 @@ if api_key or test_mode:
                 last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
             # =========================================================================
+            # 📌 盤中實時富果資料串接模式（已完全移除大盤與櫃買指數請求）
+            # =========================================================================
+            else:
+                quote = client.stock.intraday.quote(symbol=code)
+                current_price = quote.get('lastTrade', {}).get('price') or quote.get('closePrice') or 0.0
+                open_price = quote.get('priceOpen') or quote.get('openPrice') or current_price
+                stock_name = quote.get('name') or f"股票 {code}"
+                
+                total_info = quote.get('total', {})
+                raw_volume = total_info.get('unit') or total_info.get('volume', 0)
+                if raw_volume == 0:
+                    try:
+                        ticker_info = client.stock.intraday.ticker(symbol=code)
+                        raw_volume = ticker_info.get('volume', 0)
+                        if stock_name == f"股票 {code}":
+                            stock_name = ticker_info.get('name') or f"股票 {code}"
+                    except: pass
+                
+                total_volume_lots = int(raw_volume) if raw_volume > 0 else 0
+                
+                raw_bids = quote.get('bids', [])
+                raw_asks = quote.get('asks', [])
+                bids = raw_bids if isinstance(raw_bids, list) else []
+                asks = raw_asks if isinstance(raw_asks, list) else []
+                while len(bids) < 5: bids.append({'price': 0.0, 'size': 0})
+                while len(asks) < 5: asks.append({'price': 0.0, 'size': 0})
+                
+                last_trade_raw = quote.get('lastTrade')
+                if isinstance(last_trade_raw, list) and len(last_trade_raw) > 0:
+                    last_trade = last_trade_raw
+                elif isinstance(last_trade_raw, dict):
+                    last_trade = last_trade_raw
+                else:
+                    last_trade = {}
+
+                tick_qty = int(last_trade.get('unit') or last_trade.get('size', 0))
+                tick_price = last_trade.get('price', current_price)
+                trade_time = last_trade.get('time', 0)
+                
+                last_bid = bids.get('price', 0.0) if bids and isinstance(bids, dict) else 0.0
+                last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
+
+            # =========================================================================
             # 📌 畫面渲染與雙手動設定最終攔截防線
             # =========================================================================
             if current_price == 0.0 and not test_mode:
@@ -269,7 +312,7 @@ if api_key or test_mode:
                 ratio_html = "量比: 0.00 倍 (⏳ 計算中)"
 
             mode_prefix = " (🌙測試中)" if test_mode else ""
-            # UI 提示：解析 HTML 乾淨量比，徹底消除原始碼
+            # UI 提示：將即時算出的雙色量比結果漂亮地同步顯示在副標題提示列中
             threshold_spot.markdown(
                 f"<div style='font-size:12px; color:#aaa;'>⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}</div>", 
                 unsafe_allow_html=True
@@ -312,7 +355,6 @@ if api_key or test_mode:
                 f"</div>", unsafe_allow_html=True
             )
             
-            # ⚡ 🟢 核心 BUG 修正：將原本誤傳的 dynamic_threshold 改為手動指定的 manual_big_order_lots
             decision, alert = process_market_logic(current_price, total_bid_vol, total_ask_vol, manual_big_order_lots, manual_ratio, stock_name)
             
             if alert:
@@ -320,9 +362,25 @@ if api_key or test_mode:
             else:
                 retracement_alert_spot.empty()
                 
-            if "做多" in decision: signal_spot.success(decision)
-            elif "做空" in decision: signal_spot.error(decision)
-            else: signal_spot.info(decision)
+            # =========================================================================
+            # 🎯 🟢 終極修正：拋棄美式綠漲紅跌，改用「自訂高亮度 HTML 燈號」完美回歸台股紅漲綠跌
+            # =========================================================================
+            if "做多" in decision:
+                signal_spot.markdown(
+                    f"<div style='background-color:#2e1518; padding:8px; border-radius:4px; border-left:5px solid #ff4466; color:#ff4466; font-size:14px; font-weight:bold;'>{decision}</div>", 
+                    unsafe_allow_html=True
+                )
+            elif "做空" in decision:
+                signal_spot.markdown(
+                    f"<div style='background-color:#122618; padding:8px; border-radius:4px; border-left:5px solid #00ff88; color:#00ff88; font-size:14px; font-weight:bold;'>{decision}</div>", 
+                    unsafe_allow_html=True
+                )
+            else:
+                # 觀望中維持原本中性的精緻深藍灰黑底色
+                signal_spot.markdown(
+                    f"<div style='background-color:#161b22; padding:8px; border-radius:4px; border-left:5px solid #58a6ff; color:#c9d1d9; font-size:13px;'>{decision}</div>", 
+                    unsafe_allow_html=True
+                )
                 
         except FugleAPIError as e:
             if "Rate limit exceeded" in str(e) or "429" in str(e):
