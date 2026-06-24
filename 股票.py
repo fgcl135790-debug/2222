@@ -61,40 +61,19 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
 
-# --- 💡 核心演算法：精細化大戶規則多維矩陣 ---
-def get_dynamic_big_order_threshold(price, total_volume_lots):
-    if price >= 1000: return 2       
-    elif price >= 500: return 5 if total_volume_lots >= 10000 else 3
-    elif price >= 200:
-        if total_volume_lots >= 500000: return 50
-        elif total_volume_lots >= 100000: return 40
-        elif total_volume_lots >= 50000: return 30
-        elif total_volume_lots >= 10000: return 15
-        else: return 5
-    elif price >= 100:
-        if total_volume_lots >= 500000: return 100
-        elif total_volume_lots >= 100000: return 80
-        elif total_volume_lots >= 50000: return 50
-        elif total_volume_lots >= 10000: return 30
-        else: return 10
-    elif price >= 50:
-        if total_volume_lots >= 500000: return 200
-        elif total_volume_lots >= 100000: return 150
-        elif total_volume_lots >= 50000: return 100
-        elif total_volume_lots >= 10000: return 50
-        else: return 20
-    elif price >= 20: 
-        if total_volume_lots >= 500000: return 500 
-        elif total_volume_lots >= 100000: return 300
-        elif total_volume_lots >= 50000: return 150
-        elif total_volume_lots >= 10000: return 80
-        else: return 25
-    else: 
-        if total_volume_lots >= 500000: return 600
-        elif total_volume_lots >= 100000: return 400
-        elif total_volume_lots >= 50000: return 200
-        elif total_volume_lots >= 10000: return 100
-        else: return 30
+# 1. 在介面上新增一個手動輸入框，預設值設為 200 張
+big_order_threshold = st.number_input(
+    "請輸入大戶判斷門檻（張數）", 
+    min_value=1, 
+    value=200, 
+    step=10
+)
+
+# 2. 註解掉（或刪除）原本自動計算的函數呼叫
+# 原本可能是：threshold = get_dynamic_big_order_threshold(...)
+# 現在直接讓系統套用您輸入的數值：
+threshold = big_order_threshold
+
 
 # --- 核心邏輯：當沖多空連續性辨識引擎（完整雙向波段折返 1% 清空版） ---
 def process_market_logic(current_price, total_bid_vol, total_ask_vol, big_order_vol, stock_name):
