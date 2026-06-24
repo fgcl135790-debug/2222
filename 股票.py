@@ -74,23 +74,26 @@ if st.session_state.last_stock_code != stock_code:
     st.session_state.order_history = []
     st.session_state.last_trade_key = None
     st.session_state.last_stock_code = stock_code
-# --- 核心邏輯：當沖多空連續性辨識引擎（精簡純粹版：只看價格與頻率） ---
+# --- 核心邏輯：當沖多空連續性辨識引擎（轉折全解耦：多空防禦隔離，100%亮燈除錯版） ---
 def process_market_logic(current_price, big_order_vol, stock_name):
     open_p = st.session_state.open_price
     now_time = time.time()
     
+    # 30秒滾動時間窗口清洗
     st.session_state.order_history = [
         x for x in st.session_state.order_history if now_time - x['timestamp'] <= 30
     ]
     recent_buy_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Buy')
     recent_sell_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Sell')
 
+    # 1. 多頭追蹤：只有當目前有買單發動時，才去更新或比對最高點
     if recent_buy_cnt > 0:
         if current_price > st.session_state.wave_high_price:
             st.session_state.wave_high_price = current_price
     else:
         st.session_state.wave_high_price = 0.0
 
+    # 2. 空頭追蹤：只有當目前有賣單砸貨時，才去更新或比對最低點
     if recent_sell_cnt > 0:
         if current_price < st.session_state.wave_low_price and current_price > 0:
             st.session_state.wave_low_price = current_price
@@ -98,30 +101,34 @@ def process_market_logic(current_price, big_order_vol, stock_name):
         st.session_state.wave_low_price = 999999.0
 
     RETRACEMENT = 0.01  
-    ALERT_DURATION = 12.0  # 設定警告警報在手機螢幕上強制維持留存的時間（秒）
+    ALERT_DURATION = 12.0  
+    retracement_triggered = False
 
-    # 多頭轉折判定：自高點回撤 1%
-    if st.session_state.wave_high_price > 0:
+    # 多頭轉折判定：有買單高點且當前處於回撤波 ➔ 僅在 recent_buy_cnt >= 3 建立後才允許觸發
+    if st.session_state.wave_high_price > 0 and recent_buy_cnt >= 3:
         drop_ratio = (st.session_state.wave_high_price - current_price) / st.session_state.wave_high_price
         if drop_ratio >= RETRACEMENT:
-            st.session_state.order_history = []
+            # 精準只清空多頭買單，不准牽連空頭砸貨數據！
+            st.session_state.order_history = [x for x in st.session_state.order_history if x['side'] != 'Buy']
             st.session_state.wave_high_price = 0.0
             recent_buy_cnt = 0
-            st.session_state.wave_alert_text = f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空籌碼火網。"
+            st.session_state.wave_alert_text = f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空買盤籌碼。"
             st.session_state.wave_alert_expires = now_time + ALERT_DURATION
+            retracement_triggered = True
 
-    # 空頭轉折判定：自低點反彈 1%
-    if st.session_state.wave_low_price < 999999.0:
+    # 空頭轉折判定：有賣單低點且當前處於強彈波 ➔ 僅在 recent_sell_cnt >= 3 建立後且未觸發多頭回撤才允許觸發
+    if st.session_state.wave_low_price < 999999.0 and recent_sell_cnt >= 3 and not retracement_triggered:
         rebound_ratio = (current_price - st.session_state.wave_low_price) / st.session_state.wave_low_price
         if rebound_ratio >= RETRACEMENT:
-            st.session_state.order_history = []
+            # 精準只清空空頭賣單，不准牽連多頭買盤數據！
+            st.session_state.order_history = [x for x in st.session_state.order_history if x['side'] != 'Sell']
             st.session_state.wave_low_price = 999999.0
             recent_sell_cnt = 0
             st.session_state.wave_alert_text = f"💥 空頭止跌：股價自這波低點 {st.session_state.wave_low_price} 元強彈達 {rebound_ratio*100:.2f}%！空方針對性遭到攻破，強制擦除砸貨紀錄。"
             st.session_state.wave_alert_expires = now_time + ALERT_DURATION
 
     if now_time > st.session_state.wave_alert_expires:
-        st.session_state.wave_alert_text = None  # 時間到了才允許擦除隱藏
+        st.session_state.wave_alert_text = None  
 
     # 渲染計分板
     counter_html = f"<table style='width:100%; text-align:center; font-size:13px;'><tr><td style='width:49%; background-color:#221215; padding:5px; border-radius:4px;'><span style='color:#ff4466;font-size:11px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:18px;'>{recent_buy_cnt} 次</b></td><td style='width:2%;'></td><td style='width:49%; background-color:#112215; padding:5px; border-radius:4px;'><span style='color:#00ff88;font-size:11px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:18px;'>{recent_sell_cnt} 次</b></td></tr></table>"
@@ -138,13 +145,13 @@ def process_market_logic(current_price, big_order_vol, stock_name):
     else:
         log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
 
-    # 動態變更未發信號時的沙漏提示文字
+    # 動態調整狀態說明
     if recent_sell_cnt > recent_buy_cnt:
         decision_text = f"⏳ 偵測中：未出現30秒內連續3筆精確內盤大單 ({big_order_vol}張)，保持觀望..."
     else:
         decision_text = f"⏳ 偵測中：未出現30秒內連續3筆精確外盤大單 ({big_order_vol}張)，保持觀望..."
         
-    # 多空訊號判定（🟢 已放寬多空門檻為包含平盤在內的 >= 與 <=，解決平盤不亮燈BUG）
+    # 多空訊號判定門檻 (包含平盤限制，放寬判定，徹底杜絕卡平盤不亮燈BUG)
     if open_p > 0:
         if current_price >= open_p and recent_buy_cnt >= 3:
             decision_text = f"🎯【🔥 做多訊號】{stock_name} 主力突破吃貨，順勢做多！"
@@ -166,7 +173,7 @@ if api_key or test_mode:
             st.session_state.last_update_time = current_now
 
             # =========================================================================
-            # 📌 模擬劇本模式（🟢 測試單價格與量比生成邏輯已與五檔撮合價量完美同步）
+            # 📌 模擬劇本模式（五檔與成交完全一拍撮合對齊）
             # =========================================================================
             if test_mode:
                 open_price = 29.00
@@ -198,7 +205,7 @@ if api_key or test_mode:
                     current_price = round(raw_price, 2)  
                     tick_qty = manual_big_order_lots + 20 
                     bids_base, asks_base = int(1000 * manual_ratio * 1.5), 1000
-                    # 🟢 做空段：成交價同步為買盤第一檔（bids第一檔 = current_price - 0.05），實現真正的內盤砸貨
+                    # 做空段修正：成交價必須為買盤第一檔（bids第一檔 = current_price - 0.05），這才是完美的內盤砸貨！
                     tick_price = round(current_price - 0.05, 2)
                     last_bid, last_ask = round(current_price - 0.05, 2), current_price
                     
@@ -321,6 +328,7 @@ if api_key or test_mode:
                 f"</div>", unsafe_allow_html=True
             )
             
+            # 精準接收自訂大戶張數，徹底解除因果衝突
             decision, alert = process_market_logic(current_price, manual_big_order_lots, stock_name)
             
             if alert:
@@ -329,7 +337,7 @@ if api_key or test_mode:
                 retracement_alert_spot.empty()
                 
             # =========================================================================
-            # 🎯 台股自訂紅漲綠跌 HTML 高對比訊號燈塊渲染（🟢 修正：已移除 "做做多" 錯字）
+            # 🎯 台股自訂紅漲綠跌 HTML 高對比訊號燈塊渲染
             # =========================================================================
             if "做多" in decision:
                 signal_spot.markdown(
@@ -357,4 +365,3 @@ if api_key or test_mode:
     start_streaming(stock_code)
 else:
     st.warning("🔑 請先展開上方選單輸入「富果 API Key」或勾選「模擬測試」以啟動功能。")
-
