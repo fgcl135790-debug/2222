@@ -1,8 +1,4 @@
 import streamlit as st
-import fugle_marketdata
+from fugle_marketdata import WebSocketClient
 
-st.title("Fugle Version Test")
-
-st.write("Version:")
-
-st.write(fugle_marketdata.__version__)
+st.write(WebSocketClient.__doc__)
