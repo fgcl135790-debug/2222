@@ -4,8 +4,6 @@ from fugle_marketdata import RestClient, FugleAPIError
 
 # --- 📱 手機版原生視窗最佳化配置 ---
 st.set_page_config(page_title="行動大戶籌碼監控", page_icon="⚡", layout="centered")
-
-# 使用 CSS 壓縮手機端元件間距，並固定深色底色提高戶外辨識度
 st.markdown("""
     <style>
     .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem; max-width: 100% !important;}
@@ -18,350 +16,226 @@ st.markdown("""
 
 st.title("⚡ 行動大戶籌碼五檔 APP")
 
-# --- 📱 把設定選單收納進主畫面的折疊收納盒 ---
-with st.expander("⚙️ 設定：輸入金鑰 / 更換股票 / 模擬測試", expanded=False):
+# --- 📱 設定選單 ---
+with st.expander("⚙️ 設定：輸入金鑰 / 更換股票", expanded=False):
     api_key = st.text_input("富果 API Key", type="password")
     stock_code = st.text_input("股票代號", value="2409")
-    
-    # 建立雙欄位手動輸入區，完美適配手機單手操作
     col_u1, col_u2 = st.columns(2)
     with col_u1:
-        manual_big_order_lots = st.number_input(
-            "🔥 大戶定義 (張)", 
-            min_value=1, max_value=5000, value=150, step=10
-        )
+        manual_big_order_lots = st.number_input("🔥 大戶定義 (張)", min_value=1, max_value=5000, value=150, step=10)
     with col_u2:
-        manual_ratio = st.number_input(
-            "📊 參考量比 (倍)", 
-            min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f"
-        )
-        
+        manual_ratio = st.number_input("📊 參考量比 (倍)", min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f")
     test_mode = st.checkbox("🌙 啟動深夜模擬測試 (半夜看畫面專用)", value=False)
 
-# --- 📱 定義手機單頁即時擦除動態容器鎖定 ---
-retracement_alert_spot = st.empty() # 獨立轉折警告專用欄位（與多空常規燈完全分離，留存 12 秒不被洗掉）
-price_block = st.empty()  
-threshold_spot = st.empty()
-signal_spot = st.empty()
+# --- 📱 定義 UI 容器鎖定 ---
+alert_spot = st.empty()          # 進階濾網警告區
+price_block = st.empty()         # 價格與大盤狀態區
+threshold_spot = st.empty()      # 資訊與量比狀態區
 st.markdown("<hr>", unsafe_allow_html=True)
 
 st.markdown("<b style='font-size:14px; color:#ddd;'>📋 盤口最佳五檔</b>", unsafe_allow_html=True)
 five_ticks_spot = st.empty()
 st.markdown("<hr>", unsafe_allow_html=True)
 
-st.markdown("<b style='font-size:14px; color:#ddd;'>🔥 30秒大戶進攻火網</b>", unsafe_allow_html=True)
-history_counter_spot = st.empty()
+st.markdown("<b style='font-size:14px; color:#ddd;'>🔥 多空動能燈號</b>", unsafe_allow_html=True)
+signal_spot = st.empty()
 
-st.markdown("<b style='font-size:14px; color:#ddd;'>📜 大戶進攻即時紀錄 (30秒內明細)</b>", unsafe_allow_html=True)
+st.markdown("<b style='font-size:14px; color:#ddd;'>📜 大戶進攻即時紀錄</b>", unsafe_allow_html=True)
 log_spot = st.empty()
-# --- 🟢 初始化全域狀態機制 ---
-if 'open_price' not in st.session_state: st.session_state.open_price = 0.0
-if 'wave_high_price' not in st.session_state: st.session_state.wave_high_price = 0.0
-if 'wave_low_price' not in st.session_state: st.session_state.wave_low_price = 999999.0
-if 'wave_alert_text' not in st.session_state: st.session_state.wave_alert_text = None       # 持久化警報內文
-if 'wave_alert_expires' not in st.session_state: st.session_state.wave_alert_expires = 0.0  # 警報停留時間戳
-if 'last_stock_code' not in st.session_state: st.session_state.last_stock_code = ""
-if 'order_history' not in st.session_state: st.session_state.order_history = []
-if 'last_trade_key' not in st.session_state: st.session_state.last_trade_key = None
-if 'last_update_time' not in st.session_state: st.session_state.last_update_time = time.time()
 
-if st.session_state.last_stock_code != stock_code:
-    st.session_state.open_price = 0.0
-    st.session_state.wave_high_price = 0.0
-    st.session_state.wave_low_price = 999999.0
-    st.session_state.wave_alert_text = None
-    st.session_state.wave_alert_expires = 0.0
-    st.session_state.order_history = []
-    st.session_state.last_trade_key = None
-    st.session_state.last_stock_code = stock_code
-# --- 核心邏輯：當沖多空連續性辨識引擎（轉折全解耦：多空防禦隔離，100%亮燈除錯版） ---
-def process_market_logic(current_price, big_order_vol, stock_name):
-    open_p = st.session_state.open_price
+# --- 🟢 初始化全域狀態機制 ---
+def init_session_state():
+    defaults = {
+        'open_price': 0.0, 'hod': 0.0, 'lod': 999999.0, 
+        'order_history': [], 'last_trade_key': None, 
+        'last_stock_code': "", 'last_market_update': 0, 
+        'market_trend': "⚪ 大盤震盪", 'last_bids_vol': 0, 'last_asks_vol': 0
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
+
+    if st.session_state.last_stock_code != stock_code:
+        for key in defaults.keys():
+            st.session_state[key] = defaults[key]
+        st.session_state.last_stock_code = stock_code
+
+init_session_state()
+
+# --- 核心邏輯：當沖多空連續性辨識引擎 ---
+def process_market_logic(current_price, vwap):
     now_time = time.time()
-    
-    # 30秒滾動時間窗口清洗
+    # 清理 30 秒前的歷史紀錄
     st.session_state.order_history = [
         x for x in st.session_state.order_history if now_time - x['timestamp'] <= 30
     ]
+    
     recent_buy_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Buy')
     recent_sell_cnt = sum(1 for x in st.session_state.order_history if x['side'] == 'Sell')
 
-    # 1. 多頭追蹤：只有當目前有買單發動時，才去更新或比對最高點
-    if recent_buy_cnt > 0:
-        if current_price > st.session_state.wave_high_price:
-            st.session_state.wave_high_price = current_price
+    if recent_buy_cnt > recent_sell_cnt:
+        if current_price > vwap:
+            return "🔥 突破均價！大戶連續外盤掃貨中，適合順勢做多"
+        else:
+            return "⚠️ 大戶買進，但股價仍在均價之下，注意抄底風險"
+    elif recent_sell_cnt > recent_buy_cnt:
+        if current_price < vwap:
+            return "🧊 跌破均價！大戶連續內盤砸貨，適合順勢做空"
+        else:
+            return "⚠️ 大戶賣出，但股價有撐，可能是假跌破"
     else:
-        st.session_state.wave_high_price = 0.0
+        return "⚖️ 目前多空交戰或無大單進出，建議觀望"
 
-    # 2. 空頭追蹤：只有當目前有賣單砸貨時，才去更新或比對最低點
-    if recent_sell_cnt > 0:
-        if current_price < st.session_state.wave_low_price and current_price > 0:
-            st.session_state.wave_low_price = current_price
-    else:
-        st.session_state.wave_low_price = 999999.0
-
-    RETRACEMENT = 0.01  
-    ALERT_DURATION = 12.0  
-    retracement_triggered = False
-
-    # 多頭轉折判定：有買單高點且當前處於回撤波 ➔ 僅在 recent_buy_cnt >= 3 建立後才允許觸發
-    if st.session_state.wave_high_price > 0 and recent_buy_cnt >= 3:
-        drop_ratio = (st.session_state.wave_high_price - current_price) / st.session_state.wave_high_price
-        if drop_ratio >= RETRACEMENT:
-            # 精準只清空多頭買單，不准牽連空頭砸貨數據！
-            st.session_state.order_history = [x for x in st.session_state.order_history if x['side'] != 'Buy']
-            st.session_state.wave_high_price = 0.0
-            recent_buy_cnt = 0
-            st.session_state.wave_alert_text = f"⚠️ 攻勢中斷：股價自這波攻擊高點 {st.session_state.wave_high_price} 元回撤達 {drop_ratio*100:.2f}%！多頭趨勢破壞，強制清空買盤籌碼。"
-            st.session_state.wave_alert_expires = now_time + ALERT_DURATION
-            retracement_triggered = True
-
-    # 空頭轉折判定：有賣單低點且當前處於強彈波 ➔ 僅在 recent_sell_cnt >= 3 建立後且未觸發多頭回撤才允許觸發
-    if st.session_state.wave_low_price < 999999.0 and recent_sell_cnt >= 3 and not retracement_triggered:
-        rebound_ratio = (current_price - st.session_state.wave_low_price) / st.session_state.wave_low_price
-        if rebound_ratio >= RETRACEMENT:
-            # 精準只清空空頭賣單，不准牽連多頭買盤數據！
-            st.session_state.order_history = [x for x in st.session_state.order_history if x['side'] != 'Sell']
-            st.session_state.wave_low_price = 999999.0
-            recent_sell_cnt = 0
-            st.session_state.wave_alert_text = f"💥 空頭止跌：股價自這波低點 {st.session_state.wave_low_price} 元強彈達 {rebound_ratio*100:.2f}%！空方針對性遭到攻破，強制擦除砸貨紀錄。"
-            st.session_state.wave_alert_expires = now_time + ALERT_DURATION
-
-    if now_time > st.session_state.wave_alert_expires:
-        st.session_state.wave_alert_text = None  
-
-    # 渲染計分板
-    counter_html = f"<table style='width:100%; text-align:center; font-size:13px;'><tr><td style='width:49%; background-color:#221215; padding:5px; border-radius:4px;'><span style='color:#ff4466;font-size:11px;'>🔴 30s外盤大單吃貨</span><br><b style='color:#ff4466;font-size:18px;'>{recent_buy_cnt} 次</b></td><td style='width:2%;'></td><td style='width:49%; background-color:#112215; padding:5px; border-radius:4px;'><span style='color:#00ff88;font-size:11px;'>🟢 30s內盤大單倒貨</span><br><b style='color:#00ff88;font-size:18px;'>{recent_sell_cnt} 次</b></td></tr></table>"
-    history_counter_spot.markdown(counter_html, unsafe_allow_html=True)
-
-    if st.session_state.order_history:
-        log_html = "<div style='background-color:#111; padding:6px; border-radius:4px; font-family:monospace; font-size:12px; max-height:100px; overflow-y:auto; text-align:left; border: 1px solid #222;'>"
-        for order in reversed(st.session_state.order_history):
-            color = "#ff4466" if order['side'] == 'Buy' else "#00ff88"
-            action = "外盤搶吃" if order['side'] == 'Buy' else "內盤砸貨"
-            log_html += f"<p style='margin:2px 0; color:{color}; line-height:1.2;'>⏱️ {order['time_str']} | {action} <b style='font-size:12px;'>{order['qty']}</b> 張 @ {order['price']} 元</p>"
-        log_html += "</div>"
-        log_spot.markdown(log_html, unsafe_allow_html=True)
-    else:
-        log_spot.caption("⏳ 30秒內無大戶表態紀錄...")
-
-    # 動態調整狀態說明
-    if recent_sell_cnt > recent_buy_cnt:
-        decision_text = f"⏳ 偵測中：未出現30秒內連續3筆精確內盤大單 ({big_order_vol}張)，保持觀望..."
-    else:
-        decision_text = f"⏳ 偵測中：未出現30秒內連續3筆精確外盤大單 ({big_order_vol}張)，保持觀望..."
+# --- 核心主迴圈 ---
+def start_streaming(code):
+    if not api_key and not test_mode:
+        return
         
-    # 多空訊號判定門檻 (包含平盤限制，放寬判定，徹底杜絕卡平盤不亮燈BUG)
-    if open_p > 0:
-        if current_price >= open_p and recent_buy_cnt >= 3:
-            decision_text = f"🎯【🔥 做多訊號】{stock_name} 主力突破吃貨，順勢做多！"
-        if current_price <= open_p and recent_sell_cnt >= 3:
-            decision_text = f"🎯【💥 做空訊號】{stock_name} 多頭防線潰散，順勢放空！"
+    client = RestClient(api_key=api_key) if not test_mode else None
 
-    return decision_text, st.session_state.wave_alert_text
-# --- API 連線與測試模式控制機制 ---
-if api_key or test_mode:
-    client = RestClient(api_key=api_key) if api_key else None
-    
-    # 速度配置：每 1.5 秒高速無感重新整理看盤模式
-    @st.fragment(run_every=2.0)
-    def start_streaming(code):
+    while True:
         try:
-            current_now = time.time()
-            elapsed_speed = current_now - st.session_state.last_update_time
-            if elapsed_speed > 10.0 or elapsed_speed <= 0: elapsed_speed = 2.0
-            st.session_state.last_update_time = current_now
-
-            # =========================================================================
-            # 📌 模擬劇本模式（五檔與成交完全一拍撮合對齊）
-            # =========================================================================
+            start_time = time.time()
+            alerts = []
+            
             if test_mode:
-                open_price = 29.00
-                stock_name = "友達" if code == "2409" else f"股票 {code}"
-                total_volume_lots = 95459
-                trade_time = int(current_now * 1000)
-                
-                cycle = int(current_now) % 40
-                
-                if cycle < 10:
-                    raw_price = 29.05 + (cycle * 0.04) 
-                    current_price = round(raw_price, 2)  
-                    tick_qty = manual_big_order_lots + 10 
-                    bids_base, asks_base = 1000, int(1000 * manual_ratio * 1.5)
-                    # 做多段：成交在外盤第一檔（asks第一檔 = current_price）
-                    tick_price = current_price
-                    last_bid, last_ask = round(current_price - 0.05, 2), current_price
-                    
-                elif cycle < 20:
-                    raw_price = 29.41 - ((cycle - 10) * 0.05)  
-                    current_price = round(raw_price, 2)  
-                    tick_qty = 0
-                    tick_price = current_price
-                    bids_base, asks_base = 2000, 2000
-                    last_bid, last_ask = current_price, round(current_price + 0.05, 2)
-                    
-                elif cycle < 30:
-                    raw_price = 28.90 - ((cycle - 20) * 0.05)
-                    current_price = round(raw_price, 2)  
-                    tick_qty = manual_big_order_lots + 20 
-                    bids_base, asks_base = int(1000 * manual_ratio * 1.5), 1000
-                    # 做空段修正：成交價必須為買盤第一檔（bids第一檔 = current_price - 0.05），這才是完美的內盤砸貨！
-                    tick_price = round(current_price - 0.05, 2)
-                    last_bid, last_ask = round(current_price - 0.05, 2), current_price
-                    
-                else:
-                    raw_price = 28.40 + ((cycle - 30) * 0.05)  
-                    current_price = round(raw_price, 2)  
-                    tick_qty = 0
-                    tick_price = current_price
-                    bids_base, asks_base = 2000, 2000
-                    last_bid, last_ask = round(current_price - 0.05, 2), current_price
-
-                bids = [{'price': round(current_price - 0.05 * i, 2), 'size': bids_base - i * 100} for i in range(1, 6)]
-                asks = [{'price': round(current_price + 0.05 * i, 2), 'size': asks_base + i * 100} for i in range(1, 6)]
-            # =========================================================================
-            # 📌 盤中實時富果資料串接模式（已完全移除大盤與櫃買指數請求）
-            # =========================================================================
+                # 模擬測試邏輯 (可自行擴充)
+                current_price, open_price, stock_name = 28.5, 28.0, "測試股"
+                tick_qty, tick_price = 200, 28.5
+                bids = [{'price': 28.45, 'size': 1500}] * 5
+                asks = [{'price': 28.50, 'size': 1200}] * 5
+                vwap = 28.3
+                trade_time = time.time()
             else:
+                # 1. 抓取大盤資訊 (每 60 秒一次)
+                if start_time - st.session_state.last_market_update > 60:
+                    try:
+                        m_quote = client.stock.intraday.quote(symbol="IX0001")
+                        m_price = m_quote.get('lastTrade', {}).get('price', 0)
+                        m_open = m_quote.get('priceOpen', 0)
+                        if m_price > m_open: st.session_state.market_trend = "🟢 大盤順風"
+                        elif m_price < m_open: st.session_state.market_trend = "🔴 大盤逆風"
+                        st.session_state.last_market_update = start_time
+                    except: pass
+
+                # 2. 抓取個股資訊
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('lastTrade', {}).get('price') or quote.get('closePrice') or 0.0
                 open_price = quote.get('priceOpen') or quote.get('openPrice') or current_price
                 stock_name = quote.get('name') or f"股票 {code}"
                 
+                # 計算 VWAP
                 total_info = quote.get('total', {})
-                raw_volume = total_info.get('unit') or total_info.get('volume', 0)
-                if raw_volume == 0:
-                    try:
-                        ticker_info = client.stock.intraday.ticker(symbol=code)
-                        raw_volume = ticker_info.get('volume', 0)
-                        if stock_name == f"股票 {code}":
-                            stock_name = ticker_info.get('name') or f"股票 {code}"
-                    except: pass
+                total_vol = total_info.get('tradeVolume', 0)
+                total_val = total_info.get('tradeValue', 0)
+                vwap = (total_val / total_vol) if total_vol > 0 else current_price
                 
-                total_volume_lots = int(raw_volume) if raw_volume > 0 else 0
-                
-                raw_bids = quote.get('bids', [])
-                raw_asks = quote.get('asks', [])
-                bids = raw_bids if isinstance(raw_bids, list) else []
-                asks = raw_asks if isinstance(raw_asks, list) else []
+                bids = quote.get('bids', [])
+                asks = quote.get('asks', [])
                 while len(bids) < 5: bids.append({'price': 0.0, 'size': 0})
                 while len(asks) < 5: asks.append({'price': 0.0, 'size': 0})
-                
-                last_trade_raw = quote.get('lastTrade')
-                if isinstance(last_trade_raw, list) and len(last_trade_raw) > 0:
-                    last_trade = last_trade_raw
-                elif isinstance(last_trade_raw, dict):
-                    last_trade = last_trade_raw
-                else:
-                    last_trade = {}
 
-                tick_qty = int(last_trade.get('unit') or last_trade.get('size', 0))
+                last_trade = quote.get('lastTrade', {})
+                tick_qty = int(last_trade.get('size', 0))
                 tick_price = last_trade.get('price', current_price)
                 trade_time = last_trade.get('time', 0)
-                
-                last_bid = bids.get('price', 0.0) if bids and isinstance(bids, dict) else 0.0
-                last_ask = asks.get('price', 0.0) if asks and isinstance(asks, dict) else 0.0
 
-            # =========================================================================
-            # 📌 畫面渲染與雙手動設定最終攔截防線
-            # =========================================================================
-            if current_price == 0.0 and not test_mode:
-                st.warning("⏳ 目前無即時成交數據...")
-                return
-            if st.session_state.open_price == 0.0:
-                st.session_state.open_price = open_price
-                
+            if current_price == 0.0:
+                continue
+
+            if st.session_state.open_price == 0.0: st.session_state.open_price = open_price
+            
+            # --- HOD / LOD 追蹤 ---
+            if current_price > st.session_state.hod and st.session_state.hod != 0:
+                alerts.append(f"🔥 突破今日新高: {current_price:.2f}")
+            if current_price < st.session_state.lod and st.session_state.lod != 999999.0:
+                alerts.append(f"🧊 跌破今日新低: {current_price:.2f}")
+            st.session_state.hod = max(st.session_state.hod, current_price)
+            st.session_state.lod = min(st.session_state.lod, current_price)
+
+            # --- 五檔抽單偵測 ---
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
             
-            # 計算精確的五檔委託量比，並透過顏色與文字指引多空策略（不影響大戶燈號）
-            if total_bid_vol > 0 and total_ask_vol > 0:
-                if total_ask_vol >= total_bid_vol:
-                    current_real_ratio = total_ask_vol / total_bid_vol
-                    ratio_html = f"量比: <b style='color:#ff4466; font-size:13px;'>{current_real_ratio:.2f} 倍</b> (<span style='color:#ff4466;'>🔴 賣盤壓境：適合突破做多</span>)"
-                else:
-                    current_real_ratio = total_bid_vol / total_ask_vol
-                    ratio_html = f"量比: <b style='color:#00ff88; font-size:13px;'>{current_real_ratio:.2f} 倍</b> (<span style='color:#00ff88;'>🟢 買盤托底：適合主力砸貨做空</span>)"
-            else:
-                ratio_html = "量比: 0.00 倍 (⏳ 計算中)"
+            if st.session_state.last_bids_vol > 0 and (st.session_state.last_bids_vol - total_bid_vol) > 500:
+                alerts.append("🚨 買盤異常撤單，當心支撐是假的！")
+            if st.session_state.last_asks_vol > 0 and (st.session_state.last_asks_vol - total_ask_vol) > 500:
+                alerts.append("🚨 賣盤異常撤單，上方壓力可能減輕！")
+                
+            st.session_state.last_bids_vol = total_bid_vol
+            st.session_state.last_asks_vol = total_ask_vol
 
-            mode_prefix = " (🌙測試中)" if test_mode else ""
-            threshold_spot.markdown(
-                f"<div style='font-size:12px; color:#aaa;'>⚙️ 門檻: {manual_big_order_lots} 張 | 今日總量: {total_volume_lots:,} 張 | {ratio_html} | ⚡ {elapsed_speed:.2f} 秒/次{mode_prefix}</div>", 
+            # 🐞 [Bug Fix] 正確取得內外盤比對基準
+            last_bid = bids[0].get('price', 0.0) if isinstance(bids, list) and len(bids) > 0 else 0.0
+            last_ask = asks[0].get('price', 0.0) if isinstance(asks, list) and len(asks) > 0 else 0.0
+
+            # --- 畫面渲染 ---
+            tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
+            p_diff = current_price - st.session_state.open_price
+            p_color = "#ff4466" if p_diff >= 0 else "#00ff88"
+            
+            price_block.markdown(
+                f"<div style='display:flex; justify-content:space-between; align-items:center; margin-bottom: 2px;'>"
+                f"<span style='font-size:16px; font-weight:bold;'>📈 {stock_name} ({code})</span>"
+                f"<span style='font-size:18px; font-weight:bold; color:{p_color};'>{current_price:.2f} </span>"
+                f"</div>"
+                f"<div style='font-size:12px; color:#aaa;'>大盤: {st.session_state.market_trend} | 均價線 (VWAP): {vwap:.2f} | 時間: {tw_time_str}</div>", 
                 unsafe_allow_html=True
             )
-            
-            five_ticks_html = "<table style='width:100%; text-align:center; font-size:13px; border-collapse:collapse; font-family:monospace;'><tr style='background-color:#111; height:22px;'><th style='color:#00ff88; width:25%; font-size:11px;'>買張</th><th style='color:#00ff88; width:25%; font-size:11px;'>買價</th><th style='color:#ff4466; width:25%; font-size:11px;'>賣價</th><th style='color:#ff4466; width:25%; font-size:11px;'>賣張</th></tr>"
+
+            # 五檔表格渲染 (略為簡化排版)
+            five_ticks_html = "<table style='width:100%; text-align:center; font-size:13px; border-collapse:collapse;'><tr style='background-color:#111; height:22px;'><th style='color:#00ff88;'>買張</th><th style='color:#00ff88;'>買價</th><th style='color:#ff4466;'>賣價</th><th style='color:#ff4466;'>賣張</th></tr>"
             for i in range(5):
-                b_price = bids[i].get('price', 0.0) if i < len(bids) and isinstance(bids[i], dict) else 0.0
-                b_vol = int(bids[i].get('size', 0)) if i < len(bids) and isinstance(bids[i], dict) else 0
-                a_price = asks[i].get('price', 0.0) if i < len(asks) and isinstance(asks[i], dict) else 0.0
-                a_vol = int(asks[i].get('size', 0)) if i < len(asks) and isinstance(asks[i], dict) else 0
-                b_v_str = f"{b_vol:,}" if b_vol > 0 else "-"
-                b_p_str = f"{b_price:.2f}" if b_price > 0 else "-"
-                a_p_str = f"{a_price:.2f}" if a_price > 0 else "-"
-                a_v_str = f"{a_vol:,}" if a_vol > 0 else "-"
-                five_ticks_html += f"<tr style='height:24px; border-bottom:1px solid #1c1c1c;'><td style='color:#00ff88;'>{b_v_str}</td><td style='color:#00ff88; font-weight:bold;'>{b_p_str}</td><td style='color:#ff4466; font-weight:bold;'>{a_p_str}</td><td style='color:#ff4466;'>{a_v_str}</td></tr>"
+                b_p = bids[i].get('price', 0.0) if isinstance(bids[i], dict) else 0.0
+                b_v = bids[i].get('size', 0) if isinstance(bids[i], dict) else 0
+                a_p = asks[i].get('price', 0.0) if isinstance(asks[i], dict) else 0.0
+                a_v = asks[i].get('size', 0) if isinstance(asks[i], dict) else 0
+                five_ticks_html += f"<tr style='border-bottom:1px solid #1c1c1c;'><td style='color:#00ff88;'>{b_v if b_v>0 else '-'}</td><td style='color:#00ff88;'>{b_p if b_p>0 else '-'}</td><td style='color:#ff4466;'>{a_p if a_p>0 else '-'}</td><td style='color:#ff4466;'>{a_v if a_v>0 else '-'}</td></tr>"
             five_ticks_html += "</table>"
             five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
-            
+
+            # --- 大戶明細捕捉 ---
             current_trade_key = (trade_time, tick_qty, tick_price)
             if current_trade_key != st.session_state.last_trade_key and tick_qty >= manual_big_order_lots:
-                if tick_price >= last_ask and last_ask > 0: current_side = 'Buy'
-                elif tick_price <= last_bid and last_bid > 0: current_side = 'Sell'
-                else: current_side = 'Buy' if tick_price >= st.session_state.open_price else 'Sell'
-                
-                tw_tick_time = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
-                st.session_state.order_history.append({
-                    'timestamp': time.time(), 'time_str': tw_tick_time,
+                if tick_price >= last_ask and last_ask > 0:
+                    current_side = 'Buy'  # 外盤
+                elif tick_price <= last_bid and last_bid > 0:
+                    current_side = 'Sell' # 內盤
+                else:
+                    current_side = 'Buy' if tick_price >= vwap else 'Sell' # 用 VWAP 當備用防線取代開盤價
+                    
+                st.session_state.order_history.insert(0, {
+                    'timestamp': time.time(), 'time_str': tw_time_str, 
                     'side': current_side, 'qty': tick_qty, 'price': tick_price
                 })
                 st.session_state.last_trade_key = current_trade_key
             
-            p_diff = current_price - st.session_state.open_price
-            p_color = "#ff4466" if p_diff >= 0 else "#00ff88"
-            tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
-            price_block.markdown(
-                f"<div style='display:flex; justify-content:space-between; align-items:center; margin-bottom: 2px;'>"
-                f"<span style='font-size:16px; font-weight:bold;'>📈 {stock_name} ({code})</span>"
-                f"<span style='font-size:18px; font-weight:bold; color:{p_color};'>{current_price:.2f} <span style='font-size:12px;'>({p_diff:+.2f})</span> <span style='color:#888; font-size:11px; font-weight:normal;'>{tw_time_str}</span></span>"
-                f"</div>", unsafe_allow_html=True
-            )
-            
-            # 精準接收自訂大戶張數，徹底解除因果衝突
-            decision, alert = process_market_logic(current_price, manual_big_order_lots, stock_name)
-            
-            if alert:
-                retracement_alert_spot.warning(alert)
+            # --- 警報與紀錄渲染 ---
+            if alerts:
+                alert_html = "".join([f"<div style='color:#ffa500; font-size:12px; margin-bottom:2px;'>{a}</div>" for a in alerts])
+                alert_spot.markdown(alert_html, unsafe_allow_html=True)
             else:
-                retracement_alert_spot.empty()
-                
-            # =========================================================================
-            # 🎯 台股自訂紅漲綠跌 HTML 高對比訊號燈塊渲染
-            # =========================================================================
-            if "做多" in decision:
-                signal_spot.markdown(
-                    f"<div style='background-color:#2e1518; padding:8px; border-radius:4px; border-left:5px solid #ff4466; color:#ff4466; font-size:14px; font-weight:bold;'>{decision}</div>", 
-                    unsafe_allow_html=True
-                )
-            elif "做空" in decision:
-                signal_spot.markdown(
-                    f"<div style='background-color:#122618; padding:8px; border-radius:4px; border-left:5px solid #00ff88; color:#00ff88; font-size:14px; font-weight:bold;'>{decision}</div>", 
-                    unsafe_allow_html=True
-                )
-            else:
-                signal_spot.markdown(
-                    f"<div style='background-color:#161b22; padding:8px; border-radius:4px; border-left:5px solid #58a6ff; color:#c9d1d9; font-size:13px;'>{decision}</div>", 
-                    unsafe_allow_html=True
-                )
-                
-        except FugleAPIError as e:
-            if "Rate limit exceeded" in str(e) or "429" in str(e):
-                st.error("🚨 偵測到富果超頻鎖定！啟動安全防守，強制進入後台冷卻 1 秒解鎖...")
-                time.sleep(1)
-            else: st.error(f"富果 API 異常: {e}")
-        except Exception as e: st.error(f"連線異常: {e}")
+                alert_spot.empty()
 
+            decision = process_market_logic(current_price, vwap)
+            signal_spot.markdown(f"<div style='padding:8px; border-radius:4px; background-color:#1c1c1c; color:#fff; font-size:13px;'>{decision}</div>", unsafe_allow_html=True)
+
+            log_html = ""
+            for item in st.session_state.order_history[:5]: # 只顯示近5筆
+                color = "#ff4466" if item['side'] == 'Buy' else "#00ff88"
+                action = "外盤買進" if item['side'] == 'Buy' else "內盤賣出"
+                log_html += f"<div style='color:{color}; font-size:13px;'>{item['time_str']} | {item['price']} | {item['qty']}張 ({action})</div>"
+            log_spot.markdown(log_html, unsafe_allow_html=True)
+
+        except FugleAPIError as e:
+            st.error("🚨 API 異常，冷卻中...")
+            time.sleep(2)
+        except Exception as e:
+            st.error(f"系統錯誤: {e}")
+            
+        time.sleep(2) # 2秒循環確保不超頻
+
+if api_key or test_mode:
     start_streaming(stock_code)
 else:
-    st.warning("🔑 請先展開上方選單輸入「富果 API Key」或勾選「模擬測試」以啟動功能。")
+    st.warning("🔑 請先展開上方選單輸入「富果 API Key」以啟動功能。")
