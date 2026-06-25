@@ -1,4 +1,4 @@
 import streamlit as st
-from fugle_marketdata.websocket.client import MESSAGE_EVENT
+import fugle_marketdata.websocket.client as client
 
-st.write(MESSAGE_EVENT)
+st.write(dir(client))
