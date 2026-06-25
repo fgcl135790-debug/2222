@@ -21,19 +21,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# =========================
-# Auto Refresh
-# =========================
 
-if not is_close:
-
-refresh_count = st_autorefresh(
-    interval=2000,
-    key="refresh"
-)
-
-# Debug
-st.sidebar.write(f"Refresh: {refresh_count}")
 
 # =========================
 # 台灣時間
@@ -240,6 +228,23 @@ is_close = quote.get(
     "is_close",
     False
 )
+
+# 收盤後停止自動刷新
+
+if not is_close:
+
+    refresh_count = st_autorefresh(
+        interval=2000,
+        key="refresh"
+    )
+
+    st.sidebar.success("🟢 即時更新中")
+
+else:
+
+    st.sidebar.warning("🔴 已收盤")
+
+
 # =========================
 # History
 # =========================
@@ -256,7 +261,7 @@ is_market_open = (
     (now.hour < 13 or (now.hour == 13 and now.minute <= 30))
 )
 
-if is_market_open:
+if is_market_open and not is_close:
 
     if (
         len(st.session_state.price_history) == 0
@@ -264,15 +269,13 @@ if is_market_open:
         st.session_state.price_history[-1] != price
     ):
 
-if not is_close:
+        st.session_state.price_history.append(
+            price
+        )
 
-    st.session_state.price_history.append(
-        price
-    )
-
-    st.session_state.volume_history.append(
-        volume
-    )
+        st.session_state.volume_history.append(
+            volume
+        )
 
 st.session_state.price_history = (
     st.session_state.price_history[-500:]
