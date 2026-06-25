@@ -73,16 +73,16 @@ st_autorefresh(interval=2000, key="refresh")
 # =========================
 
 if "price_history" not in st.session_state:
-st.session_state.price_history = []
+    st.session_state["price_history"] = []
 
 if "last_bid_vol" not in st.session_state:
-st.session_state.last_bid_vol = 0
+    st.session_state["last_bid_vol"] = 0
 
 if "last_ask_vol" not in st.session_state:
-st.session_state.last_ask_vol = 0
+    st.session_state["last_ask_vol"] = 0
 
 if "big_order_log" not in st.session_state:
-st.session_state.big_order_log = []
+    st.session_state["big_order_log"] = []
 
 # =========================
 
