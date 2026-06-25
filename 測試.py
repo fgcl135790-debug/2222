@@ -1,6 +1,7 @@
 import streamlit as st
 from fugle_marketdata import RestClient
 
+st.write("Fugle Version:", fugle_marketdata.__version__)
 st.title("Fugle Test")
 
 api_key = st.text_input("API Key")
