@@ -69,7 +69,16 @@ with st.sidebar:
         ]
     )
 
+    big_order_threshold = st.number_input(
+        "大戶門檻(張)",
+       min_value=10,
+       max_value=10000,
+       value=100,
+       step=10
+)
+
     sim_minutes = st.slider(
+
         "模擬時間(分鐘)",
         2,
         60,
@@ -286,7 +295,6 @@ st.dataframe(
 from datetime import datetime
 
 # 大戶門檻
-big_order_threshold = 100
 
 if volume >= big_order_threshold:
 
@@ -327,6 +335,29 @@ if volume >= big_order_threshold:
             "來源": data_source
         }
     )
+
+# =========================
+# 大戶成交紀錄顯示
+# =========================
+
+st.subheader("📜 大戶成交紀錄")
+
+if len(st.session_state.big_order_log) > 0:
+
+    log_df = pd.DataFrame(
+        st.session_state.big_order_log[:50]
+    )
+
+    st.dataframe(
+        log_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+else:
+
+    st.info("尚未偵測到大戶成交")
+
 # =========================
 # Export
 # =========================
