@@ -13,9 +13,21 @@ class ChartBuilder:
         volumes=None,
     ):
 
+        if len(prices) == 0:
+
+            fig = go.Figure()
+
+            fig.update_layout(
+                height=450
+            )
+
+            return fig
+
         df = pd.DataFrame({
             "price": prices
         })
+
+        # EMA
 
         df["ema5"] = (
             df["price"]
@@ -35,27 +47,33 @@ class ChartBuilder:
             .mean()
         )
 
+        # =========================
+        # 圖表
+        # =========================
+
         fig = make_subplots(
             rows=2,
             cols=1,
             shared_xaxes=True,
             vertical_spacing=0.02,
-            row_heights=[0.7, 0.3],   # 上70% 下30%
+            row_heights=[0.7, 0.3],
         )
 
+        # =========================
         # 價格
+        # =========================
+
         fig.add_trace(
             go.Scatter(
                 y=df["price"],
                 name="Price",
                 mode="lines",
-                line=dict(width=2),
+                line=dict(width=3),
             ),
             row=1,
             col=1,
         )
 
-        # EMA5
         fig.add_trace(
             go.Scatter(
                 y=df["ema5"],
@@ -67,7 +85,6 @@ class ChartBuilder:
             col=1,
         )
 
-        # EMA20
         fig.add_trace(
             go.Scatter(
                 y=df["ema20"],
@@ -79,7 +96,6 @@ class ChartBuilder:
             col=1,
         )
 
-        # EMA60
         fig.add_trace(
             go.Scatter(
                 y=df["ema60"],
@@ -91,8 +107,11 @@ class ChartBuilder:
             col=1,
         )
 
+        # =========================
         # 成交量
-        if volumes:
+        # =========================
+
+        if volumes and len(volumes) > 0:
 
             fig.add_trace(
                 go.Bar(
@@ -103,16 +122,22 @@ class ChartBuilder:
                 col=1,
             )
 
+        # =========================
+        # Layout
+        # =========================
+
         fig.update_layout(
 
-            height=500,  # 原本700改500
+            height=450,
 
             margin=dict(
-                l=10,
-                r=10,
+                l=5,
+                r=5,
                 t=10,
-                b=10,
+                b=5,
             ),
+
+            hovermode="x unified",
 
             legend=dict(
                 orientation="h",
@@ -120,10 +145,7 @@ class ChartBuilder:
                 y=1.02,
                 xanchor="right",
                 x=1,
-                font=dict(size=10)
             ),
-
-            hovermode="x unified",
         )
 
         fig.update_xaxes(
