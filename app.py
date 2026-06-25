@@ -1,4 +1,7 @@
 import streamlit as st
+
+st.write("APP START")
+
 import pandas as pd
 
 from fugle_provider import FugleProvider
