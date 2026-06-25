@@ -194,6 +194,8 @@ try:
             stock_code
         )
 
+        st.sidebar.write(quote)
+
     else:
 
         engine = SimulationEngine(
