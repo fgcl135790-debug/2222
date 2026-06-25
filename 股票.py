@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 import time
 from fugle_marketdata import RestClient, FugleAPIError
 
@@ -66,7 +67,6 @@ init_session_state()
 # --- 核心邏輯：當沖多空連續性辨識引擎 ---
 def process_market_logic(current_price, vwap):
     now_time = time.time()
-    # 清理 30 秒前的歷史紀錄
     st.session_state.order_history = [
         x for x in st.session_state.order_history if now_time - x['timestamp'] <= 30
     ]
@@ -100,7 +100,6 @@ def start_streaming(code):
             alerts = []
             
             if test_mode:
-                # 模擬測試邏輯
                 current_price, open_price, stock_name = 30.40, 30.0, "測試友達"
                 tick_qty, tick_price = 200, 30.40
                 bids = [{'price': 30.40 - i*0.05, 'size': 1000 + i*150} for i in range(5)]
@@ -108,7 +107,6 @@ def start_streaming(code):
                 vwap = 30.25
                 trade_time = time.time()
             else:
-                # 1. 抓取大盤資訊 (每 60 秒一次)
                 if start_time - st.session_state.last_market_update > 60:
                     try:
                         m_quote = client.stock.intraday.quote(symbol="IX0001")
@@ -119,13 +117,11 @@ def start_streaming(code):
                         st.session_state.last_market_update = start_time
                     except: pass
 
-                # 2. 抓取個股資訊
                 quote = client.stock.intraday.quote(symbol=code)
                 current_price = quote.get('lastTrade', {}).get('price') or quote.get('closePrice') or 0.0
                 open_price = quote.get('priceOpen') or quote.get('openPrice') or current_price
                 stock_name = quote.get('name') or f"股票 {code}"
                 
-                # 計算 VWAP
                 total_info = quote.get('total', {})
                 total_vol = total_info.get('tradeVolume', 0)
                 total_val = total_info.get('tradeValue', 0)
@@ -146,7 +142,6 @@ def start_streaming(code):
 
             if st.session_state.open_price == 0.0: st.session_state.open_price = open_price
             
-            # --- HOD / LOD 追蹤 ---
             if current_price > st.session_state.hod and st.session_state.hod != 0:
                 alerts.append(f"🔥 突破今日新高: {current_price:.2f}")
             if current_price < st.session_state.lod and st.session_state.lod != 999999.0:
@@ -154,7 +149,6 @@ def start_streaming(code):
             st.session_state.hod = max(st.session_state.hod, current_price)
             st.session_state.lod = min(st.session_state.lod, current_price)
 
-            # --- 五檔抽單偵測 ---
             total_bid_vol = sum([b.get('size', 0) for b in bids if isinstance(b, dict)])
             total_ask_vol = sum([a.get('size', 0) for a in asks if isinstance(a, dict)])
             
@@ -174,7 +168,6 @@ def start_streaming(code):
             p_diff = current_price - st.session_state.open_price
             p_color = "#ff4466" if p_diff >= 0 else "#00ff88"
             
-            # 強制將主要股價與 VWAP 設定為放大樣式
             price_block.markdown(
                 f"<div style='background-color: #1E1E1E; padding: 18px; border-radius: 8px; margin-bottom: 5px; border: 1px solid #333;'>"
                 f"  <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;'>"
@@ -188,38 +181,33 @@ def start_streaming(code):
                 unsafe_allow_html=True
             )
 
-            # --- 五檔表格渲染 (修正小數點過多問題) ---
-            five_ticks_html = (
-                "<table style='width:100%; text-align:center; font-size:15px; border-collapse:collapse;'>"
-                "<tr style='background-color:#111; height:26px;'>"
-                "<th style='color:#00ff88; font-size:13px;'>買張</th>"
-                "<th style='color:#00ff88; font-size:13px;'>買價</th>"
-                "<th style='color:#ff4466; font-size:13px;'>賣價</th>"
-                "<th style='color:#ff4466; font-size:13px;'>賣張</th>"
-                "</tr>"
-            )
-            for i in range(5):
-                b_p = bids[i].get('price', 0.0) if isinstance(bids[i], dict) else 0.0
-                b_v = bids[i].get('size', 0) if isinstance(bids[i], dict) else 0
-                a_p = asks[i].get('price', 0.0) if isinstance(asks[i], dict) else 0.0
-                a_v = asks[i].get('size', 0) if isinstance(asks[i], dict) else 0
-                
-                # 關鍵修正點：利用 f"{value:.2f}" 格式化價格，若小於等於 0 則顯示 "-"
-                b_p_str = f"{b_p:.2f}" if b_p > 0 else "-"
-                a_p_str = f"{a_p:.2f}" if a_p > 0 else "-"
-                b_v_str = str(b_v) if b_v > 0 else "-"
-                a_v_str = str(a_v) if a_v > 0 else "-"
-                
-                five_ticks_html += (
-                    f"<tr style='border-bottom:1px solid #1c1c1c; height:28px;'>"
-                    f"<td style='color:#00ff88;'>{b_v_str}</td>"
-                    f"<td style='color:#00ff88; font-weight:bold;'>{b_p_str}</td>"
-                    f"<td style='color:#ff4466; font-weight:bold;'>{a_p_str}</td>"
-                    f"<td style='color:#ff4466;'>{a_v_str}</td>"
-                    f"</tr>"
-                )
-            five_ticks_html += "</table>"
-            five_ticks_spot.markdown(five_ticks_html, unsafe_allow_html=True)
+            # ==========================================
+            # ✨ 核心修正：改回原生漂亮的 DataFrame，並精準控制小數點
+            # ==========================================
+            df_5_ticks = pd.DataFrame({
+                "買張": [b.get('size', 0) if isinstance(b, dict) else 0 for b in bids],
+                "買價": [b.get('price', 0.0) if isinstance(b, dict) else 0.0 for b in bids],
+                "賣價": [a.get('price', 0.0) if isinstance(a, dict) else 0.0 for a in asks],
+                "賣張": [a.get('size', 0) if isinstance(a, dict) else 0 for a in asks]
+            })
+
+            # 自訂格式化函數 (沒有掛單顯示 '-'，有掛單強制顯示兩位小數)
+            def format_price(val): return f"{val:.2f}" if val > 0 else "-"
+            def format_size(val): return f"{int(val)}" if val > 0 else "-"
+
+            styled_df = df_5_ticks.style\
+                .format({
+                    '買價': format_price, 
+                    '賣價': format_price,
+                    '買張': format_size,
+                    '賣張': format_size
+                })\
+                .map(lambda x: 'color: #00ff88; font-weight: bold;', subset=['買張', '買價'])\
+                .map(lambda x: 'color: #ff4466; font-weight: bold;', subset=['賣價', '賣張'])
+
+            # 注入回原本的表格位置
+            five_ticks_spot.dataframe(styled_df, use_container_width=True, hide_index=True)
+            # ==========================================
 
             # --- 大戶明細捕捉 ---
             current_trade_key = (trade_time, tick_qty, tick_price)
@@ -263,7 +251,7 @@ def start_streaming(code):
         except Exception as e:
             st.error(f"系統錯誤: {e}")
             
-        time.sleep(2) # 2秒循環確保不超頻
+        time.sleep(2)
 
 # 啟動主流程
 start_streaming(stock_code)
