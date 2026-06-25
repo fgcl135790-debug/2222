@@ -333,7 +333,7 @@ st.title(
 
 st.caption(
     f"🕒 現在時間："
-    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    f"{datetime.strftime('%Y-%m-%d %H:%M:%S')}"
 )
 
 # =========================
@@ -914,5 +914,5 @@ st.caption(
 
 st.caption(
     f"更新時間："
-    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    f"{datetime.strftime('%Y-%m-%d %H:%M:%S')}"
 )
