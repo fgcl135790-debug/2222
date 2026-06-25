@@ -1,6 +1,6 @@
 import streamlit as st
 from fugle_marketdata import WebSocketClient
 
-st.write(WebSocketClient)
+help_text = WebSocketClient.**doc**
 
-st.write(dir(WebSocketClient))
+st.write(help_text)
