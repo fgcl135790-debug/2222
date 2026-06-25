@@ -1,7 +1,16 @@
 import streamlit as st
 import pandas as pd
 
-from datetime import datetime
+from datetime import datetimefrom datetime import datetime
+from zoneinfo import ZoneInfo
+
+taipei_time = datetime.now(
+    ZoneInfo("Asia/Taipei")
+)
+
+st.caption(
+    f"🕒 現在時間：{taipei_time.strftime('%Y-%m-%d %H:%M:%S')}"
+)
 
 from fugle_provider import FugleProvider
 from simulation_engine import SimulationEngine
