@@ -283,29 +283,50 @@ st.dataframe(
 # Big Order Log
 # =========================
 
-if volume >= 100:
+from datetime import datetime
+
+# 大戶門檻
+big_order_threshold = 100
+
+if volume >= big_order_threshold:
+
+    # 等級判斷
+    if volume >= 5000:
+        level = "🐋 超級主力"
+
+    elif volume >= 1000:
+        level = "🔥 主力大單"
+
+    elif volume >= 300:
+        level = "📈 法人等級"
+
+    else:
+        level = "💰 大戶"
+
+    # 買賣方向判斷
+    total_bid = sum(x["size"] for x in bids)
+    total_ask = sum(x["size"] for x in asks)
+
+    if total_bid > total_ask:
+        direction = "🟢 主力買進"
+
+    elif total_ask > total_bid:
+        direction = "🔴 主力賣出"
+
+    else:
+        direction = "⚪ 中性"
 
     st.session_state.big_order_log.insert(
         0,
         {
-            "價格": price,
+            "時間": datetime.now().strftime("%H:%M:%S"),
+            "價格": round(price, 2),
             "張數": volume,
+            "等級": level,
+            "方向": direction,
             "來源": data_source
         }
     )
-
-st.subheader("📜 大戶成交紀錄")
-
-log_df = pd.DataFrame(
-    st.session_state.big_order_log[:50]
-)
-
-st.dataframe(
-    log_df,
-    use_container_width=True,
-    hide_index=True
-)
-
 # =========================
 # Export
 # =========================
