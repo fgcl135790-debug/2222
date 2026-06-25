@@ -13,3 +13,6 @@ st.write("CHART OK")
 
 from exporters import Exporter
 st.write("EXPORTER OK")
+
+from fugle_provider import FugleProvider
+st.write("FUGLE OK")
