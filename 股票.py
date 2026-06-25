@@ -5,12 +5,14 @@ from fugle_marketdata import RestClient, FugleAPIError
 
 # --- 📱 手機版原生視窗最佳化配置 ---
 st.set_page_config(page_title="行動大戶籌碼監控", page_icon="⚡", layout="wide")
+
+# 修正：移除對 p 和 span 的強制覆蓋，避免吃掉我們自訂的股價大字體
 st.markdown("""
     <style>
     .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem; max-width: 100% !important;}
     h1 {font-size: 22px !important; margin-bottom: 5px !important;}
     hr {margin: 8px 0 !important;}
-    p, span, label {font-size: 14px !important;}
+    label {font-size: 14px !important;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -27,7 +29,7 @@ with st.sidebar:
         manual_ratio = st.number_input("📊 參考量比 (倍)", min_value=1.0, max_value=5.0, value=1.2, step=0.1, format="%.1f")
     test_mode = st.checkbox("🌙 啟動深夜模擬測試", value=False)
 
-# --- 📱 頂部固定狀態提示區 (防止右下角遮擋) ---
+# --- 📱 頂部固定狀態提示區 ---
 if not api_key and not test_mode:
     st.warning("🔑 請先展開左側側邊欄輸入「富果 API Key」以啟動功能。")
     st.stop()
@@ -122,10 +124,20 @@ def start_streaming(code):
                 open_price = quote.get('priceOpen') or quote.get('openPrice') or current_price
                 stock_name = quote.get('name') or f"股票 {code}"
                 
+                # 計算 VWAP (並修正常見的「張/股」單位失真問題，解決出現 30135.22 的狀況)
                 total_info = quote.get('total', {})
                 total_vol = total_info.get('tradeVolume', 0)
                 total_val = total_info.get('tradeValue', 0)
-                vwap = (total_val / total_vol) if total_vol > 0 else current_price
+                
+                if total_vol > 0:
+                    vwap = total_val / total_vol
+                    if vwap > current_price * 500:  # 代表 API 回傳除到了「張」，自動修正回「股」
+                        vwap = vwap / 1000
+                else:
+                    vwap = current_price
+                
+                # 優先使用官方回傳的平均價
+                vwap = quote.get('avgPrice') or vwap
                 
                 bids = quote.get('bids', [])
                 asks = quote.get('asks', [])
@@ -163,26 +175,30 @@ def start_streaming(code):
             last_bid = bids[0].get('price', 0.0) if isinstance(bids, list) and len(bids) > 0 else 0.0
             last_ask = asks[0].get('price', 0.0) if isinstance(asks, list) and len(asks) > 0 else 0.0
 
-            # --- 畫面渲染：放大顯示區 ---
+            # ==========================================
+            # ✨ 核心修正：使用穩定結構重寫價格區塊 HTML
+            # ==========================================
             tw_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() + 28800))
             p_diff = current_price - st.session_state.open_price
             p_color = "#ff4466" if p_diff >= 0 else "#00ff88"
             
-            price_block.markdown(
-                f"<div style='background-color: #1E1E1E; padding: 18px; border-radius: 8px; margin-bottom: 5px; border: 1px solid #333;'>"
-                f"  <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;'>"
-                f"    <span style='font-size:26px; font-weight:bold; color:white;'>📈 {stock_name} ({code})</span>"
-                f"    <span style='font-size:34px; font-weight:bold; color:{p_color};'>{current_price:.2f}</span>"
-                f"  </div>"
-                f"  <div style='font-size:15px; color:#ccc; border-top: 1px solid #444; padding-top: 10px;'>"
-                f"    大盤: {st.session_state.market_trend} &nbsp;|&nbsp; 均價線 (VWAP): <b style='color:#fff;'>{vwap:.2f}</b> &nbsp;|&nbsp; 時間: {tw_time_str}"
-                f"  </div>"
-                f"</div>", 
-                unsafe_allow_html=True
-            )
+            # 使用多行字串與穩定的 div，避開 CSS 覆蓋問題
+            html_content = f"""
+            <div style="background-color: #1e1e1e; padding: 18px; border-radius: 8px; border: 1px solid #333; margin-bottom: 5px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="margin:0; padding:0; color:white; font-size: 26px; font-weight: bold;">📈 {stock_name} ({code})</div>
+                    <div style="margin:0; padding:0; color:{p_color}; font-size: 36px; font-weight: bold;">{current_price:.2f}</div>
+                </div>
+                <div style="height:1px; background-color:#444; margin:12px 0;"></div>
+                <div style="font-size:15px; color:#ccc;">
+                    大盤: {st.session_state.market_trend} &nbsp;|&nbsp; 均價線 (VWAP): <strong style="color:white;">{vwap:.2f}</strong> &nbsp;|&nbsp; 時間: {tw_time_str}
+                </div>
+            </div>
+            """
+            price_block.markdown(html_content, unsafe_allow_html=True)
 
             # ==========================================
-            # ✨ 核心修正：改回原生漂亮的 DataFrame，並精準控制小數點
+            # ✨ 五檔 DataFrame (維持精準兩位小數與美觀無外框)
             # ==========================================
             df_5_ticks = pd.DataFrame({
                 "買張": [b.get('size', 0) if isinstance(b, dict) else 0 for b in bids],
@@ -191,7 +207,6 @@ def start_streaming(code):
                 "賣張": [a.get('size', 0) if isinstance(a, dict) else 0 for a in asks]
             })
 
-            # 自訂格式化函數 (沒有掛單顯示 '-'，有掛單強制顯示兩位小數)
             def format_price(val): return f"{val:.2f}" if val > 0 else "-"
             def format_size(val): return f"{int(val)}" if val > 0 else "-"
 
@@ -205,9 +220,7 @@ def start_streaming(code):
                 .map(lambda x: 'color: #00ff88; font-weight: bold;', subset=['買張', '買價'])\
                 .map(lambda x: 'color: #ff4466; font-weight: bold;', subset=['賣價', '賣張'])
 
-            # 注入回原本的表格位置
             five_ticks_spot.dataframe(styled_df, use_container_width=True, hide_index=True)
-            # ==========================================
 
             # --- 大戶明細捕捉 ---
             current_trade_key = (trade_time, tick_qty, tick_price)
