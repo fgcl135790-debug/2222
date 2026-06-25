@@ -16,3 +16,11 @@ st.write("EXPORTER OK")
 
 from fugle_provider import FugleProvider
 st.write("FUGLE OK")
+
+st.set_page_config(
+    page_title="REST PRO",
+    page_icon="⚡",
+    layout="wide",
+)
+
+st.write("CONFIG OK")
