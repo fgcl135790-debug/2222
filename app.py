@@ -9,6 +9,9 @@ from market_analyzer import MarketAnalyzer
 from charts import ChartBuilder
 from exporters import Exporter
 
+from streamlit_autorefresh import st_autorefresh
+
+
 # =========================
 # Page Config
 # =========================
@@ -18,6 +21,13 @@ st.set_page_config(
     page_icon="⚡",
     layout="wide",
 )
+
+# 每2秒自動刷新
+st_autorefresh(
+    interval=2000,
+    key="refresh"
+)
+
 
 # =========================
 # Session State
