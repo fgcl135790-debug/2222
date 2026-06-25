@@ -5,4 +5,4 @@ import inspect
 ws = WebSocketClient(api_key="TEST")
 stock = ws.stock
 
-st.text(inspect.getsource(stock.on))
+st.text(inspect.getsource(stock.__class__))
