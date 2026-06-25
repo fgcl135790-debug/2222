@@ -211,7 +211,47 @@ st.plotly_chart(
 # =========================
 # Best 5
 # =========================
+# =========================
+# AI交易判斷
+# =========================
 
+total_bid = sum(x["size"] for x in bids)
+total_ask = sum(x["size"] for x in asks)
+
+action, confidence, reasons = (
+    MarketAnalyzer.trading_signal(
+        price,
+        vwap,
+        ema5,
+        ema20,
+        ema60,
+        total_bid,
+        total_ask,
+    )
+)
+
+st.subheader("🤖 AI交易判斷")
+
+if action == "做多":
+
+    st.success(
+        f"🟢 做多優勢｜信心度 {confidence}%"
+    )
+
+elif action == "做空":
+
+    st.error(
+        f"🔴 做空優勢｜信心度 {confidence}%"
+    )
+
+else:
+
+    st.warning(
+        f"🟡 觀望｜信心度 {confidence}%"
+    )
+
+for reason in reasons:
+    st.write(f"✓ {reason}")
 st.subheader("📋 最佳五檔")
 
 while len(bids) < 5:
