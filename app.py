@@ -236,13 +236,33 @@ asks = quote["asks"]
 # History
 # =========================
 
-st.session_state.price_history.append(
-    price
+from zoneinfo import ZoneInfo
+
+now = datetime.now(
+    ZoneInfo("Asia/Taipei")
 )
 
-st.session_state.volume_history.append(
-    volume
+is_market_open = (
+    (now.hour > 9 or (now.hour == 9 and now.minute >= 0))
+    and
+    (now.hour < 13 or (now.hour == 13 and now.minute <= 30))
 )
+
+if is_market_open:
+
+    if (
+        len(st.session_state.price_history) == 0
+        or
+        st.session_state.price_history[-1] != price
+    ):
+
+        st.session_state.price_history.append(
+            price
+        )
+
+        st.session_state.volume_history.append(
+            volume
+        )
 
 st.session_state.price_history = (
     st.session_state.price_history[-500:]
@@ -252,13 +272,8 @@ st.session_state.volume_history = (
     st.session_state.volume_history[-500:]
 )
 
-prices = (
-    st.session_state.price_history
-)
-
-volumes = (
-    st.session_state.volume_history
-)
+prices = st.session_state.price_history
+volumes = st.session_state.volume_history
 
 # =========================
 # Indicators
