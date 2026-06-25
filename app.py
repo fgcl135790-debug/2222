@@ -10,3 +10,6 @@ st.write("ANALYZER OK")
 
 from charts import ChartBuilder
 st.write("CHART OK")
+
+from exporters import Exporter
+st.write("EXPORTER OK")
