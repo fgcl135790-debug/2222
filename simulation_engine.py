@@ -115,9 +115,19 @@ class SimulationEngine:
 
         trade_size = random.randint(50, 500)
 
-        return {
-            "price": price,
-            "bids": bids,
-            "asks": asks,
-            "trade_size": trade_size,
-        }
+return {
+    "name": f"模擬-{self.mode}",
+    "price": price,
+    "open": self.base_price,
+    "high": max(price, self.base_price),
+    "low": min(price, self.base_price),
+    "vwap": self.base_price,
+    "last_size": trade_size,
+    "bids": bids,
+    "asks": asks,
+    "trade": {
+        "price": price,
+        "size": trade_size,
+    },
+    "is_close": False,
+}
