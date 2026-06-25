@@ -1,4 +1,5 @@
 import streamlit as st
 from fugle_marketdata import WebSocketClient
+import inspect
 
-st.write(WebSocketClient.__doc__)
+st.text(inspect.getsource(WebSocketClient))
