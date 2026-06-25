@@ -229,39 +229,29 @@ is_close = quote.get(
     False
 )
 
-# 收盤後停止自動刷新
+# 永遠刷新頁面
+refresh_count = st_autorefresh(
+    interval=2000,
+    key="refresh"
+)
 
 if not is_close:
 
-    refresh_count = st_autorefresh(
-        interval=2000,
-        key="refresh"
+    st.sidebar.success(
+        "🟢 即時更新中"
     )
-
-    st.sidebar.success("🟢 即時更新中")
 
 else:
 
-    st.sidebar.warning("🔴 已收盤")
-
+    st.sidebar.warning(
+        "🔴 已收盤"
+    )
 
 # =========================
 # History
 # =========================
 
-from zoneinfo import ZoneInfo
-
-now = datetime.now(
-    ZoneInfo("Asia/Taipei")
-)
-
-is_market_open = (
-    (now.hour > 9 or (now.hour == 9 and now.minute >= 0))
-    and
-    (now.hour < 13 or (now.hour == 13 and now.minute <= 30))
-)
-
-if is_market_open and not is_close:
+if not is_close:
 
     if (
         len(st.session_state.price_history) == 0
