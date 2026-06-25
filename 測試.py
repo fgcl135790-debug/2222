@@ -1,10 +1,17 @@
+import streamlit as st
 from fugle_marketdata import RestClient
 
-client = RestClient(api_key="你的APIKEY")
+st.title("Fugle Test")
 
-try:
-    quote = client.stock.intraday.quote(symbol="2330")
-    print(quote)
-except Exception as e:
-    print(type(e))
-    print(e)
+api_key = st.text_input("API Key")
+
+if api_key:
+    try:
+        client = RestClient(api_key=api_key)
+
+        quote = client.stock.intraday.quote(symbol="2330")
+
+        st.write(quote)
+
+    except Exception as e:
+        st.exception(e)
