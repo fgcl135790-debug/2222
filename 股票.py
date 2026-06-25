@@ -357,8 +357,8 @@ if api_key or test_mode:
                 
         except FugleAPIError as e:
             if "Rate limit exceeded" in str(e) or "429" in str(e):
-                st.error("🚨 偵測到富果超頻鎖定！啟動安全防守，強制進入後台冷卻 5 秒解鎖...")
-                time.sleep(5)
+                st.error("🚨 偵測到富果超頻鎖定！啟動安全防守，強制進入後台冷卻 1 秒解鎖...")
+                time.sleep(1)
             else: st.error(f"富果 API 異常: {e}")
         except Exception as e: st.error(f"連線異常: {e}")
 
