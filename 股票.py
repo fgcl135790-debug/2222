@@ -164,12 +164,12 @@ if api_key or test_mode:
     client = RestClient(api_key=api_key) if api_key else None
     
     # 速度配置：每 1.5 秒高速無感重新整理看盤模式
-    @st.fragment(run_every=1.5)
+    @st.fragment(run_every=2.0)
     def start_streaming(code):
         try:
             current_now = time.time()
             elapsed_speed = current_now - st.session_state.last_update_time
-            if elapsed_speed > 10.0 or elapsed_speed <= 0: elapsed_speed = 1.50
+            if elapsed_speed > 10.0 or elapsed_speed <= 0: elapsed_speed = 2.0
             st.session_state.last_update_time = current_now
 
             # =========================================================================
