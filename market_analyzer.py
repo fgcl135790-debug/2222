@@ -61,3 +61,61 @@ class MarketAnalyzer:
             return True
 
         return False
+    @staticmethod
+    def trading_signal(
+        price,
+        vwap,
+        ema5,
+        ema20,
+        ema60,
+        total_bid,
+        total_ask,
+    ):
+
+        score = 0
+        reasons = []
+
+        # VWAP
+        if price > vwap:
+            score += 25
+            reasons.append("現價站上VWAP")
+        else:
+            score -= 25
+            reasons.append("現價跌破VWAP")
+
+        # EMA5 / EMA20
+        if ema5 > ema20:
+            score += 20
+            reasons.append("EMA5 > EMA20")
+        else:
+            score -= 20
+            reasons.append("EMA5 < EMA20")
+
+        # EMA20 / EMA60
+        if ema20 > ema60:
+            score += 20
+            reasons.append("EMA20 > EMA60")
+        else:
+            score -= 20
+            reasons.append("EMA20 < EMA60")
+
+        # 買賣力道
+        if total_bid > total_ask:
+            score += 15
+            reasons.append("委買大於委賣")
+        else:
+            score -= 15
+            reasons.append("委賣大於委買")
+
+        confidence = min(abs(score), 100)
+
+        if score >= 20:
+            action = "做多"
+
+        elif score <= -20:
+            action = "做空"
+
+        else:
+            action = "觀望"
+
+        return action, confidence, reasons
