@@ -201,8 +201,6 @@ c1.metric("EMA20", round(float(ema20), 2))
 c2.metric("EMA60", round(float(ema60), 2))
 c3.metric("成交量", volume)
 
-# st.write("DEBUG Volume =", volume)
-# st.write("DEBUG Threshold =", big_order_threshold)
 
 # =========================
 # Chart
