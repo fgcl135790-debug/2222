@@ -36,6 +36,9 @@ taipei_time = (
 # Session State
 # =========================
 
+avg_volume = 1
+suggest_threshold = 100
+
 if "price_history" not in st.session_state:
     st.session_state.price_history = []
 
