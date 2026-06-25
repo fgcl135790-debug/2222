@@ -242,7 +242,15 @@ is_close = quote.get(
     "is_close",
     False
 )
+# =========================
+# 收盤提示
+# =========================
 
+if is_close:
+
+    st.info(
+        "📌 已收盤，以下統計為最後一次盤中結果"
+    )
 # 永遠刷新頁面
 refresh_count = st_autorefresh(
     interval=2000,
