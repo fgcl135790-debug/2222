@@ -1,26 +1,16 @@
 import streamlit as st
 
-st.write("APP START")
-
-from simulation_engine import SimulationEngine
-st.write("SIM OK")
-
-from market_analyzer import MarketAnalyzer
-st.write("ANALYZER OK")
-
-from charts import ChartBuilder
-st.write("CHART OK")
-
-from exporters import Exporter
-st.write("EXPORTER OK")
-
-from fugle_provider import FugleProvider
-st.write("FUGLE OK")
-
+# 必須放第一個 Streamlit 指令
 st.set_page_config(
     page_title="REST PRO",
     page_icon="⚡",
     layout="wide",
 )
 
-st.write("CONFIG OK")
+import pandas as pd
+
+from fugle_provider import FugleProvider
+from simulation_engine import SimulationEngine
+from market_analyzer import MarketAnalyzer
+from charts import ChartBuilder
+from exporters import Exporter
