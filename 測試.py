@@ -1,18 +1,8 @@
+import pkg_resources
 import streamlit as st
-from fugle_marketdata import RestClient
 
-st.write("Fugle Version:", fugle_marketdata.__version__)
-st.title("Fugle Test")
-
-api_key = st.text_input("API Key")
-
-if api_key:
-    try:
-        client = RestClient(api_key=api_key)
-
-        quote = client.stock.intraday.quote(symbol="2330")
-
-        st.write(quote)
-
-    except Exception as e:
-        st.exception(e)
+st.write(
+pkg_resources.get_distribution(
+"fugle-marketdata"
+).version
+)
