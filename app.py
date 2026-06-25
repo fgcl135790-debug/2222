@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from fugle_provider import FugleProvider
 from simulation_engine import SimulationEngine
@@ -32,8 +31,14 @@ st_autorefresh(
 # 台灣時間
 # =========================
 
-taipei_time = datetime.now(
-    ZoneInfo("Asia/Taipei")
+taipei_time = (
+    datetime.utcnow()
+    + timedelta(hours=8)
+)
+
+st.caption(
+    f"🕒 現在時間："
+    f"{taipei_time.strftime('%Y-%m-%d %H:%M:%S')}"
 )
 
 
