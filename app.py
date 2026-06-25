@@ -345,6 +345,18 @@ sell_strength = (
 # Header
 # =========================
 
+if is_close:
+
+    st.warning(
+        "🔴 已收盤，走勢圖停止更新"
+    )
+
+else:
+
+    st.success(
+        "🟢 盤中即時更新"
+    )
+
 st.title(
     f"⚡ {name} {stock_code}"
 )
