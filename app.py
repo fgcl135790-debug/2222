@@ -25,6 +25,8 @@ st.set_page_config(
 # Auto Refresh
 # =========================
 
+if not is_close:
+
 refresh_count = st_autorefresh(
     interval=2000,
     key="refresh"
@@ -234,6 +236,10 @@ bids = quote["bids"]
 
 asks = quote["asks"]
 
+is_close = quote.get(
+    "is_close",
+    False
+)
 # =========================
 # History
 # =========================
@@ -258,13 +264,15 @@ if is_market_open:
         st.session_state.price_history[-1] != price
     ):
 
-        st.session_state.price_history.append(
-            price
-        )
+if not is_close:
 
-        st.session_state.volume_history.append(
-            volume
-        )
+    st.session_state.price_history.append(
+        price
+    )
+
+    st.session_state.volume_history.append(
+        volume
+    )
 
 st.session_state.price_history = (
     st.session_state.price_history[-500:]
