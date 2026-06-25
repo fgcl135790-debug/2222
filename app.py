@@ -459,6 +459,85 @@ with left:
         )
 
 # =========================
+# 主力分析
+# =========================
+
+inst_score = (
+    MarketAnalyzer.institution_score(
+        total_bid,
+        total_ask
+    )
+)
+
+st.subheader("🏦 主力分析")
+
+c1, c2, c3 = st.columns(3)
+
+c1.metric(
+    "主力分數",
+    f"{inst_score}"
+)
+
+c2.metric(
+    "委買量",
+    total_bid
+)
+
+c3.metric(
+    "委賣量",
+    total_ask
+)
+
+if MarketAnalyzer.detect_accumulation(
+    total_bid,
+    total_ask,
+):
+    st.success(
+        "🟢 偵測到主力吸籌"
+    )
+
+if MarketAnalyzer.detect_distribution(
+    total_bid,
+    total_ask,
+):
+    st.error(
+        "🔴 偵測到主力出貨"
+    )
+
+if MarketAnalyzer.bullish_alignment(
+    ema5,
+    ema20,
+    ema60,
+):
+    st.success(
+        "📈 多頭排列"
+    )
+
+if MarketAnalyzer.bearish_alignment(
+    ema5,
+    ema20,
+    ema60,
+):
+    st.error(
+        "📉 空頭排列"
+    )
+
+prob = (
+    MarketAnalyzer.limit_up_probability(
+        price,
+        vwap,
+        total_bid,
+        total_ask,
+    )
+)
+
+st.progress(prob)
+
+st.write(
+    f"🚀 漲停機率預估：{prob}%"
+)
+
+# =========================
 # 買賣力道
 # =========================
 
