@@ -69,21 +69,55 @@ with st.sidebar:
         ]
     )
 
-    big_order_threshold = st.number_input(
-        "大戶門檻(張)",
-       min_value=10,
-       max_value=10000,
-       value=100,
-       step=10
+# 自動大戶門檻開關
+auto_threshold = st.checkbox(
+    "自動大戶門檻",
+    value=True
 )
 
-    sim_minutes = st.slider(
+# 已有歷史成交量才計算
+if len(st.session_state.volume_history) > 0:
 
-        "模擬時間(分鐘)",
-        2,
-        60,
-        10
+    avg_volume = (
+        sum(st.session_state.volume_history[-100:])
+        / min(len(st.session_state.volume_history), 100)
     )
+
+    suggest_threshold = int(avg_volume * 3)
+
+    st.info(
+        f"📊 最近100筆平均量：{avg_volume:.0f} 張\n\n"
+        f"建議大戶門檻：{suggest_threshold} 張"
+    )
+
+else:
+
+    suggest_threshold = 100
+
+# 自動 / 手動切換
+if auto_threshold:
+
+    big_order_threshold = suggest_threshold
+
+    st.success(
+        f"目前使用自動門檻：{big_order_threshold} 張"
+    )
+
+else:
+
+    big_order_threshold = st.number_input(
+        "大戶門檻(張)",
+        min_value=10,
+        max_value=10000,
+        value=100,
+        step=10
+    )
+sim_minutes = st.slider(
+    "模擬時間(分鐘)",
+    2,
+    60,
+    10
+)
 
     if st.button("重置模擬"):
         st.session_state.price_history = []
@@ -182,24 +216,7 @@ trend = MarketAnalyzer.trend(
     ema20
 )
 
-# =========================
-# Header
-# =========================
 
-st.title(f"⚡ {name}")
-
-c1, c2, c3, c4 = st.columns(4)
-
-c1.metric("現價", round(price, 2))
-c2.metric("VWAP", round(vwap, 2))
-c3.metric("EMA5", round(float(ema5), 2))
-c4.metric("趨勢", trend)
-
-c1, c2, c3 = st.columns(3)
-
-c1.metric("EMA20", round(float(ema20), 2))
-c2.metric("EMA60", round(float(ema60), 2))
-c3.metric("成交量", volume)
 
 
 # =========================
@@ -217,6 +234,32 @@ st.plotly_chart(
     fig,
     use_container_width=True
 )
+
+# =========================
+# Header
+# =========================
+
+from datetime import datetime
+
+st.title(f"⚡ {name}")
+
+st.caption(
+    f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+)
+
+row1 = st.columns(3)
+
+row1[0].metric("現價", round(price, 2))
+row1[1].metric("VWAP", round(vwap, 2))
+row1[2].metric("趨勢", trend)
+
+row2 = st.columns(3)
+
+row2[0].metric("EMA5", round(float(ema5), 2))
+row2[1].metric("EMA20", round(float(ema20), 2))
+row2[2].metric("EMA60", round(float(ema60), 2))
+
+st.metric("成交量", volume)
 
 # =========================
 # Best 5
