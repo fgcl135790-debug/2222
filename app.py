@@ -18,8 +18,19 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(
     page_title="REST PRO v2",
     page_icon="⚡",
-    layout="wide",
+    layout="wide"
 )
+
+st.markdown("""
+<style>
+.block-container{
+    padding-top:0.5rem;
+    padding-bottom:0.5rem;
+    padding-left:1rem;
+    padding-right:1rem;
+}
+</style>
+""", unsafe_allow_html=True)
 
 
 
@@ -394,65 +405,14 @@ st.plotly_chart(
 
 st.markdown("---")
 
-row1 = st.columns(3)
+c1,c2,c3,c4,c5,c6 = st.columns(6)
 
-with row1[0]:
-
-    st.metric(
-        "現價",
-        round(price, 2)
-    )
-
-with row1[1]:
-
-    st.metric(
-        "VWAP",
-        round(vwap, 2)
-    )
-
-with row1[2]:
-
-    st.metric(
-        "成交量",
-        volume
-    )
-
-row2 = st.columns(3)
-
-with row2[0]:
-
-    st.metric(
-        "EMA5",
-        round(
-            float(ema5),
-            2
-        )
-    )
-
-with row2[1]:
-
-    st.metric(
-        "EMA20",
-        round(
-            float(ema20),
-            2
-        )
-    )
-
-with row2[2]:
-
-    st.metric(
-        "EMA60",
-        round(
-            float(ema60),
-            2
-        )
-    )
-
-st.metric(
-    "趨勢",
-    trend
-)
+c1.metric("現價", round(price,2))
+c2.metric("VWAP", round(vwap,2))
+c3.metric("成交量", volume)
+c4.metric("EMA5", round(float(ema5),2))
+c5.metric("EMA20", round(float(ema20),2))
+c6.metric("EMA60", round(float(ema60),2))
 
 st.markdown("---")
 
