@@ -2,6 +2,5 @@ streamlit
 pandas
 numpy
 plotly
-streamlit
-pandas
 fugle-marketdata
+streamlit-autorefresh
