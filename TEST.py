@@ -1,5 +1,4 @@
 import streamlit as st
-from fugle_marketdata.websocket.client import WebSocketClient
-import inspect
+from fugle_marketdata.websocket.client import MESSAGE_EVENT
 
-st.text(inspect.getsource(WebSocketClient))
+st.write(MESSAGE_EVENT)
