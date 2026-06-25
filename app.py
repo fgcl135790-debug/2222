@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fugle_provider import FugleProvider
 from simulation_engine import SimulationEngine
@@ -21,11 +21,17 @@ st.set_page_config(
     layout="wide",
 )
 
-# 每2秒自動刷新
-st_autorefresh(
+# =========================
+# Auto Refresh
+# =========================
+
+refresh_count = st_autorefresh(
     interval=2000,
     key="refresh"
 )
+
+# Debug
+st.sidebar.write(f"Refresh: {refresh_count}")
 
 # =========================
 # 台灣時間
@@ -35,12 +41,6 @@ taipei_time = (
     datetime.utcnow()
     + timedelta(hours=8)
 )
-
-st.caption(
-    f"🕒 現在時間："
-    f"{taipei_time.strftime('%Y-%m-%d %H:%M:%S')}"
-)
-
 
 # =========================
 # Session State
