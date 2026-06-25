@@ -1,4 +1,16 @@
 import streamlit as st
-import fugle_marketdata.websocket.client as client
+from fugle_marketdata.websocket.client import (
+    MESSAGE_EVENT,
+    CONNECT_EVENT,
+    DISCONNECT_EVENT,
+    AUTHENTICATED_EVENT,
+    UNAUTHENTICATED_EVENT,
+    ERROR_EVENT
+)
 
-st.write(dir(client))
+st.write("MESSAGE_EVENT =", MESSAGE_EVENT)
+st.write("CONNECT_EVENT =", CONNECT_EVENT)
+st.write("DISCONNECT_EVENT =", DISCONNECT_EVENT)
+st.write("AUTHENTICATED_EVENT =", AUTHENTICATED_EVENT)
+st.write("UNAUTHENTICATED_EVENT =", UNAUTHENTICATED_EVENT)
+st.write("ERROR_EVENT =", ERROR_EVENT)
