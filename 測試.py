@@ -1,10 +1,5 @@
 import streamlit as st
-from fugle_marketdata import WebSocketClient
+import fugle_marketdata
 
-st.write("WebSocketClient.stock")
-
-st.write(dir(WebSocketClient.stock))
-
-st.write("WebSocketClient.futopt")
-
-st.write(dir(WebSocketClient.futopt))
+st.write("Version:")
+st.write(fugle_marketdata.**version**)
