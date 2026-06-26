@@ -1,28 +1,10 @@
-import streamlit as st
-import sys
+API_KEY = "你的FUGLE_KEY"
 
-st.write("Python:", sys.version)
+def clean_key(key):
+    return str(key).strip().replace("\n", "").replace("\r", "")
 
-try:
-    import streamlit
-    st.write("streamlit:", streamlit.__version__)
-except Exception as e:
-    st.write("streamlit error:", e)
+api_key = clean_key(API_KEY)
 
-try:
-    import plotly
-    st.write("plotly:", plotly.__version__)
-except Exception as e:
-    st.write("plotly error:", e)
-
-try:
-    import pandas
-    st.write("pandas:", pandas.__version__)
-except Exception as e:
-    st.write("pandas error:", e)
-
-try:
-    import fugle_marketdata
-    st.write("fugle-marketdata:", getattr(fugle_marketdata, "__version__", "unknown"))
-except Exception as e:
-    st.write("fugle-marketdata error:", e)
+headers = {
+    "X-API-KEY": api_key
+}
