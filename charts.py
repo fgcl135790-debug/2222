@@ -304,7 +304,7 @@ class ChartBuilder:
 
             template="plotly_dark",
 
-            height=700,
+            height=430,
 
             margin=dict(
 
