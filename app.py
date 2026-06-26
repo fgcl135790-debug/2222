@@ -382,6 +382,36 @@ st.markdown("---")
 
 col1, col2, col3, col4 = st.columns(4)
 
+# =========================
+# 五檔報價
+# =========================
+
+st.subheader("📋 最佳五檔")
+
+bid_list = bids.copy()
+ask_list = asks.copy()
+
+while len(bid_list) < 5:
+    bid_list.append({"price": 0, "size": 0})
+
+while len(ask_list) < 5:
+    ask_list.append({"price": 0, "size": 0})
+
+best5_df = pd.DataFrame({
+
+    "買張": [x["size"] for x in bid_list[:5]],
+    "買價": [x["price"] for x in bid_list[:5]],
+
+    "賣價": [x["price"] for x in ask_list[:5]],
+    "賣張": [x["size"] for x in ask_list[:5]],
+})
+
+st.dataframe(
+    best5_df,
+    use_container_width=True,
+    hide_index=True,
+    height=220,
+)
 
 # =========================
 # AI交易判斷
