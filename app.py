@@ -283,43 +283,50 @@ with col2:
     st.progress(ai_confidence / 100)
 
 # ======================
-# 📈 反彈機率（右）
+# 📈 反彈機率（右）V6修正版
 # ======================
 with col3:
 
-    color = "#00e676" if rebound_rate > 60 else "#ff1744" if rebound_rate < 40 else "#ffc107"
-
     # =========================
-    # 🧠 多層級市場判讀（V6核心）
+    # 🧠 分級判讀
     # =========================
     if rebound_rate >= 75:
         label = "強勢反彈"
         desc = "主力回補明顯，多方動能強"
         signal_hint = "可偏多操作"
         risk_text = "低風險"
+        color = "#00e676"
+
     elif rebound_rate >= 60:
         label = "偏多反彈"
         desc = "買盤優於賣盤，短線轉強"
         signal_hint = "可短多"
         risk_text = "中低風險"
+        color = "#22c55e"
+
     elif rebound_rate >= 45:
         label = "震盪整理"
         desc = "多空平衡，方向未明"
         signal_hint = "觀望為主"
         risk_text = "中性風險"
+        color = "#ffc107"
+
     elif rebound_rate >= 30:
         label = "偏弱反彈"
         desc = "賣壓略大，反彈有限"
         signal_hint = "避免追多"
         risk_text = "中高風險"
+        color = "#ff9800"
+
     else:
         label = "弱勢下跌"
         desc = "空方主導，續跌機率高"
         signal_hint = "偏空觀察"
         risk_text = "高風險"
+        color = "#ff1744"
 
     # =========================
-    # 🎨 UI（券商級卡片）
+    # 🎨 統一卡片 UI（更穩）
     # =========================
     st.markdown(f"""
     <div style="
@@ -327,7 +334,7 @@ with col3:
         padding:16px;
         border-radius:14px;
         border:1px solid rgba(255,255,255,0.08);
-        height:140px;
+        height:150px;
     ">
 
         <div style="color:#9ca3af;font-size:12px;">
@@ -366,6 +373,21 @@ with col3:
             color:#94a3b8;
         ">
             👉 {signal_hint} ｜ {risk_text}
+        </div>
+
+        <!-- 🔥 加入內嵌進度條（關鍵修正） -->
+        <div style="
+            margin-top:10px;
+            background:#1f2937;
+            height:6px;
+            border-radius:999px;
+            overflow:hidden;
+        ">
+            <div style="
+                width:{rebound_rate}%;
+                background:{color};
+                height:6px;
+            "></div>
         </div>
 
     </div>
