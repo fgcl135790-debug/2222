@@ -353,56 +353,93 @@ class MarketAnalyzer:
         )
 
     # =========================
-    # 趨勢反轉預測
-    # =========================
+# AI 趨勢反轉預測 v2
+# =========================
 
-    @staticmethod
-    def reversal_signal(
-        prices,
-        ema5,
-        ema20,
-        total_bid,
-        total_ask,
-    ):
+@staticmethod
+def reversal_prediction(
+    prices,
+    price,
+    vwap,
+    ema5,
+    ema20,
+    ema60,
+    total_bid,
+    total_ask,
+):
 
-        if len(prices) < 6:
-            return "資料不足", "⚪"
+    score = 0
+    reasons = []
 
-        recent = prices[-6:]
+    # VWAP
+    if price > vwap:
+        score += 20
+        reasons.append("站上VWAP")
+    else:
+        reasons.append("仍在VWAP下")
 
-        # 最近價格是否開始止跌
-        price_up = (
-            recent[-1] > recent[-2] > recent[-3]
-        )
+    # EMA
+    if ema5 > ema20:
+        score += 20
+        reasons.append("EMA5突破EMA20")
 
-        # 最近價格是否開始轉弱
-        price_down = (
-            recent[-1] < recent[-2] < recent[-3]
-        )
+    if ema20 > ema60:
+        score += 10
+        reasons.append("EMA20維持多頭")
 
-        bid_ratio = (
-            total_bid /
-            max(total_ask, 1)
-        )
+    # 最近價格
+    if len(prices) >= 5:
 
-        # 空翻多
-        if (
-            ema5 < ema20
-            and
-            price_up
-            and
-            bid_ratio > 1.5
-        ):
-            return "🟢 空頭可能反轉為多頭", "BUY"
+        last5 = prices[-5:]
 
-        # 多翻空
-        if (
-            ema5 > ema20
-            and
-            price_down
-            and
-            bid_ratio < 0.7
-        ):
-            return "🔴 多頭可能反轉為空頭", "SELL"
+        if last5[-1] > last5[-2] > last5[-3]:
+            score += 20
+            reasons.append("最近價格開始走高")
 
-        return "🟡 尚未出現反轉訊號", "WAIT"
+        elif last5[-1] < last5[-2] < last5[-3]:
+            score -= 20
+            reasons.append("最近價格持續走弱")
+
+    # 買賣盤
+    bid_ratio = total_bid / max(total_ask, 1)
+
+    if bid_ratio > 1.5:
+        score += 20
+        reasons.append("委買明顯大於委賣")
+
+    elif bid_ratio > 1:
+        score += 10
+        reasons.append("委買略強")
+
+    # 多頭排列
+    if ema5 > ema20 > ema60:
+        score += 10
+        reasons.append("多頭排列")
+
+    probability = max(0, min(score, 100))
+
+    stars = "⭐" * max(1, probability // 20)
+
+    if probability >= 80:
+        signal = "BUY"
+        text = "🟢 高機率反轉向上"
+
+    elif probability >= 60:
+        signal = "WATCH"
+        text = "🟡 有反轉跡象"
+
+    elif probability <= 20:
+        signal = "SELL"
+        text = "🔴 持續轉弱"
+
+    else:
+        signal = "NONE"
+        text = "⚪ 尚未形成反轉"
+
+    return (
+        signal,
+        text,
+        probability,
+        stars,
+        reasons
+    )
