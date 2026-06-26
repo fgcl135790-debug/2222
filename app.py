@@ -342,13 +342,13 @@ st.plotly_chart(fig, use_container_width=True)
 
 
 # =========================
-# 📋 五檔（V5.7 修正版）
+# 📋 五檔（V5.7 無價差版）
 # =========================
 
 st.subheader("📋 五檔專業版（V5.7）")
 
 # =========================
-# 🔧 防呆 + 強制轉 float/int
+# 🔧 防呆
 # =========================
 while len(bids) < 5:
     bids.append({"price": 0, "size": 0})
@@ -356,14 +356,14 @@ while len(bids) < 5:
 while len(asks) < 5:
     asks.append({"price": 0, "size": 0})
 
-buy_prices = [float(b["price"]) for b in bids[:5]]
-buy_sizes  = [int(b["size"]) for b in bids[:5]]
+buy_prices = [float(b.get("price", 0)) for b in bids[:5]]
+buy_sizes  = [int(b.get("size", 0)) for b in bids[:5]]
 
-sell_prices = [float(a["price"]) for a in asks[:5]]
-sell_sizes  = [int(a["size"]) for a in asks[:5]]
+sell_prices = [float(a.get("price", 0)) for a in asks[:5]]
+sell_sizes  = [int(a.get("size", 0)) for a in asks[:5]]
 
 # =========================
-# 🎨 HTML
+# 🎨 HTML（無 mid 版本）
 # =========================
 html = """
 <style>
@@ -371,7 +371,6 @@ html = """
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
-    font-family: Arial;
 }
 
 .orderbook th {
@@ -398,40 +397,29 @@ html = """
     color: #ff5252;
     font-weight: 600;
 }
-
-/* ⚪ 中間價差 */
-.mid {
-    color: #ffffff;
-    font-weight: 700;
-    background: #0f172a;
-}
 </style>
 
 <table class="orderbook">
 <tr>
     <th>買量</th>
     <th>買價</th>
-    <th>價差</th>
     <th>賣價</th>
     <th>賣量</th>
 </tr>
 """
 
 # =========================
-# 📊 核心 loop（修掉 NaN / TypeError）
+# 📊 五檔列
 # =========================
 for i in range(5):
 
     bp = buy_prices[i]
     sp = sell_prices[i]
 
-    spread = round(sp - bp, 2) if bp > 0 and sp > 0 else 0
-
     html += f"""
     <tr>
         <td class="buy">{buy_sizes[i]}</td>
         <td class="buy">{bp}</td>
-        <td class="mid">{spread}</td>
         <td class="sell">{sp}</td>
         <td class="sell">{sell_sizes[i]}</td>
     </tr>
