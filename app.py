@@ -206,7 +206,7 @@ def signal_dot(color, text):
     """
 
 # =========================
-# 🧠 AI 判讀（V5.5 修正版）
+# 🧠 AI 判讀（修正版台股顏色系統）
 # =========================
 
 st.subheader("🧠 AI 判讀")
@@ -214,70 +214,62 @@ st.subheader("🧠 AI 判讀")
 signal = ai.get("signal", "HOLD")
 score = ai.get("score", 50)
 risk = ai.get("risk", 50)
-state = ai.get("market_state", "UNKNOWN")
 rebound = ai.get("rebound_prob", 50)
 
-col1, col2, col3 = st.columns([1, 1, 1])
+col1, col2, col3 = st.columns(3)
 
 # =========================
-# 🎯 左：訊號（台股顏色）
+# 🎯 左：做多 / 做空（台股顏色）
 # =========================
 with col1:
 
     if signal == "BUY":
         st.markdown("""
-        <div style="
-            background:#1b3b2a;
-            padding:12px;
-            border-radius:10px;
-            border-left:5px solid #00c853;">
+        <div style="background:#3b0d0d;padding:12px;border-radius:10px;">
             <div style="display:flex;align-items:center;gap:8px;">
-                <div style="width:10px;height:10px;border-radius:50%;background:#00c853;"></div>
-                <b style="color:#00e676;">做多訊號</b>
+                <div style="width:10px;height:10px;border-radius:50%;background:#ff1744;"></div>
+                <b style="color:#ff5252;">做多訊號</b>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     elif signal == "SELL":
         st.markdown("""
-        <div style="
-            background:#3b1b1b;
-            padding:12px;
-            border-radius:10px;
-            border-left:5px solid #ff1744;">
+        <div style="background:#0d3b1f;padding:12px;border-radius:10px;">
             <div style="display:flex;align-items:center;gap:8px;">
-                <div style="width:10px;height:10px;border-radius:50%;background:#ff1744;"></div>
-                <b style="color:#ff5252;">做空訊號</b>
+                <div style="width:10px;height:10px;border-radius:50%;background:#00e676;"></div>
+                <b style="color:#00e676;">做空訊號</b>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     else:
         st.markdown("""
-        <div style="background:#222;padding:12px;border-radius:10px;">
-        ⚪ 盤整
+        <div style="background:#222;padding:12px;border-radius:10px;color:#aaa;">
+            ⚪ 盤整
         </div>
         """, unsafe_allow_html=True)
 
 # =========================
-# 🧠 中：AI 信心
+# 🧠 中：AI信心（紅=強）
 # =========================
 with col2:
     st.metric("AI信心", f"{score}%")
-    st.progress(min(score / 100, 1.0))
+
+    st.progress(score / 100)
 
 # =========================
-# 🔁 右：反彈機率
+# 🔁 右：反彈機率（反向語意）
 # =========================
 with col3:
     st.metric("反彈機率", f"{rebound}%")
 
     if rebound >= 60:
-        st.success("🟢 強反彈機率")
+        st.success("🔴 強反彈（多方）")
     elif rebound <= 40:
-        st.error("🔴 偏弱")
+        st.error("🟢 偏弱（空方）")
     else:
-        st.info("🟡 中性區")
+        st.info("⚪ 中性")
 
 # =========================
 # 📡 主力雷達（台股正確顏色版）
