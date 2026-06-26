@@ -1,126 +1,300 @@
-# charts.py
-
 import pandas as pd
 import plotly.graph_objects as go
+
 from plotly.subplots import make_subplots
 
 
 class ChartBuilder:
 
+    # =========================
+    # EMA
+    # =========================
+
     @staticmethod
-    def build_price_chart(
+    def calculate_ema(
         prices,
-        volumes=None,
+        span,
     ):
 
         if len(prices) == 0:
 
-            fig = go.Figure()
+            return []
 
-            fig.update_layout(
-                height=450
+        return (
+
+            pd.Series(prices)
+
+            .ewm(
+
+                span=span,
+
+                adjust=False,
+
             )
 
-            return fig
+            .mean()
 
-        df = pd.DataFrame({
-            "price": prices
-        })
+            .tolist()
 
+        )
+
+    # =========================
+    # SMA
+    # =========================
+
+    @staticmethod
+    def calculate_sma(
+        prices,
+        period,
+    ):
+
+        if len(prices) == 0:
+
+            return []
+
+        return (
+
+            pd.Series(prices)
+
+            .rolling(period)
+
+            .mean()
+
+            .tolist()
+
+        )
+
+    # =========================
+    # Price Chart
+    # =========================
+
+    @staticmethod
+    def build_price_chart(
+
+        prices,
+
+        volumes,
+
+    ):
+        # =========================
         # EMA
+        # =========================
 
-        df["ema5"] = (
-            df["price"]
-            .ewm(span=5)
-            .mean()
+        ema5 = ChartBuilder.calculate_ema(
+            prices,
+            5,
         )
 
-        df["ema20"] = (
-            df["price"]
-            .ewm(span=20)
-            .mean()
+        ema20 = ChartBuilder.calculate_ema(
+            prices,
+            20,
         )
 
-        df["ema60"] = (
-            df["price"]
-            .ewm(span=60)
-            .mean()
+        ema60 = ChartBuilder.calculate_ema(
+            prices,
+            60,
+        )
+
+        sma20 = ChartBuilder.calculate_sma(
+            prices,
+            20,
         )
 
         # =========================
-        # 圖表
+        # Figure
         # =========================
 
         fig = make_subplots(
+
             rows=2,
+
             cols=1,
+
             shared_xaxes=True,
-            vertical_spacing=0.02,
-            row_heights=[0.7, 0.3],
+
+            vertical_spacing=0.03,
+
+            row_heights=[0.75, 0.25],
+
         )
 
         # =========================
-        # 價格
+        # Price
         # =========================
 
         fig.add_trace(
+
             go.Scatter(
-                y=df["price"],
+
+                y=prices,
+
+                mode="lines",
+
                 name="Price",
-                mode="lines",
-                line=dict(width=3),
+
+                line=dict(
+
+                    color="#00E5FF",
+
+                    width=3,
+
+                ),
+
             ),
+
             row=1,
+
             col=1,
+
         )
 
         fig.add_trace(
+
             go.Scatter(
-                y=df["ema5"],
+
+                y=ema5,
+
+                mode="lines",
+
                 name="EMA5",
-                mode="lines",
-                line=dict(width=1.5),
+
+                line=dict(
+
+                    color="#FFD54F",
+
+                    width=2,
+
+                ),
+
             ),
+
             row=1,
+
             col=1,
+
         )
 
         fig.add_trace(
+
             go.Scatter(
-                y=df["ema20"],
+
+                y=ema20,
+
+                mode="lines",
+
                 name="EMA20",
-                mode="lines",
-                line=dict(width=1.5),
+
+                line=dict(
+
+                    color="#FF7043",
+
+                    width=2,
+
+                ),
+
             ),
+
             row=1,
+
             col=1,
+
         )
 
         fig.add_trace(
+
             go.Scatter(
-                y=df["ema60"],
-                name="EMA60",
+
+                y=ema60,
+
                 mode="lines",
-                line=dict(width=1.5),
+
+                name="EMA60",
+
+                line=dict(
+
+                    color="#AB47BC",
+
+                    width=2,
+
+                ),
+
             ),
+
             row=1,
+
             col=1,
+
+        )
+
+        fig.add_trace(
+
+            go.Scatter(
+
+                y=sma20,
+
+                mode="lines",
+
+                name="SMA20",
+
+                line=dict(
+
+                    color="#4CAF50",
+
+                    width=2,
+
+                    dash="dot",
+
+                ),
+
+            ),
+
+            row=1,
+
+            col=1,
+
         )
 
         # =========================
         # 成交量
         # =========================
 
-        if volumes and len(volumes) > 0:
+        volume_colors = []
 
-            fig.add_trace(
-                go.Bar(
-                    y=volumes,
-                    name="Volume",
-                ),
-                row=2,
-                col=1,
-            )
+        for i in range(len(volumes)):
+
+            if i == 0:
+
+                volume_colors.append("#26A69A")
+
+            else:
+
+                if prices[i] >= prices[i - 1]:
+
+                    volume_colors.append("#26A69A")
+
+                else:
+
+                    volume_colors.append("#EF5350")
+
+        fig.add_trace(
+
+            go.Bar(
+
+                y=volumes,
+
+                name="Volume",
+
+                marker_color=volume_colors,
+
+                opacity=0.8,
+
+            ),
+
+            row=2,
+
+            col=1,
+
+        )
 
         # =========================
         # Layout
@@ -128,33 +302,213 @@ class ChartBuilder:
 
         fig.update_layout(
 
-            height=450,
+            template="plotly_dark",
+
+            height=700,
 
             margin=dict(
-                l=5,
-                r=5,
-                t=10,
-                b=5,
+
+                l=10,
+
+                r=10,
+
+                t=20,
+
+                b=10,
+
             ),
 
             hovermode="x unified",
 
             legend=dict(
+
                 orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1,
+
+                y=1.05,
+
+                x=0,
+
             ),
+
+            xaxis=dict(
+
+                showgrid=False,
+
+            ),
+
+            yaxis=dict(
+
+                showgrid=True,
+
+                gridcolor="rgba(255,255,255,0.08)",
+
+            ),
+
+            plot_bgcolor="#111111",
+
+            paper_bgcolor="#111111",
+
         )
 
         fig.update_xaxes(
-            showgrid=False
+
+            showgrid=False,
+
+            zeroline=False,
+
         )
 
         fig.update_yaxes(
-            showgrid=True,
-            gridwidth=0.3
+
+            zeroline=False,
+
         )
 
+        # =========================
+        # 自動判斷趨勢背景
+        # =========================
+
+        if len(ema20) > 0 and len(ema60) > 0:
+
+            if ema20[-1] > ema60[-1]:
+
+                bg_color = "rgba(0,120,0,0.08)"
+
+            else:
+
+                bg_color = "rgba(180,0,0,0.08)"
+
+            fig.add_vrect(
+
+                x0=0,
+
+                x1=max(len(prices) - 1, 1),
+
+                fillcolor=bg_color,
+
+                opacity=0.25,
+
+                line_width=0,
+
+                layer="below",
+
+            )
+
+        # =========================
+        # 最高價
+        # =========================
+
+        if len(prices) > 0:
+
+            high_price = max(prices)
+
+            high_index = prices.index(high_price)
+
+            fig.add_annotation(
+
+                x=high_index,
+
+                y=high_price,
+
+                text=f"⬆ {high_price:.2f}",
+
+                showarrow=True,
+
+                arrowhead=2,
+
+                font=dict(
+
+                    size=12,
+
+                    color="#00FF99",
+
+                ),
+
+                arrowcolor="#00FF99",
+
+            )
+
+        # =========================
+        # 最低價
+        # =========================
+
+        if len(prices) > 0:
+
+            low_price = min(prices)
+
+            low_index = prices.index(low_price)
+
+            fig.add_annotation(
+
+                x=low_index,
+
+                y=low_price,
+
+                text=f"⬇ {low_price:.2f}",
+
+                showarrow=True,
+
+                arrowhead=2,
+
+                font=dict(
+
+                    size=12,
+
+                    color="#FF5252",
+
+                ),
+
+                arrowcolor="#FF5252",
+
+            )
+
+        # =========================
+        # 最新價格水平線
+        # =========================
+
+        if len(prices) > 0:
+
+            fig.add_hline(
+
+                y=prices[-1],
+
+                line_dash="dash",
+
+                line_color="#00E5FF",
+
+                opacity=0.6,
+
+            )
+
+        # =========================
+        # Layout 微調
+        # =========================
+
+        fig.update_yaxes(
+
+            fixedrange=False,
+
+            showspikes=True,
+
+            spikemode="across",
+
+            spikesnap="cursor",
+
+        )
+
+        fig.update_xaxes(
+
+            showspikes=True,
+
+            spikemode="across",
+
+            spikesnap="cursor",
+
+        )
+
+        # =========================
+        # Return
+        # =========================
+
         return fig
+
