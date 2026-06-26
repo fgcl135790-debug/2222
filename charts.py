@@ -404,27 +404,27 @@ class ChartBuilder:
 
             high_index = prices.index(high_price)
 
-fig.add_annotation(
-    x=min_idx,
-    y=min_price,
+         fig.add_annotation(
+             x=min_idx,
+             y=min_price,
 
-    text=f"{min_price:.2f}",
+             text=f"{min_price:.2f}",
 
-    showarrow=True,
+             showarrow=True,
 
-    arrowhead=2,
+             arrowhead=2,
 
-    ay=35,          # 往下移文字
+             ay=35,          # 往下移文字
 
-    ax=0,
+             ax=0,
 
-    font=dict(
-        size=12,
-        color="#00ff66",
-    ),
+             font=dict(
+                 size=12,
+                 color="#00ff66",
+             ),
 
-    arrowcolor="#00ff66",
-)
+             arrowcolor="#00ff66",
+         )
 
         # =========================
         # 最低價
