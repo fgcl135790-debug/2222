@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from fugle_provider import FugleProvider
 from simulation_engine import SimulationEngine
@@ -59,12 +60,16 @@ if "volume_history" not in st.session_state:
 if "big_order_log" not in st.session_state:
     st.session_state.big_order_log = []
 
-if "last_trade_serial" not in st.session_state:
-    st.session_state.last_trade_serial = None
+# 走勢圖去重
+if "last_history_serial" not in st.session_state:
+    st.session_state.last_history_serial = None
+
+# 大戶成交去重
+if "last_big_order_serial" not in st.session_state:
+    st.session_state.last_big_order_serial = None
 
 if "tick" not in st.session_state:
     st.session_state.tick = 0
-
 
 
 # =========================
@@ -254,6 +259,22 @@ is_close = quote.get(
     "is_close",
     False
 )
+
+now = datetime.now(
+    ZoneInfo("Asia/Taipei")
+)
+
+# 09:00~13:30
+market_open = (
+    (now.hour > 9 or (now.hour == 9 and now.minute >= 0))
+    and
+    (
+        now.hour < 13
+        or
+        (now.hour == 13 and now.minute <= 30)
+    )
+)
+
 # =========================
 # 收盤提示
 # =========================
@@ -285,21 +306,18 @@ else:
 # History
 # =========================
 
-if not is_close:
+if market_open and not is_close:
 
     if (
         len(st.session_state.price_history) == 0
         or
-        st.session_state.price_history[-1] != price
+        trade_serial != st.session_state.last_history_serial
     ):
 
-        st.session_state.price_history.append(
-            price
-        )
+        st.session_state.last_history_serial = trade_serial
 
-        st.session_state.volume_history.append(
-            volume
-        )
+        st.session_state.price_history.append(price)
+        st.session_state.volume_history.append(volume)
 
 st.session_state.price_history = (
     st.session_state.price_history[-500:]
@@ -670,61 +688,49 @@ st.markdown("---")
 # =========================
 
 if (
+    market_open
+    and
     not is_close
     and
     volume >= big_order_threshold
     and
-    trade_serial != st.session_state.last_trade_serial
+    trade_serial != st.session_state.last_big_order_serial
 ):
 
-    st.session_state.last_trade_serial = trade_serial
-
+    st.session_state.last_big_order_serial = trade_serial
 
     impact_ratio = round(
-        volume
-        /
+        volume /
         max(avg_volume, 1),
         2
     )
 
     if volume >= 5000:
-
         level = "🐋 超級主力"
 
     elif volume >= 1000:
-
         level = "🔥 主力大單"
 
     elif volume >= 300:
-
         level = "📈 法人等級"
 
     else:
-
         level = "💰 大戶"
 
     if total_bid > total_ask:
-
         direction = "🟢 主力買進"
 
     elif total_ask > total_bid:
-
         direction = "🔴 主力賣出"
 
     else:
-
         direction = "⚪ 中性"
 
     st.session_state.big_order_log.insert(
         0,
         {
-            "時間": datetime.now().strftime(
-                "%H:%M:%S"
-            ),
-            "價格": round(
-                price,
-                2
-            ),
+            "時間": datetime.now().strftime("%H:%M:%S"),
+            "價格": round(price, 2),
             "張數": volume,
             "等級": level,
             "方向": direction,
