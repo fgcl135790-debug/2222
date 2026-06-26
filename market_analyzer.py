@@ -351,3 +351,58 @@ class MarketAnalyzer:
             score,
             100
         )
+
+    # =========================
+    # 趨勢反轉預測
+    # =========================
+
+    @staticmethod
+    def reversal_signal(
+        prices,
+        ema5,
+        ema20,
+        total_bid,
+        total_ask,
+    ):
+
+        if len(prices) < 6:
+            return "資料不足", "⚪"
+
+        recent = prices[-6:]
+
+        # 最近價格是否開始止跌
+        price_up = (
+            recent[-1] > recent[-2] > recent[-3]
+        )
+
+        # 最近價格是否開始轉弱
+        price_down = (
+            recent[-1] < recent[-2] < recent[-3]
+        )
+
+        bid_ratio = (
+            total_bid /
+            max(total_ask, 1)
+        )
+
+        # 空翻多
+        if (
+            ema5 < ema20
+            and
+            price_up
+            and
+            bid_ratio > 1.5
+        ):
+            return "🟢 空頭可能反轉為多頭", "BUY"
+
+        # 多翻空
+        if (
+            ema5 > ema20
+            and
+            price_down
+            and
+            bid_ratio < 0.7
+        ):
+            return "🔴 多頭可能反轉為空頭", "SELL"
+
+        return "🟡 尚未出現反轉訊號", "WAIT"
