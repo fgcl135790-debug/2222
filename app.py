@@ -66,7 +66,7 @@ for k in ["price_history", "volume_history", "tick", "last_serial"]:
 # =========================
 with st.sidebar:
 
-    st.title("⚙️ V5.5 控制中心")
+    st.title("⚙️  控制中心")
 
     stock_code = st.text_input("股票代號", "2330")
 
@@ -176,7 +176,7 @@ rebound = ai["rebound_prob"]
 # =========================
 # 🧾 Header（券商級）
 # =========================
-st.title(f"🏦 V5.5 {name} ({stock_code})")
+st.title(f"🏦  {name} ({stock_code})")
 
 colA, colB, colC, colD = st.columns(4)
 
