@@ -426,6 +426,7 @@ class ChartBuilder:
              arrowcolor="#00ff66",
          )
 
+
         # =========================
         # 最低價
         # =========================
@@ -436,29 +437,27 @@ class ChartBuilder:
 
             low_index = prices.index(low_price)
 
-            fig.add_annotation(
+         fig.add_annotation(
+             x=min_idx,
+             y=min_price,
 
-                x=low_index,
+             text=f"{min_price:.2f}",
 
-                y=low_price,
+             showarrow=True,
 
-                text=f"⬇ {low_price:.2f}",
+             arrowhead=2,
 
-                showarrow=True,
+             ay=35,          # 往下移文字
 
-                arrowhead=2,
+             ax=0,
 
-                font=dict(
+             font=dict(
+                 size=12,
+                 color="#00ff66",
+                 ),
 
-                    size=12,
-
-                    color="#FF5252",
-
-                ),
-
-                arrowcolor="#FF5252",
-
-            )
+                 arrowcolor="#00ff66",
+         )
 
         # =========================
         # 最新價格水平線
