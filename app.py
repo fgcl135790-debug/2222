@@ -347,53 +347,57 @@ st.plotly_chart(fig, use_container_width=True)
 
 st.subheader("📋 五檔專業版（V5.6）")
 
-# 🔧 ① 先補資料（防止不足5檔）
+# =========================
+# 🔧 防呆補齊
+# =========================
 while len(bids) < 5:
     bids.append({"price": 0, "size": 0})
 
 while len(asks) < 5:
     asks.append({"price": 0, "size": 0})
 
-# 📊 ② 再拆資料（核心計算層）
 buy_prices = [b["price"] for b in bids[:5]]
 buy_sizes  = [b["size"] for b in bids[:5]]
 
 sell_prices = [a["price"] for a in asks[:5]]
 sell_sizes  = [a["size"] for a in asks[:5]]
 
-st.subheader("📋 五檔專業版（V5.6）")
-
+# =========================
+# 🎨 HTML（券商穩定版）
+# =========================
 html = """
 <style>
 .orderbook {
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
+    border-radius: 10px;
+    overflow: hidden;
 }
 
 .orderbook th {
     color: #aaa;
     text-align: center;
-    padding: 6px;
+    padding: 8px;
     border-bottom: 1px solid #333;
 }
 
 .orderbook td {
     text-align: center;
-    padding: 6px;
+    padding: 8px;
     border-bottom: 1px solid #222;
 }
 
 /* 🟢 買方 */
 .buy {
-    background: rgba(0, 230, 118, 0.08);
+    background: rgba(0, 230, 118, 0.10);
     color: #00e676;
     font-weight: 600;
 }
 
 /* 🔴 賣方 */
 .sell {
-    background: rgba(255, 82, 82, 0.08);
+    background: rgba(255, 82, 82, 0.10);
     color: #ff5252;
     font-weight: 600;
 }
@@ -401,7 +405,8 @@ html = """
 /* 中間價差 */
 .mid {
     background: #111827;
-    color: #fff;
+    color: #ffffff;
+    font-weight: 600;
 }
 </style>
 
@@ -409,14 +414,18 @@ html = """
 <tr>
     <th>買量</th>
     <th>買價</th>
-    <th class="mid">價差</th>
+    <th>價差</th>
     <th>賣價</th>
     <th>賣量</th>
 </tr>
 """
 
+# =========================
+# 📊 rows
+# =========================
 for i in range(5):
-    spread = round(sell_prices[i] - buy_prices[i], 2)
+
+    spread = round(sell_prices[i] - buy_prices[i], 2) if sell_prices[i] and buy_prices[i] else 0
 
     html += f"""
     <tr>
@@ -430,4 +439,8 @@ for i in range(5):
 
 html += "</table>"
 
-st.markdown(html, unsafe_allow_html=True)
+# =========================
+# 📦 必須包 container（避免跑版）
+# =========================
+with st.container():
+    st.markdown(html, unsafe_allow_html=True)
