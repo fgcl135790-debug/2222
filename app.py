@@ -386,7 +386,7 @@ fig = ChartBuilder.build_price_chart(prices, volumes)
 
 # ⭐ 如果要改 layout，一定要在 fig 之後
 fig.update_layout(
-    height=520,
+    height=720,
     margin=dict(l=10, r=10, t=20, b=10)
 )
 
