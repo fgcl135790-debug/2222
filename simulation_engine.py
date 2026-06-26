@@ -1,133 +1,504 @@
-# simulation_engine.py
-
 import random
 
 
 class SimulationEngine:
 
-    def __init__(self, mode="一般波動", base_price=100):
+    def __init__(
+
+        self,
+
+        mode="一般波動",
+
+        base_price=100,
+
+    ):
+
         self.mode = mode
+
         self.base_price = base_price
 
-    def generate(self, tick, total_ticks):
+    # =========================
+    # 建立最佳五檔
+    # =========================
 
-        progress = tick / max(total_ticks, 1)
+    def _best5(
 
-        price = self.base_price
+        self,
 
-        if self.mode == "漲停鎖死":
+        price,
 
-            if progress < 0.25:
-                price += progress * 40
-            else:
-                price = round(self.base_price * 1.10, 2)
+    ):
 
-        elif self.mode == "跌停鎖死":
+        bids = []
 
-            if progress < 0.25:
-                price -= progress * 40
-            else:
-                price = round(self.base_price * 0.90, 2)
+        asks = []
 
-        elif self.mode == "跳空急跌":
+        for i in range(5):
 
-            if progress < 0.15:
-                price = self.base_price
-            else:
-                price = self.base_price - 15
+            bids.append(
 
-        elif self.mode == "軋空行情":
+                {
 
-            if progress < 0.35:
-                price -= progress * 15
-            else:
-                price += (progress - 0.35) * 35
+                    "price": round(
 
-        elif self.mode == "誘多出貨":
+                        price - 0.1 * (i + 1),
 
-            if progress < 0.5:
-                price += progress * 20
-            else:
-                price += 10 - (progress - 0.5) * 35
+                        2,
 
-        elif self.mode == "誘空嘎空":
+                    ),
 
-            if progress < 0.4:
-                price -= progress * 15
-            else:
-                price -= 6
-                price += (progress - 0.4) * 40
+                    "size": random.randint(
 
-        elif self.mode == "拉高出貨":
+                        20,
 
-            if progress < 0.3:
-                price += progress * 50
+                        300,
 
-            elif progress < 0.6:
-                price += 15 + random.uniform(-1, 1)
+                    ),
 
-            else:
-                price += 15
-                price -= (progress - 0.6) * 45
+                }
+
+            )
+
+            asks.append(
+
+                {
+
+                    "price": round(
+
+                        price + 0.1 * (i + 1),
+
+                        2,
+
+                    ),
+
+                    "size": random.randint(
+
+                        20,
+
+                        300,
+
+                    ),
+
+                }
+
+            )
+
+        return bids, asks
+
+    # =========================
+    # 產生行情
+    # =========================
+
+    def generate(
+
+        self,
+
+        tick,
+
+        total_ticks,
+
+    ):
+
+        # =========================
+        # 一般波動
+        # =========================
+
+        if self.mode == "一般波動":
+
+            change = random.uniform(
+
+                -0.4,
+
+                0.4,
+
+            )
+
+        # =========================
+        # 主力吸籌
+        # =========================
 
         elif self.mode == "主力吸籌":
 
-            price += random.uniform(-0.2, 0.2)
+            if tick < total_ticks * 0.7:
+
+                change = random.uniform(
+
+                    -0.1,
+
+                    0.15,
+
+                )
+
+            else:
+
+                change = random.uniform(
+
+                    0.3,
+
+                    1.2,
+
+                )
+
+        # =========================
+        # 洗盤
+        # =========================
+
+        elif self.mode == "洗盤":
+
+            if tick % 6 < 3:
+
+                change = random.uniform(
+
+                    -1.2,
+
+                    -0.2,
+
+                )
+
+            else:
+
+                change = random.uniform(
+
+                    0.2,
+
+                    1.2,
+
+                )
+
+        # =========================
+        # 突破
+        # =========================
+
+        elif self.mode == "突破":
+
+            if tick < total_ticks * 0.5:
+
+                change = random.uniform(
+
+                    -0.2,
+
+                    0.2,
+
+                )
+
+            else:
+
+                change = random.uniform(
+
+                    0.8,
+
+                    2.5,
+
+                )
+
+        # =========================
+        # 跌破
+        # =========================
+
+        elif self.mode == "跌破":
+
+            if tick < total_ticks * 0.5:
+
+                change = random.uniform(
+
+                    -0.2,
+
+                    0.2,
+
+                )
+
+            else:
+
+                change = random.uniform(
+
+                    -2.5,
+
+                    -0.8,
+
+                )
+
+        # =========================
+        # 一般波動
+        # =========================
+
+        if self.mode == "一般波動":
+
+            change = random.uniform(
+
+                -0.4,
+
+                0.4,
+
+            )
+
+        # =========================
+        # 主力吸籌
+        # =========================
+
+        elif self.mode == "主力吸籌":
+
+            if tick < total_ticks * 0.7:
+
+                change = random.uniform(
+
+                    -0.1,
+
+                    0.15,
+
+                )
+
+            else:
+
+                change = random.uniform(
+
+                    0.3,
+
+                    1.2,
+
+                )
+
+        # =========================
+        # 洗盤
+        # =========================
+
+        elif self.mode == "洗盤":
+
+            if tick % 6 < 3:
+
+                change = random.uniform(
+
+                    -1.2,
+
+                    -0.2,
+
+                )
+
+            else:
+
+                change = random.uniform(
+
+                    0.2,
+
+                    1.2,
+
+                )
+
+        # =========================
+        # 突破
+        # =========================
+
+        elif self.mode == "突破":
+
+            if tick < total_ticks * 0.5:
+
+                change = random.uniform(
+
+                    -0.2,
+
+                    0.2,
+
+                )
+
+            else:
+
+                change = random.uniform(
+
+                    0.8,
+
+                    2.5,
+
+                )
+
+        # =========================
+        # 跌破
+        # =========================
+
+        elif self.mode == "跌破":
+
+            if tick < total_ticks * 0.5:
+
+                change = random.uniform(
+
+                    -0.2,
+
+                    0.2,
+
+                )
+
+            else:
+
+                change = random.uniform(
+
+                    -2.5,
+
+                    -0.8,
+
+                )
+
+        # =========================
+        # 最新價格
+        # =========================
+
+        price = round(
+
+            self.base_price + change,
+
+            2,
+
+        )
+
+        if price <= 1:
+
+            price = 1
+
+        # 下一次價格基準
+        self.base_price = price
+
+        # =========================
+        # VWAP
+        # =========================
+
+        vwap = round(
+
+            price + random.uniform(
+
+                -0.3,
+
+                0.3,
+
+            ),
+
+            2,
+
+        )
+
+        # =========================
+        # 成交量
+        # =========================
+
+        if self.mode in [
+
+            "突破",
+
+            "軋空行情",
+
+            "拉高出貨",
+
+            "漲停鎖死",
+
+        ]:
+
+            volume = random.randint(
+
+                800,
+
+                3500,
+
+            )
+
+        elif self.mode in [
+
+            "跌破",
+
+            "跳空急跌",
+
+            "跌停鎖死",
+
+        ]:
+
+            volume = random.randint(
+
+                600,
+
+                2800,
+
+            )
 
         else:
 
-            if progress < 0.33:
-                price += progress * 15
+            volume = random.randint(
 
-            elif progress < 0.66:
-                price += 5
-                price -= (progress - 0.33) * 20
+                20,
 
-            else:
-                price -= 2
-                price += (progress - 0.66) * 12
+                600,
 
-        price = round(price, 2)
+            )
 
-        bids = [
-            {
-                "price": round(price - 0.5 - i * 0.5, 2),
-                "size": random.randint(100, 1500),
-            }
-            for i in range(5)
-        ]
+        # =========================
+        # Best5
+        # =========================
 
-        asks = [
-            {
-                "price": round(price + 0.5 + i * 0.5, 2),
-                "size": random.randint(100, 1500),
-            }
-            for i in range(5)
-        ]
+        bids, asks = self._best5(
 
-        if self.mode == "漲停鎖死":
-            bids[0]["size"] = 8000
-            asks = []
+            price,
 
-        if self.mode == "跌停鎖死":
-            asks[0]["size"] = 8000
-            bids[0]["size"] = 50
+        )
 
-        trade_size = random.randint(50, 500)
+        # =========================
+        # 主力模式
+        # =========================
+
+        if self.mode in [
+
+            "主力吸籌",
+
+            "突破",
+
+            "軋空行情",
+
+            "漲停鎖死",
+
+        ]:
+
+            bids[0]["size"] *= 5
+
+            bids[1]["size"] *= 4
+
+        if self.mode in [
+
+            "拉高出貨",
+
+            "跌破",
+
+            "跳空急跌",
+
+            "跌停鎖死",
+
+        ]:
+
+            asks[0]["size"] *= 5
+
+            asks[1]["size"] *= 4
+
+        # =========================
+        # 回傳
+        # =========================
 
         return {
-            "name": f"模擬-{self.mode}",
+
+            "name": "Simulation",
+
             "price": price,
-            "open": self.base_price,
-            "high": max(price, self.base_price),
-            "low": min(price, self.base_price),
-            "vwap": self.base_price,
-            "last_size": trade_size,
+
+            "vwap": vwap,
+
+            "last_size": volume,
+
             "bids": bids,
+
             "asks": asks,
+
             "trade": {
-                "price": price,
-                "size": trade_size,
+
+                "serial": tick,
+
             },
-            "is_close": False,
+
+            "is_close": (
+
+                tick >= total_ticks
+
+            ),
+
         }
+
