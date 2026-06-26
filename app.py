@@ -10,16 +10,15 @@ from market_analyzer import MarketAnalyzer
 from ai_predictor import AIPredictor
 from charts import ChartBuilder
 from exporters import Exporter
-
 from streamlit_autorefresh import st_autorefresh
 
 
 # =========================
-# V4 SYSTEM
+# V4 系統設定
 # =========================
 
 st.set_page_config(
-    page_title="準法人交易系統 V4.1 AI PRO",
+    page_title="準法人交易系統 V4",
     page_icon="🏦",
     layout="wide",
 )
@@ -34,32 +33,26 @@ st.markdown("""
 
 
 # =========================
-# TIME
+# 台灣時間
 # =========================
 
 now = datetime.now(ZoneInfo("Asia/Taipei"))
 
 
 # =========================
-# SESSION STATE FIX
+# Session State
 # =========================
 
-def init_state(key, default):
-    if key not in st.session_state:
-        st.session_state[key] = default
+for k in ["price_history", "volume_history", "big_order_log", "tick", "last_history_serial", "last_big_order_serial"]:
+    if k not in st.session_state:
+        if "history" in k or "log" in k:
+            st.session_state[k] = []
+        else:
+            st.session_state[k] = 0
 
 
-init_state("price_history", [])
-init_state("volume_history", [])
-init_state("big_order_log", [])
-init_state("tick", 0)
-init_state("last_serial", 0)
-init_state("last_big_serial", 0)
-
-
-# =========================
-# SIDEBAR
-# =========================
+avg_volume = 1
+suggest_threshold = 100
 
 with st.sidebar:
 
@@ -78,40 +71,54 @@ with st.sidebar:
 
     refresh_sec = st.slider("更新秒數", 1, 10, 2)
 
+    auto_threshold = st.checkbox("自動大戶門檻", value=True)
 
-# =========================
-# DATA PROVIDER
-# =========================
+
+    # 平均量
+    if len(st.session_state.volume_history) > 0:
+        avg_volume = sum(st.session_state.volume_history[-100:]) / min(len(st.session_state.volume_history), 100)
+        suggest_threshold = int(avg_volume * 3)
+
+        st.info(f"平均量:{avg_volume:.0f}\n建議門檻:{suggest_threshold}")
+
+    if auto_threshold:
+        big_order_threshold = suggest_threshold
+    else:
+        big_order_threshold = st.number_input("大戶門檻", 10, 10000, 100)
+
+    sim_minutes = st.slider("模擬分鐘", 2, 60, 10)
+
+    if st.button("重置"):
+        st.session_state.price_history = []
+        st.session_state.volume_history = []
+        st.session_state.big_order_log = []
+        st.session_state.tick = 0
+        st.rerun()
+
+st_autorefresh(interval=refresh_sec * 1000, key="v4")
+
 
 try:
-
     if data_source == "真實盤":
-
         if api_key == "":
-            st.warning("請輸入 API KEY")
+            st.warning("請輸入 API")
             st.stop()
 
         provider = FugleProvider(api_key)
         quote = provider.get_quote(stock_code)
 
     else:
-
         engine = SimulationEngine(mode=sim_mode, base_price=100)
-
-        quote = engine.generate(
-            st.session_state.tick,
-            300
-        )
-
+        quote = engine.generate(st.session_state.tick, sim_minutes * 60)
         st.session_state.tick += 1
 
 except Exception as e:
-    st.error(f"資料錯誤: {e}")
+    st.error(e)
     st.stop()
 
 
 # =========================
-# QUOTE
+# Quote
 # =========================
 
 name = quote["name"]
@@ -123,33 +130,20 @@ bids = quote.get("bids", [])
 asks = quote.get("asks", [])
 
 trade = quote.get("trade", {})
-serial = trade.get("serial", 0)
+trade_serial = trade.get("serial", 0)
 
 is_close = quote.get("is_close", False)
 
-
-# =========================
-# AUTO REFRESH
-# =========================
-
-st_autorefresh(interval=refresh_sec * 1000, key="refresh")
+market_open = (9 <= now.hour <= 13)
 
 
-# =========================
-# HISTORY FIX（關鍵）
-# =========================
-
-if not is_close:
-
-    if serial != st.session_state.last_serial:
-
-        st.session_state.last_serial = serial
-
+if market_open and not is_close:
+    if len(st.session_state.price_history) == 0 or trade_serial != st.session_state.last_history_serial:
+        st.session_state.last_history_serial = trade_serial
         st.session_state.price_history.append(price)
         st.session_state.volume_history.append(volume)
 
 
-# limit
 st.session_state.price_history = st.session_state.price_history[-300:]
 st.session_state.volume_history = st.session_state.volume_history[-300:]
 
@@ -158,7 +152,7 @@ volumes = st.session_state.volume_history
 
 
 # =========================
-# TECH
+# 技術指標
 # =========================
 
 ema5 = MarketAnalyzer.calculate_ema(prices, 5)
@@ -173,30 +167,17 @@ volatility = MarketAnalyzer.volatility(prices)
 volume_trend = MarketAnalyzer.volume_trend(volumes)
 
 
-# =========================
-# BUY SELL DEPTH
-# =========================
-
 total_bid = sum(x["size"] for x in bids)
 total_ask = sum(x["size"] for x in asks)
-
 bid_ratio = total_bid / max(total_ask, 1)
 
-
 # =========================
-# AI SCORE V4
+# V4 AI
 # =========================
 
 ai_score = 50
 reasons = []
 
-if ema5 > ema20 > ema60:
-    ai_score += 20
-    reasons.append("多頭排列")
-
-elif ema5 < ema20 < ema60:
-    ai_score -= 20
-    reasons.append("空頭排列")
 
 if price > vwap:
     ai_score += 10
@@ -204,158 +185,97 @@ if price > vwap:
 else:
     ai_score -= 10
 
+
+if ema5 > ema20 > ema60:
+    ai_score += 20
+    reasons.append("多頭排列")
+elif ema5 < ema20 < ema60:
+    ai_score -= 20
+    reasons.append("空頭排列")
+
+
 if rsi > 70:
     ai_score -= 10
 elif rsi < 30:
     ai_score += 10
+
 
 if macd > macd_signal:
     ai_score += 10
 else:
     ai_score -= 10
 
-if bid_ratio > 1.5:
-    ai_score += 10
-elif bid_ratio < 0.7:
-    ai_score -= 10
 
-ai_score = max(0, min(ai_score, 100))
-
-
-# =========================
-# HEADER
-# =========================
-
-st.title(f"🏦 {name} ({stock_code})")
-st.caption(f"更新時間: {now}")
-
-
-if is_close:
-    st.warning("已收盤")
+if momentum > 0:
+    ai_score += 5
 else:
-    st.success("即時更新")
+    ai_score -= 5
+
+
+if bid_ratio > 1.5:
+    ai_score += 15
+elif bid_ratio < 0.7:
+    ai_score -= 15
+
+
+ai_score = max(0, min(100, int(ai_score)))
 
 
 # =========================
-# 📈 走勢圖（修復）
+# 反轉區（補回你原本少掉的）
 # =========================
 
-st.subheader("📈 即時走勢")
+reversal = "NONE"
+if ema5 > ema20 and rsi < 40:
+    reversal = "BUY"
+elif ema5 < ema20 and rsi > 60:
+    reversal = "SELL"
+else:
+    reversal = "WATCH"
+
+
+# =========================
+# AI判斷
+# =========================
+
+st.title(f"{name} ({stock_code})")
+
+st.subheader("📈 走勢圖")
 
 fig = ChartBuilder.build_price_chart(prices, volumes)
-
 st.plotly_chart(fig, use_container_width=True)
 
 
 # =========================
-# INDICATORS
+# 五檔（補回）
 # =========================
 
-c1, c2, c3, c4, c5, c6 = st.columns(6)
+st.subheader("📋 五檔")
 
-c1.metric("現價", price)
-c2.metric("VWAP", vwap)
-c3.metric("EMA5", round(float(ema5), 2))
-c4.metric("EMA20", round(float(ema20), 2))
-c5.metric("RSI", rsi)
-c6.metric("MACD", round(macd, 4))
+while len(bids) < 5:
+    bids.append({"price": 0, "size": 0})
 
+while len(asks) < 5:
+    asks.append({"price": 0, "size": 0})
 
-st.markdown("---")
-
-
-# =========================
-# AI PANEL
-# =========================
-
-col1, col2, col3 = st.columns(3)
-
-
-with col1:
-
-    st.subheader("🤖 AI判斷")
-
-    if ai_score >= 70:
-        st.success(f"偏多 {ai_score}%")
-    elif ai_score <= 40:
-        st.error(f"偏空 {ai_score}%")
-    else:
-        st.warning(f"中性 {ai_score}%")
-
-    st.progress(ai_score / 100)
-
-    for r in reasons:
-        st.write("•", r)
+st.dataframe(pd.DataFrame({
+    "買價": [x["price"] for x in bids[:5]],
+    "買量": [x["size"] for x in bids[:5]],
+    "賣價": [x["price"] for x in asks[:5]],
+    "賣量": [x["size"] for x in asks[:5]],
+}))
 
 
 # =========================
-# 5 LEVEL DEPTH（修復五檔）
+# 反轉顯示
 # =========================
 
-with col2:
+st.subheader("🔄 反轉區")
 
-    st.subheader("📊 五檔")
+if reversal == "BUY":
+    st.success("可能反彈")
+elif reversal == "SELL":
+    st.error("可能轉弱")
+else:
+    st.info("盤整")
 
-    bids = (bids + [{"price": 0, "size": 0}] * 5)[:5]
-    asks = (asks + [{"price": 0, "size": 0}] * 5)[:5]
-
-    df = pd.DataFrame({
-        "買價": [x["price"] for x in bids],
-        "買量": [x["size"] for x in bids],
-        "賣價": [x["price"] for x in asks],
-        "賣量": [x["size"] for x in asks],
-    })
-
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-
-# =========================
-# FLOW
-# =========================
-
-with col3:
-
-    st.subheader("🏦 主力")
-
-    st.metric("買壓", total_bid)
-    st.metric("賣壓", total_ask)
-    st.metric("比例", round(bid_ratio, 2))
-
-
-    if bid_ratio > 1.5:
-        st.success("主力偏多")
-    elif bid_ratio < 0.7:
-        st.error("主力出貨")
-    else:
-        st.info("中性")
-
-
-# =========================
-# BIG ORDER LOG
-# =========================
-
-st.markdown("---")
-st.subheader("📜 大戶成交")
-
-if volume >= 800 and serial != st.session_state.last_big_serial:
-
-    st.session_state.last_big_serial = serial
-
-    st.session_state.big_order_log.insert(0, {
-        "時間": now.strftime("%H:%M:%S"),
-        "價格": price,
-        "量": volume,
-        "AI": ai_score
-    })
-
-df_log = pd.DataFrame(st.session_state.big_order_log)
-
-st.dataframe(df_log, use_container_width=True, hide_index=True)
-
-
-# =========================
-# FOOTER
-# =========================
-
-st.markdown("---")
-st.caption("V4.1 FIXED FULL SYSTEM")
