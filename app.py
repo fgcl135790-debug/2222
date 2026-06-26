@@ -186,30 +186,46 @@ colC.metric("風險", f"{risk}%")
 colD.metric("狀態", state)
 
 
-# =========================
-# 🚦 台股券商級訊號（修正版）
-# =========================
+def signal_dot(color, text):
+    return f"""
+    <div style="
+        display:flex;
+        align-items:center;
+        gap:8px;
+        font-weight:600;
+    ">
+        <div style="
+            width:12px;
+            height:12px;
+            border-radius:50%;
+            background:{color};
+            box-shadow:0 0 6px {color};
+        "></div>
+        <div>{text}</div>
+    </div>
+    """
 
-st.subheader("📊 交易訊號")
+# =========================
+# 台股訊號顯示（修正版）
+# =========================
 
 if signal == "BUY":
     st.markdown(
-        "<div style='background:#b71c1c;padding:12px;border-radius:10px;color:white;font-weight:bold'>🟢 做多訊號</div>",
+        signal_dot("#e53935", "做多訊號"),
         unsafe_allow_html=True
     )
 
 elif signal == "SELL":
     st.markdown(
-        "<div style='background:#1b5e20;padding:12px;border-radius:10px;color:white;font-weight:bold'>🔴 做空訊號</div>",
+        signal_dot("#43a047", "做空訊號"),  # ✅ 重點：綠色
         unsafe_allow_html=True
     )
 
 else:
     st.markdown(
-        "<div style='background:#455a64;padding:12px;border-radius:10px;color:white;font-weight:bold'>🟡 盤整觀望</div>",
+        signal_dot("#90a4ae", "盤整觀望"),
         unsafe_allow_html=True
     )
-
 # =========================
 # 📉 反彈區（你要的）
 # =========================
