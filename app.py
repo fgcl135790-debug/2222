@@ -342,24 +342,92 @@ st.plotly_chart(fig, use_container_width=True)
 
 
 # =========================
-# 📋 五檔（券商級）
+# 📋 五檔（V5.6 正確位置）
 # =========================
-st.subheader("📋 五檔報價")
 
+st.subheader("📋 五檔專業版（V5.6）")
+
+# 🔧 ① 先補資料（防止不足5檔）
 while len(bids) < 5:
     bids.append({"price": 0, "size": 0})
 
 while len(asks) < 5:
     asks.append({"price": 0, "size": 0})
 
-df = pd.DataFrame({
-    # 🟢 買方（左邊）
-    "買量": [b["size"] for b in bids[:5]],
-    "買價": [b["price"] for b in bids[:5]],
+# 📊 ② 再拆資料（核心計算層）
+buy_prices = [b["price"] for b in bids[:5]]
+buy_sizes  = [b["size"] for b in bids[:5]]
 
-    # 🔴 賣方（右邊）
-    "賣價": [a["price"] for a in asks[:5]],
-    "賣量": [a["size"] for a in asks[:5]],
-})
+sell_prices = [a["price"] for a in asks[:5]]
+sell_sizes  = [a["size"] for a in asks[:5]]
 
-st.dataframe(df, use_container_width=True)
+st.subheader("📋 五檔專業版（V5.6）")
+
+html = """
+<style>
+.orderbook {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.orderbook th {
+    color: #aaa;
+    text-align: center;
+    padding: 6px;
+    border-bottom: 1px solid #333;
+}
+
+.orderbook td {
+    text-align: center;
+    padding: 6px;
+    border-bottom: 1px solid #222;
+}
+
+/* 🟢 買方 */
+.buy {
+    background: rgba(0, 230, 118, 0.08);
+    color: #00e676;
+    font-weight: 600;
+}
+
+/* 🔴 賣方 */
+.sell {
+    background: rgba(255, 82, 82, 0.08);
+    color: #ff5252;
+    font-weight: 600;
+}
+
+/* 中間價差 */
+.mid {
+    background: #111827;
+    color: #fff;
+}
+</style>
+
+<table class="orderbook">
+<tr>
+    <th>買量</th>
+    <th>買價</th>
+    <th class="mid">價差</th>
+    <th>賣價</th>
+    <th>賣量</th>
+</tr>
+"""
+
+for i in range(5):
+    spread = round(sell_prices[i] - buy_prices[i], 2)
+
+    html += f"""
+    <tr>
+        <td class="buy">{buy_sizes[i]}</td>
+        <td class="buy">{buy_prices[i]}</td>
+        <td class="mid">{spread}</td>
+        <td class="sell">{sell_prices[i]}</td>
+        <td class="sell">{sell_sizes[i]}</td>
+    </tr>
+    """
+
+html += "</table>"
+
+st.markdown(html, unsafe_allow_html=True)
