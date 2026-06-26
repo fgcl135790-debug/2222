@@ -710,7 +710,7 @@ with col1:
 
     elif action == "STRONG SELL":
 
-        st.error(f"🔴🟢 強力賣出　{confidence}%")
+        st.error(f"🟢 強力賣出　{confidence}%")
 
     else:
 
@@ -735,19 +735,27 @@ with col2:
 
     if reversal_signal == "BUY":
 
-        st.success(reversal_text)
+    st.error(
+        reversal_text
+    )
 
-    elif reversal_signal == "WATCH":
+elif reversal_signal == "SELL":
 
-        st.warning(reversal_text)
+    st.success(
+        reversal_text
+    )
 
-    elif reversal_signal == "SELL":
+elif reversal_signal == "WATCH":
 
-        st.error(reversal_text)
+    st.warning(
+        reversal_text
+    )
 
-    else:
+else:
 
-        st.info(reversal_text)
+    st.info(
+        reversal_text
+    )
 
     st.metric(
         "AI信心",
