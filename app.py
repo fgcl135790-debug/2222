@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from fugle_provider import FugleProvider
 from simulation_engine import SimulationEngine
 from market_analyzer import MarketAnalyzer
+from ai_predictor import AIPredictor
 from charts import ChartBuilder
 from exporters import Exporter
 
@@ -552,63 +553,41 @@ sell_strength = (
 # =========================
 
 action, confidence, reasons = (
-
-    MarketAnalyzer.trading_signal(
-
-        prices,
-
-        price,
-
-        vwap,
-
-        ema5,
-
-        ema20,
-
-        ema60,
-
-        total_bid,
-
-        total_ask,
-
+    AIPredictor.predict_trade(
+        prices=prices,
+        volumes=volumes,
+        price=price,
+        vwap=vwap,
+        ema5=ema5,
+        ema20=ema20,
+        ema60=ema60,
+        rsi=rsi,
+        macd=macd,
+        macd_signal=macd_signal,
+        total_bid=total_bid,
+        total_ask=total_ask,
     )
-
 )
 
 (
-
     reversal_signal,
-
     reversal_text,
-
     reversal_probability,
-
     reversal_stars,
-
     reversal_reasons,
-
 ) = (
-
-    MarketAnalyzer.reversal_prediction(
-
-        prices,
-
-        price,
-
-        vwap,
-
-        ema5,
-
-        ema20,
-
-        ema60,
-
-        total_bid,
-
-        total_ask,
-
+    AIPredictor.predict_reversal(
+        prices=prices,
+        price=price,
+        ema5=ema5,
+        ema20=ema20,
+        ema60=ema60,
+        rsi=rsi,
+        macd=macd,
+        macd_signal=macd_signal,
+        total_bid=total_bid,
+        total_ask=total_ask,
     )
-
 )
 
 # =========================
@@ -711,41 +690,36 @@ left, center, right = st.columns(3)
 
 with left:
 
-    st.subheader(
-        "🤖 AI交易判斷"
-    )
+    st.subheader("🤖 AI交易判斷")
 
-    if action == "做多":
+    if action == "STRONG BUY":
 
-        st.success(
-            f"🟢 做多優勢 ({confidence}%)"
-        )
+        st.success(f"🟢 強力買進　{confidence}%")
 
-    elif action == "做空":
+    elif action == "BUY":
 
-        st.error(
-            f"🔴 做空優勢 ({confidence}%)"
-        )
+        st.success(f"📈 買進　{confidence}%")
+
+    elif action == "SELL":
+
+        st.error(f"📉 賣出　{confidence}%")
+
+    elif action == "STRONG SELL":
+
+        st.error(f"🔴 強力賣出　{confidence}%")
 
     else:
 
-        st.warning(
-            f"🟡 觀望 ({confidence}%)"
-        )
+        st.warning(f"🟡 觀望　{confidence}%")
 
-    st.progress(
-        confidence / 100
-    )
+    st.progress(confidence / 100)
 
-    st.markdown(
-        "#### AI判斷依據"
-    )
+    st.markdown("#### AI分析")
 
-    for reason in reasons:
+    for r in reasons:
 
-        st.write(
-            f"✅ {reason}"
-        )
+        st.write("•", r)
+
 
 # =========================
 # AI反轉預測
@@ -753,36 +727,26 @@ with left:
 
 with center:
 
-    st.subheader(
-        "🔄 趨勢反轉預測"
-    )
+    st.subheader("🔄 AI反轉預測")
 
     if reversal_signal == "BUY":
 
-        st.success(
-            reversal_text
-        )
-
-    elif reversal_signal == "SELL":
-
-        st.error(
-            reversal_text
-        )
+        st.success(reversal_text)
 
     elif reversal_signal == "WATCH":
 
-        st.warning(
-            reversal_text
-        )
+        st.warning(reversal_text)
+
+    elif reversal_signal == "SELL":
+
+        st.error(reversal_text)
 
     else:
 
-        st.info(
-            reversal_text
-        )
+        st.info(reversal_text)
 
     st.metric(
-        "反轉機率",
+        "AI信心",
         f"{reversal_probability}%"
     )
 
@@ -792,29 +756,44 @@ with center:
 
     st.write(reversal_stars)
 
-    st.markdown(
-        "#### 判斷依據"
-    )
+    st.markdown("#### AI依據")
 
-    for reason in reversal_reasons:
+    for r in reversal_reasons:
 
-        st.write(
-            f"⭐ {reason}"
-        )
-
+        st.write("•", r)
 # =========================
 # 技術指標
 # =========================
 
 with right:
 
-    st.subheader(
-        "📊 技術分析"
-    )
+    st.subheader("📊 技術分析")
 
     st.metric(
         "Momentum",
         round(momentum, 2)
+    )
+
+    if rsi >= 70:
+        rsi_state = "🔥 超買"
+    elif rsi <= 30:
+        rsi_state = "🧊 超賣"
+    else:
+        rsi_state = "✅ 正常"
+
+    st.metric(
+        "RSI",
+        f"{rsi} ({rsi_state})"
+    )
+
+    if macd > macd_signal:
+        macd_state = "🟢 多頭"
+    else:
+        macd_state = "🔴 空頭"
+
+    st.metric(
+        "MACD",
+        macd_state
     )
 
     st.metric(
@@ -823,7 +802,7 @@ with right:
     )
 
     st.metric(
-        "Volume Trend",
+        "成交量",
         volume_trend
     )
 
@@ -833,16 +812,92 @@ with right:
     )
 
     st.metric(
-        "MACD Signal",
-        macd_signal
-    )
-
-    st.metric(
         "MACD Hist",
-        macd_hist
+        round(macd_hist, 3)
     )
 
 st.markdown("---")
+
+# =========================
+# AI 綜合評分
+# =========================
+
+ai_score = 50
+
+# AI交易分數
+if action == "STRONG BUY":
+    ai_score += 25
+elif action == "BUY":
+    ai_score += 15
+elif action == "SELL":
+    ai_score -= 15
+elif action == "STRONG SELL":
+    ai_score -= 25
+
+# 反轉預測
+if reversal_signal == "BUY":
+    ai_score += 15
+elif reversal_signal == "SELL":
+    ai_score -= 15
+
+# RSI
+if rsi < 30:
+    ai_score += 10
+elif rsi > 70:
+    ai_score -= 10
+
+# MACD
+if macd > macd_signal:
+    ai_score += 10
+else:
+    ai_score -= 10
+
+# Momentum
+if momentum > 0:
+    ai_score += 5
+else:
+    ai_score -= 5
+
+# 買賣盤
+if total_bid > total_ask:
+    ai_score += 10
+else:
+    ai_score -= 10
+
+ai_score = max(0, min(ai_score, 100))
+
+st.subheader("🧠 AI 綜合評分")
+
+c1, c2 = st.columns([3, 2])
+
+with c1:
+
+    st.progress(ai_score / 100)
+
+with c2:
+
+    st.metric(
+        "AI Score",
+        f"{ai_score}/100"
+    )
+
+if ai_score >= 85:
+    st.success("🚀 極度看多")
+
+elif ai_score >= 70:
+    st.success("📈 偏多")
+
+elif ai_score >= 55:
+    st.info("🙂 小幅偏多")
+
+elif ai_score >= 45:
+    st.warning("😐 中性整理")
+
+elif ai_score >= 30:
+    st.warning("📉 偏空")
+
+else:
+    st.error("💥 極度看空")
 
 # =========================
 # 主力分析
