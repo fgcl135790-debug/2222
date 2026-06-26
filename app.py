@@ -978,43 +978,59 @@ else:
     )
 
 # =========================
-# 漲停機率
+# 漲停機率（AI v2）
 # =========================
 
-limit_score = 0
+limit_score = 5
 
+# VWAP
 if price > vwap:
+    limit_score += 15
 
-    limit_score += 25
-
+# 均線
 if ema5 > ema20:
+    limit_score += 15
 
-    limit_score += 25
+if ema20 > ema60:
+    limit_score += 10
 
-if bid_ratio > 1.5:
+# 委買委賣
+if bid_ratio >= 2:
+    limit_score += 20
+elif bid_ratio >= 1.5:
+    limit_score += 15
+elif bid_ratio >= 1.2:
+    limit_score += 8
 
-    limit_score += 25
+# Momentum
+if momentum >= 3:
+    limit_score += 15
+elif momentum >= 1:
+    limit_score += 8
 
-if momentum > 2:
+# RSI
+if 55 <= rsi <= 70:
+    limit_score += 10
+elif rsi > 75:
+    limit_score -= 10
 
-    limit_score += 25
+# MACD
+if macd > macd_signal:
+    limit_score += 10
 
-limit_score = min(
-    limit_score,
-    100,
-)
+# 成交量
+if volume_trend == "UP":
+    limit_score += 10
+
+# 限制範圍
+limit_score = max(0, min(int(limit_score), 100))
 
 st.metric(
-
     "🚀 漲停機率",
-
-    f"{limit_score}%",
-
+    f"{limit_score}%"
 )
 
-st.progress(
-    limit_score / 100
-)
+st.progress(limit_score / 100)
 
 st.markdown("---")
 
