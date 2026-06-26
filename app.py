@@ -686,13 +686,13 @@ st.markdown("---")
 # AI 分析區
 # =========================
 
-left, center, right = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 # =========================
 # AI交易判斷
 # =========================
 
-with left:
+with col1:
 
     st.subheader("🤖 AI交易判斷")
 
@@ -729,7 +729,7 @@ with left:
 # AI反轉預測
 # =========================
 
-with center:
+with col2:
 
     st.subheader("🔄 AI反轉預測")
 
@@ -769,7 +769,7 @@ with center:
 # 技術指標
 # =========================
 
-with right:
+with col3:
 
     st.subheader("📊 技術分析")
 
@@ -819,6 +819,47 @@ with right:
         "MACD Hist",
         round(macd_hist, 3)
     )
+
+with col4:
+
+    st.subheader("🏦 主力分析")
+
+    st.metric(
+        "委買",
+        total_bid,
+    )
+
+    st.metric(
+        "委賣",
+        total_ask,
+    )
+
+    st.metric(
+        "買盤比例",
+        f"{buy_strength}%"
+    )
+
+    bid_ratio = total_bid / max(total_ask, 1)
+
+    if bid_ratio >= 2:
+
+        st.success("🟢 強力買盤")
+
+    elif bid_ratio >= 1.3:
+
+        st.info("📈 偏多")
+
+    elif bid_ratio <= 0.5:
+
+        st.error("🔴 強力賣盤")
+
+    elif bid_ratio <= 0.8:
+
+        st.warning("📉 偏空")
+
+    else:
+
+        st.info("⚪ 中性")
 
 st.markdown("---")
 
@@ -903,77 +944,6 @@ elif ai_score >= 30:
 else:
     st.error("💥 極度看空")
 
-# =========================
-# 主力分析
-# =========================
-
-st.subheader(
-    "🏦 主力分析"
-)
-
-institution_score = int(
-
-    total_bid
-
-    /
-
-    max(
-
-        total_bid + total_ask,
-
-        1,
-
-    )
-
-    * 100
-
-)
-
-c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-
-    st.metric(
-
-        "主力分數",
-
-        f"{institution_score}/100",
-
-    )
-
-with c2:
-
-    st.metric(
-
-        "委買",
-
-        total_bid,
-
-    )
-
-with c3:
-
-    st.metric(
-
-        "委賣",
-
-        total_ask,
-
-    )
-
-with c4:
-
-    st.metric(
-
-        "買盤比例",
-
-        f"{buy_strength}%",
-
-    )
-
-st.progress(
-    buy_strength / 100
-)
 
 # =========================
 # 主力狀態
@@ -1224,139 +1194,158 @@ c4.metric(
 
 st.markdown("---")
 
-# =========================
-# 大戶成交紀錄
-# =========================
+tab1, tab2, tab3 = st.tabs(
 
-st.subheader(
-    "📜 大戶成交紀錄"
+    [
+
+        "📜 成交紀錄",
+
+        "📋 Best5",
+
+        "📥 匯出",
+
+    ]
+
 )
 
-if len(st.session_state.big_order_log) > 0:
+with tab1:
 
-    log_df = pd.DataFrame(
-        st.session_state.big_order_log
-    )
+    st.subheader("📜 大戶成交紀錄")
+
+    if len(st.session_state.big_order_log) > 0:
+
+        log_df = pd.DataFrame(
+
+            st.session_state.big_order_log
+
+        )
+
+        st.dataframe(
+
+            log_df,
+
+            use_container_width=True,
+
+            hide_index=True,
+
+            height=300,
+
+        )
+
+    else:
+
+        st.info(
+
+            "尚未偵測到大戶成交"
+
+        )
+
+
+with tab2:
+
+    st.subheader("📋 最佳五檔")
+
+    bid_list = bids.copy()
+
+    ask_list = asks.copy()
+
+    while len(bid_list) < 5:
+
+        bid_list.append({
+
+            "price": 0,
+
+            "size": 0,
+
+        })
+
+    while len(ask_list) < 5:
+
+        ask_list.append({
+
+            "price": 0,
+
+            "size": 0,
+
+        })
+
+    best5_df = pd.DataFrame({
+
+        "買張": [
+
+            x["size"]
+
+            for x in bid_list[:5]
+
+        ],
+
+        "買價": [
+
+            x["price"]
+
+            for x in bid_list[:5]
+
+        ],
+
+        "賣價": [
+
+            x["price"]
+
+            for x in ask_list[:5]
+
+        ],
+
+        "賣張": [
+
+            x["size"]
+
+            for x in ask_list[:5]
+
+        ],
+
+    })
 
     st.dataframe(
 
-        log_df,
+        best5_df,
 
         use_container_width=True,
 
         hide_index=True,
 
+        height=220,
+
     )
 
-else:
+with tab3:
+
+    st.subheader("📥 匯出資料")
+
+    csv_data = Exporter.export_big_order_log(
+
+        st.session_state.big_order_log
+
+    )
+
+    st.download_button(
+
+        "📥 下載大戶成交紀錄",
+
+        csv_data,
+
+        file_name="big_order_log.csv",
+
+        mime="text/csv",
+
+        use_container_width=True,
+
+    )
 
     st.info(
-        "尚未偵測到大戶成交"
+
+        f"目前共有 {len(st.session_state.big_order_log)} 筆成交紀錄"
+
     )
-
-# =========================
-# Best 5
-# =========================
-
-st.markdown("---")
-
-st.subheader(
-    "📋 最佳五檔"
-)
-
-while len(bids) < 5:
-
-    bids.append({
-
-        "price": 0,
-
-        "size": 0,
-
-    })
-
-while len(asks) < 5:
-
-    asks.append({
-
-        "price": 0,
-
-        "size": 0,
-
-    })
-
-best5_df = pd.DataFrame({
-
-    "買張": [
-
-        x["size"]
-
-        for x in bids[:5]
-
-    ],
-
-    "買價": [
-
-        x["price"]
-
-        for x in bids[:5]
-
-    ],
-
-    "賣價": [
-
-        x["price"]
-
-        for x in asks[:5]
-
-    ],
-
-    "賣張": [
-
-        x["size"]
-
-        for x in asks[:5]
-
-    ],
-
-})
-
-st.dataframe(
-
-    best5_df,
-
-    use_container_width=True,
-
-    hide_index=True,
-
-)
-
-# =========================
-# 匯出
-# =========================
-
-st.markdown("---")
-
-st.subheader(
-    "📥 匯出資料"
-)
-
-csv_data = Exporter.export_big_order_log(
-
-    st.session_state.big_order_log
-
-)
-
-st.download_button(
-
-    "📥 下載大戶成交紀錄",
-
-    csv_data,
-
-    file_name="big_order_log.csv",
-
-    mime="text/csv",
-
-)
 
 # =========================
 # Footer
@@ -1369,8 +1358,5 @@ st.caption(
 )
 
 st.caption(
-
     f"更新時間：{now.strftime('%Y-%m-%d %H:%M:%S')}"
-
 )
-
