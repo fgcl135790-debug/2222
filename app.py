@@ -17,7 +17,7 @@ from streamlit_autorefresh import st_autorefresh
 # =========================
 
 st.set_page_config(
-    page_title="V5.5 券商主力雷達",
+    page_title="主力監控",
     layout="wide",
     page_icon="🏦"
 )
@@ -347,7 +347,7 @@ st.plotly_chart(fig, use_container_width=True)
 
 import streamlit.components.v1 as components
 
-st.subheader("📋 五檔專業版（V5.7）")
+st.subheader("📋 五檔")
 
 # =========================
 # 防呆
