@@ -457,49 +457,49 @@ if len(prices) > 0:
         arrowcolor="#00cc66",
 
     )
-        # =========================
-        # 最新價格水平線
-        # =========================
+# =========================
+# 最新價格水平線
+# =========================
 
-        if len(prices) > 0:
+if len(prices) > 0:
 
-            fig.add_hline(
+    fig.add_hline(
 
-                y=prices[-1],
+        y=prices[-1],
 
-                line_dash="dash",
+        line_dash="dash",
 
-                line_color="#00E5FF",
+        line_color="#00E5FF",
 
-                opacity=0.6,
+        opacity=0.6,
 
-            )
+    )
 
-        # =========================
-        # Layout 微調
-        # =========================
+# =========================
+# Layout 微調
+# =========================
 
-        fig.update_yaxes(
+fig.update_yaxes(
 
-            fixedrange=False,
+    fixedrange=False,
 
-            showspikes=True,
+    showspikes=True,
 
-            spikemode="across",
+    spikemode="across",
 
-            spikesnap="cursor",
+    spikesnap="cursor",
 
-        )
+)
 
-        fig.update_xaxes(
+fig.update_xaxes(
 
-            showspikes=True,
+    showspikes=True,
 
-            spikemode="across",
+    spikemode="across",
 
-            spikesnap="cursor",
+    spikesnap="cursor",
 
-        )
+)
 
         # =========================
         # Return
