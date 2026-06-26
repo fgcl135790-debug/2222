@@ -545,7 +545,94 @@ elif bid_ratio < 0.7:
 
 else:
     st.warning("⚪ 中性")
+# =========================
+# 五檔 + 明細區（V4補完）
+# =========================
 
+st.markdown("---")
+
+tab1, tab2, tab3 = st.tabs([
+    "📜 成交紀錄",
+    "📋 五檔",
+    "📥 匯出"
+])
+
+# =========================
+# 成交紀錄
+# =========================
+
+with tab1:
+
+    st.subheader("📜 大戶成交紀錄")
+
+    if len(st.session_state.big_order_log) > 0:
+
+        log_df = pd.DataFrame(st.session_state.big_order_log)
+
+        st.dataframe(
+            log_df,
+            use_container_width=True,
+            hide_index=True,
+            height=300
+        )
+
+    else:
+
+        st.info("尚未偵測到大戶成交")
+
+
+# =========================
+# 五檔
+# =========================
+
+with tab2:
+
+    st.subheader("📋 五檔報價")
+
+    bid_list = bids.copy()
+    ask_list = asks.copy()
+
+    while len(bid_list) < 5:
+        bid_list.append({"price": 0, "size": 0})
+
+    while len(ask_list) < 5:
+        ask_list.append({"price": 0, "size": 0})
+
+    best5_df = pd.DataFrame({
+        "買價": [x["price"] for x in bid_list[:5]],
+        "買量": [x["size"] for x in bid_list[:5]],
+        "賣價": [x["price"] for x in ask_list[:5]],
+        "賣量": [x["size"] for x in ask_list[:5]],
+    })
+
+    st.dataframe(
+        best5_df,
+        use_container_width=True,
+        hide_index=True,
+        height=220
+    )
+
+
+# =========================
+# 匯出
+# =========================
+
+with tab3:
+
+    st.subheader("📥 匯出資料")
+
+    csv_data = Exporter.export_big_order_log(
+        st.session_state.big_order_log
+    )
+
+    st.download_button(
+        "📥 下載大戶成交紀錄",
+        csv_data,
+        file_name="big_order_log.csv",
+        mime="text/csv"
+    )
+
+    st.info(f"目前共有 {len(st.session_state.big_order_log)} 筆紀錄")
 
 # =========================
 # Footer
