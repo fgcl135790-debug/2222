@@ -206,34 +206,60 @@ def signal_dot(color, text):
     """
 
 # =========================
-# 台股訊號顯示（修正版）
+# AI 判讀（V5.5 券商排版修正版）
 # =========================
 
-if signal == "BUY":
-    st.markdown(
-        signal_dot("#e53935", "做多訊號"),
-        unsafe_allow_html=True
-    )
+st.subheader("🧠 AI 判讀")
 
-elif signal == "SELL":
-    st.markdown(
-        signal_dot("#43a047", "做空訊號"),  # ✅ 重點：綠色
-        unsafe_allow_html=True
-    )
+col1, col2, col3 = st.columns(3)
 
-else:
-    st.markdown(
-        signal_dot("#90a4ae", "盤整觀望"),
-        unsafe_allow_html=True
-    )
 # =========================
-# 📉 反彈區（你要的）
+# 左：做空/做多訊號
 # =========================
-st.subheader("🔄 反彈區")
+with col1:
+    if signal == "BUY":
+        st.markdown(
+            """
+            <div style="background:#3b0d0d;padding:12px;border-radius:10px;">
+                <span style="color:#ff5252;font-weight:700;">🔴 做多訊號</span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-st.progress(rebound / 100)
-st.write(f"反彈機率：{rebound}%")
+    elif signal == "SELL":
+        st.markdown(
+            """
+            <div style="background:#0d3b1f;padding:12px;border-radius:10px;">
+                <span style="color:#00e676;font-weight:700;">🟢 做空訊號</span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
+    else:
+        st.markdown("⚪ 盤整")
+
+# =========================
+# 中：AI 信心
+# =========================
+with col2:
+    st.metric("AI信心", f"{ai_confidence}%")
+
+    st.progress(ai_confidence / 100)
+
+# =========================
+# 右：反彈機率
+# =========================
+with col3:
+    st.metric("反彈機率", f"{rebound_rate}%")
+
+    if rebound_rate > 60:
+        st.success("可能反彈")
+    elif rebound_rate < 40:
+        st.error("偏弱")
+    else:
+        st.info("中性")
 
 # =========================
 # 📊 主力雷達（簡化券商版）
