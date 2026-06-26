@@ -394,6 +394,19 @@ sell_strength = (
     100 - buy_strength
 )
 # =========================
+# AI 趨勢反轉預測
+# =========================
+
+reversal_text, reversal_type = (
+    MarketAnalyzer.reversal_signal(
+        prices,
+        ema5,
+        ema20,
+        total_bid,
+        total_ask,
+    )
+)
+# =========================
 # Header
 # =========================
 
@@ -512,6 +525,24 @@ with left:
             f"✓ {reason}"
         )
 
+    # =========================
+    # AI 趨勢反轉
+    # =========================
+
+    st.markdown("---")
+    st.markdown("### 🔄 趨勢反轉預測")
+
+    if reversal_type == "BUY":
+
+        st.success(reversal_text)
+
+    elif reversal_type == "SELL":
+
+        st.error(reversal_text)
+
+    else:
+
+        st.info(reversal_text)
 # =========================
 # 主力分析
 # =========================
