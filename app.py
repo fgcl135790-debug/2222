@@ -187,15 +187,28 @@ colD.metric("狀態", state)
 
 
 # =========================
-# 🚦 交易燈號（核心）
+# 🚦 台股券商級訊號（修正版）
 # =========================
-if signal == "BUY":
-    st.success("🟢 做多訊號")
-elif signal == "SELL":
-    st.error("🔴 做空訊號")
-else:
-    st.warning("🟡 觀望")
 
+st.subheader("📊 交易訊號")
+
+if signal == "BUY":
+    st.markdown(
+        "<div style='background:#b71c1c;padding:12px;border-radius:10px;color:white;font-weight:bold'>🟢 做多訊號</div>",
+        unsafe_allow_html=True
+    )
+
+elif signal == "SELL":
+    st.markdown(
+        "<div style='background:#1b5e20;padding:12px;border-radius:10px;color:white;font-weight:bold'>🔴 做空訊號</div>",
+        unsafe_allow_html=True
+    )
+
+else:
+    st.markdown(
+        "<div style='background:#455a64;padding:12px;border-radius:10px;color:white;font-weight:bold'>🟡 盤整觀望</div>",
+        unsafe_allow_html=True
+    )
 
 # =========================
 # 📉 反彈區（你要的）
