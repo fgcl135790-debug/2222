@@ -379,13 +379,18 @@ else:
     """, unsafe_allow_html=True)
 
 # =========================
-# 📈 走勢圖（修復清空問題）
+# 📈 走勢圖（修復空白 V6）
 # =========================
-st.subheader("📈 分時趨勢")
+fig.update_layout(
+    height=520,   # ⭐ 核心：撐高圖表
+    margin=dict(l=10, r=10, t=20, b=10),
+)
 
-fig = ChartBuilder.build_price_chart(prices, volumes)
-st.plotly_chart(fig, use_container_width=True)
-
+st.plotly_chart(
+    fig,
+    use_container_width=True,
+    height=520   # ⭐ Streamlit 外層同步撐高
+)
 
 # =========================
 # 📋 五檔（V5.7 無價差版）
