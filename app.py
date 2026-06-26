@@ -94,76 +94,48 @@ with st.sidebar:
     st.header("⚙️ 系統設定")
 
     data_source = st.radio(
-
         "資料來源",
-
         [
-
             "真實盤",
-
             "情境模擬",
-
         ],
-
     )
 
     stock_code = st.text_input(
-
         "股票代號",
-
         "2330",
-
     )
 
     api_key = st.text_input(
-
         "Fugle API Key",
-
         type="password",
-
     )
 
     sim_mode = st.selectbox(
-
         "模擬情境",
-
         [
-
             "一般波動",
-
             "漲停鎖死",
-
             "跌停鎖死",
-
             "跳空急跌",
-
             "軋空行情",
-
             "誘多出貨",
-
             "誘空嘎空",
-
             "拉高出貨",
-
             "主力吸籌",
-
         ],
-
     )
 
-refresh_sec = st.slider(
+    # 新增這裡
+    refresh_sec = st.slider(
+        "更新秒數",
+        min_value=1,
+        max_value=30,
+        value=2,
+        step=1,
+    )
 
-    "更新秒數",
-
-    min_value=1,
-
-    max_value=30,
-
-    value=2,
-
-    step=1,
-
-)
+    # 後面再接你的「自動大戶門檻」等設定
     
     # ---------------------
     # 大戶門檻
