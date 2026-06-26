@@ -353,8 +353,11 @@ while len(asks) < 5:
     asks.append({"price": 0, "size": 0})
 
 df = pd.DataFrame({
-    "買價": [b["price"] for b in bids[:5]],
+    # 🟢 買方（左邊）
     "買量": [b["size"] for b in bids[:5]],
+    "買價": [b["price"] for b in bids[:5]],
+
+    # 🔴 賣方（右邊）
     "賣價": [a["price"] for a in asks[:5]],
     "賣量": [a["size"] for a in asks[:5]],
 })
