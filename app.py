@@ -365,6 +365,17 @@ sell_sizes  = [a["size"] for a in asks[:5]]
 # =========================
 # 🎨 HTML（關鍵修正）
 # =========================
+
+<div style="
+    background:#111827;
+    padding:14px;
+    border-radius:12px;
+    height:120px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+">
+
 html = f"""
 <style>
 .orderbook {{
