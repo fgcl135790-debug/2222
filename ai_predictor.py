@@ -336,7 +336,7 @@ class AIPredictor:
 
         elif score >= 70:
 
-            action = "🟢 做多"
+            action = " 🔴做多"
 
         elif score >= 55:
 
@@ -352,7 +352,7 @@ class AIPredictor:
 
         else:
 
-            action = "🔴 做空"
+            action = "🟢 做空"
 
         confidence = score
 
@@ -647,7 +647,7 @@ class AIPredictor:
 
             signal = "BUY"
 
-            text = "🟢 AI判斷：高機率反轉向上"
+            text = "🔴 AI判斷：高機率反轉向上"
 
         elif probability >= 65:
 
@@ -659,7 +659,7 @@ class AIPredictor:
 
             signal = "SELL"
 
-            text = "🔴 AI判斷：持續轉弱"
+            text = "🟢 AI判斷：持續轉弱"
 
         else:
 
