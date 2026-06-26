@@ -345,10 +345,12 @@ st.plotly_chart(fig, use_container_width=True)
 # 📋 五檔（V5.7 無價差版）
 # =========================
 
+import streamlit.components.v1 as components
+
 st.subheader("📋 五檔專業版（V5.7）")
 
 # =========================
-# 🔧 防呆（一定要）
+# 防呆
 # =========================
 bids = bids[:5]
 asks = asks[:5]
@@ -359,17 +361,14 @@ while len(bids) < 5:
 while len(asks) < 5:
     asks.append({"price": 0, "size": 0})
 
-# =========================
-# 📦 拆資料
-# =========================
-buy_sizes = [int(x.get("size", 0)) for x in bids]
 buy_prices = [float(x.get("price", 0)) for x in bids]
+buy_sizes  = [int(x.get("size", 0)) for x in bids]
 
 sell_prices = [float(x.get("price", 0)) for x in asks]
-sell_sizes = [int(x.get("size", 0)) for x in asks]
+sell_sizes  = [int(x.get("size", 0)) for x in asks]
 
 # =========================
-# 🎨 HTML（最穩版本）
+# HTML
 # =========================
 html = """
 <style>
@@ -424,4 +423,5 @@ for i in range(5):
 
 html += "</table>"
 
-st.markdown(html, unsafe_allow_html=True)
+# 🚨 關鍵修正（不是 markdown）
+components.html(html, height=260, scrolling=False)
