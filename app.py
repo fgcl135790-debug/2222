@@ -732,8 +732,8 @@ with col1:
 with col2:
 
     st.subheader("🔄 AI反轉預測")
-
-    if reversal_signal == "BUY":
+    
+if reversal_signal == "BUY":
 
     st.error(
         reversal_text
