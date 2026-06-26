@@ -732,30 +732,30 @@ with col1:
 with col2:
 
     st.subheader("🔄 AI反轉預測")
-    
-if reversal_signal == "BUY":
 
-    st.error(
-        reversal_text
-    )
+    if reversal_signal == "BUY":
 
-elif reversal_signal == "SELL":
+        st.error(
+            reversal_text
+        )
 
-    st.success(
-        reversal_text
-    )
+    elif reversal_signal == "SELL":
 
-elif reversal_signal == "WATCH":
+        st.success(
+            reversal_text
+        )
 
-    st.warning(
-        reversal_text
-    )
+    elif reversal_signal == "WATCH":
 
-else:
+        st.warning(
+            reversal_text
+        )
 
-    st.info(
-        reversal_text
-    )
+    else:
+
+        st.info(
+            reversal_text
+        )
 
     st.metric(
         "AI信心",
@@ -773,6 +773,8 @@ else:
     for r in reversal_reasons:
 
         st.write("•", r)
+
+
 # =========================
 # 技術指標
 # =========================
