@@ -347,32 +347,16 @@ st.plotly_chart(fig, use_container_width=True)
 
 st.subheader("📋 五檔專業版（V5.6）")
 
-# =========================
-# 🔧 防呆
-# =========================
-while len(bids) < 5:
-    bids.append({"price": 0, "size": 0})
+placeholder = st.empty()   # ⭐ 關鍵
 
-while len(asks) < 5:
-    asks.append({"price": 0, "size": 0})
-
-buy_prices = [b["price"] for b in bids[:5]]
-buy_sizes  = [b["size"] for b in bids[:5]]
-
-sell_prices = [a["price"] for a in asks[:5]]
-sell_sizes  = [a["size"] for a in asks[:5]]
-
-# =========================
-# 🎨 HTML（關鍵修正）
-# =========================
-
-
+# ===== build html =====
 html = f"""
 <style>
 .orderbook {{
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
+    table-layout: fixed;
 }}
 
 .orderbook th {{
@@ -418,7 +402,7 @@ html = f"""
 """
 
 for i in range(5):
-    spread = round(sell_prices[i] - buy_prices[i], 2) if sell_prices[i] and buy_prices[i] else 0
+    spread = round(sell_prices[i] - buy_prices[i], 2)
 
     html += f"""
     <tr>
@@ -432,7 +416,5 @@ for i in range(5):
 
 html += "</table>"
 
-# =========================
-# 🚨 這行是你剛剛壞掉的關鍵
-# =========================
-st.markdown(html, unsafe_allow_html=True)
+# 🔥 強制刷新（重點）
+placeholder.markdown(html, unsafe_allow_html=True)
