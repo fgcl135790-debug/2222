@@ -276,16 +276,6 @@ with col3:
     else:
         st.info("中性震盪")
 
-# =========================
-# 🚀 一次輸出（關鍵）
-# =========================
-st.markdown(f"""
-<div class="ai-grid">
-    {signal_html}
-    {ai_html}
-    {rebound_html}
-</div>
-""", unsafe_allow_html=True)
 
 # =========================
 # 📡 主力雷達（台股正確顏色版）
