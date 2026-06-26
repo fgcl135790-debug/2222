@@ -59,8 +59,13 @@ if "volume_history" not in st.session_state:
 if "big_order_log" not in st.session_state:
     st.session_state.big_order_log = []
 
+if "last_trade_serial" not in st.session_state:
+    st.session_state.last_trade_serial = None
+
 if "tick" not in st.session_state:
     st.session_state.tick = 0
+
+
 
 # =========================
 # Sidebar
@@ -237,6 +242,13 @@ volume = quote["last_size"]
 bids = quote["bids"]
 
 asks = quote["asks"]
+
+trade = quote["trade"]
+
+trade_serial = trade.get(
+    "serial",
+    0
+)
 
 is_close = quote.get(
     "is_close",
@@ -657,7 +669,16 @@ st.markdown("---")
 # 大戶成交偵測
 # =========================
 
-if volume >= big_order_threshold:
+if (
+    not is_close
+    and
+    volume >= big_order_threshold
+    and
+    trade_serial != st.session_state.last_trade_serial
+):
+
+    st.session_state.last_trade_serial = trade_serial
+
 
     impact_ratio = round(
         volume
