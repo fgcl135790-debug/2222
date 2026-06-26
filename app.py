@@ -382,6 +382,7 @@ else:
 # 📈 走勢圖（安全版）
 # =========================
 
+st.subheader("📈 分時趨勢")
 fig = ChartBuilder.build_price_chart(prices, volumes)
 
 # ⭐ 如果要改 layout，一定要在 fig 之後
