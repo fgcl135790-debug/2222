@@ -348,58 +348,62 @@ st.plotly_chart(fig, use_container_width=True)
 st.subheader("📋 五檔專業版（V5.7）")
 
 # =========================
-# 🔧 防呆
+# 🔧 防呆（一定要）
 # =========================
+bids = bids[:5]
+asks = asks[:5]
+
 while len(bids) < 5:
     bids.append({"price": 0, "size": 0})
 
 while len(asks) < 5:
     asks.append({"price": 0, "size": 0})
 
-buy_prices = [float(b.get("price", 0)) for b in bids[:5]]
-buy_sizes  = [int(b.get("size", 0)) for b in bids[:5]]
+# =========================
+# 📦 拆資料
+# =========================
+buy_sizes = [int(x.get("size", 0)) for x in bids]
+buy_prices = [float(x.get("price", 0)) for x in bids]
 
-sell_prices = [float(a.get("price", 0)) for a in asks[:5]]
-sell_sizes  = [int(a.get("size", 0)) for a in asks[:5]]
+sell_prices = [float(x.get("price", 0)) for x in asks]
+sell_sizes = [int(x.get("size", 0)) for x in asks]
 
 # =========================
-# 🎨 HTML（無 mid 版本）
+# 🎨 HTML（最穩版本）
 # =========================
 html = """
 <style>
-.orderbook {
+table {
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
 }
 
-.orderbook th {
+th {
     color: #aaa;
-    text-align: center;
     padding: 8px;
     border-bottom: 1px solid #333;
+    text-align: center;
 }
 
-.orderbook td {
-    text-align: center;
+td {
     padding: 8px;
+    text-align: center;
     border-bottom: 1px solid #222;
 }
 
-/* 🟢 買方 */
 .buy {
     color: #00e676;
     font-weight: 600;
 }
 
-/* 🔴 賣方 */
 .sell {
     color: #ff5252;
     font-weight: 600;
 }
 </style>
 
-<table class="orderbook">
+<table>
 <tr>
     <th>買量</th>
     <th>買價</th>
@@ -408,19 +412,12 @@ html = """
 </tr>
 """
 
-# =========================
-# 📊 五檔列
-# =========================
 for i in range(5):
-
-    bp = buy_prices[i]
-    sp = sell_prices[i]
-
     html += f"""
     <tr>
         <td class="buy">{buy_sizes[i]}</td>
-        <td class="buy">{bp}</td>
-        <td class="sell">{sp}</td>
+        <td class="buy">{buy_prices[i]}</td>
+        <td class="sell">{sell_prices[i]}</td>
         <td class="sell">{sell_sizes[i]}</td>
     </tr>
     """
