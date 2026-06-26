@@ -10,16 +10,15 @@ from market_analyzer import MarketAnalyzer
 from ai_predictor import AIPredictor
 from charts import ChartBuilder
 from exporters import Exporter
-
 from streamlit_autorefresh import st_autorefresh
 
 
 # =========================
-# V4.5 法人級交易系統
+# Page Config
 # =========================
 
 st.set_page_config(
-    page_title="法人級交易系統 V4.5",
+    page_title="準法人交易系統 V4.5",
     page_icon="🏦",
     layout="wide",
 )
@@ -27,7 +26,7 @@ st.set_page_config(
 st.markdown("""
 <style>
 .block-container{
-    padding:0.6rem 1rem;
+    padding:0.5rem 1rem;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -44,48 +43,50 @@ now = datetime.now(ZoneInfo("Asia/Taipei"))
 # Session State
 # =========================
 
-for k in [
-    "price_history",
-    "volume_history",
-    "big_order_log",
-    "tick",
-    "last_serial"
-]:
+for k in ["price_history", "volume_history", "big_order_log", "tick", "last_history_serial", "last_big_order_serial"]:
     if k not in st.session_state:
         st.session_state[k] = [] if "history" in k or "log" in k else 0
 
 
 # =========================
-# Sidebar（法人控制中心）
+# Sidebar
 # =========================
 
 with st.sidebar:
 
-    st.title("🏦 V4.5 法人控制中心")
+    st.title("⚙️ V4.5 控制中心")
 
     data_source = st.radio("資料來源", ["真實盤", "情境模擬"])
+
     stock_code = st.text_input("股票代號", "2330")
+
     api_key = st.text_input("Fugle API Key", type="password")
 
     sim_mode = st.selectbox(
         "模擬情境",
-        ["一般波動", "軋空行情", "誘多出貨", "主力吸籌", "暴力洗盤"]
+        ["一般波動", "軋空行情", "誘多出貨", "主力吸籌"]
     )
 
     refresh_sec = st.slider("更新秒數", 1, 10, 2)
 
-    auto_threshold = st.checkbox("自動大戶門檻", True)
+    auto_threshold = st.checkbox("自動大戶門檻", value=True)
 
-    avg_volume = 1
-    suggest_threshold = 100
 
+    # 平均量
     if len(st.session_state.volume_history) > 0:
-        avg_volume = sum(st.session_state.volume_history[-100:]) / max(len(st.session_state.volume_history[-100:]), 1)
+        avg_volume = sum(st.session_state.volume_history[-100:]) / max(len(st.session_state.volume_history), 1)
         suggest_threshold = int(avg_volume * 3)
 
         st.info(f"平均量：{avg_volume:.0f}\n建議門檻：{suggest_threshold}")
 
-    big_order_threshold = suggest_threshold if auto_threshold else st.number_input("大戶門檻", 10, 10000, 100)
+    else:
+        avg_volume = 1
+        suggest_threshold = 100
+
+    if auto_threshold:
+        big_order_threshold = suggest_threshold
+    else:
+        big_order_threshold = st.number_input("大戶門檻", 10, 10000, 100)
 
     sim_minutes = st.slider("模擬分鐘", 2, 60, 10)
 
@@ -94,15 +95,16 @@ with st.sidebar:
         st.session_state.volume_history = []
         st.session_state.big_order_log = []
         st.session_state.tick = 0
-        st.session_state.last_serial = 0
+        st.session_state.last_history_serial = None
+        st.session_state.last_big_order_serial = None
         st.rerun()
 
 
 # =========================
-# 自動刷新
+# Auto Refresh
 # =========================
 
-st_autorefresh(interval=refresh_sec * 1000, key="v45")
+st_autorefresh(interval=refresh_sec * 1000, key="v45_refresh")
 
 
 # =========================
@@ -120,7 +122,6 @@ try:
         quote = provider.get_quote(stock_code)
 
     else:
-
         engine = SimulationEngine(mode=sim_mode, base_price=100)
         quote = engine.generate(st.session_state.tick, sim_minutes * 60)
         st.session_state.tick += 1
@@ -131,7 +132,7 @@ except Exception as e:
 
 
 # =========================
-# Quote 解包
+# Quote
 # =========================
 
 name = quote["name"]
@@ -147,29 +148,35 @@ trade_serial = trade.get("serial", 0)
 
 is_close = quote.get("is_close", False)
 
+
+# =========================
+# Market Open
+# =========================
+
 market_open = (9 <= now.hour <= 13)
 
 
 # =========================
-# History（法人級修復）
+# History
 # =========================
 
 if market_open and not is_close:
 
-    if len(st.session_state.price_history) == 0 or trade_serial != st.session_state.last_serial:
-
-        st.session_state.last_serial = trade_serial
-
+    if len(st.session_state.price_history) == 0 or trade_serial != st.session_state.last_history_serial:
+        st.session_state.last_history_serial = trade_serial
         st.session_state.price_history.append(price)
         st.session_state.volume_history.append(volume)
 
+
+st.session_state.price_history = st.session_state.price_history[-500:]
+st.session_state.volume_history = st.session_state.volume_history[-500:]
 
 prices = st.session_state.price_history
 volumes = st.session_state.volume_history
 
 
 # =========================
-# 技術指標（V4.5法人版）
+# Indicators
 # =========================
 
 ema5 = MarketAnalyzer.calculate_ema(prices, 5)
@@ -181,11 +188,8 @@ macd, macd_signal, macd_hist = MarketAnalyzer.calculate_macd(prices)
 
 momentum = MarketAnalyzer.momentum(prices)
 volatility = MarketAnalyzer.volatility(prices)
+volume_trend = MarketAnalyzer.volume_trend(volumes)
 
-
-# =========================
-# 買賣盤（法人級）
-# =========================
 
 total_bid = sum(x["size"] for x in bids)
 total_ask = sum(x["size"] for x in asks)
@@ -194,7 +198,7 @@ bid_ratio = total_bid / max(total_ask, 1)
 
 
 # =========================
-# 🧠 V4.5 AI核心（升級）
+# AI SCORE（法人版）
 # =========================
 
 ai_score = 50
@@ -202,23 +206,22 @@ reasons = []
 
 if price > vwap:
     ai_score += 10
-    reasons.append("站上VWAP（多方控盤）")
+    reasons.append("站上VWAP（偏多）")
 else:
     ai_score -= 10
+    reasons.append("跌破VWAP（偏空）")
 
 if ema5 > ema20 > ema60:
     ai_score += 20
-    reasons.append("多頭法人排列")
+    reasons.append("多頭排列")
 elif ema5 < ema20 < ema60:
     ai_score -= 20
-    reasons.append("空頭法人出貨")
+    reasons.append("空頭排列")
 
 if rsi < 30:
     ai_score += 10
-    reasons.append("超賣區（法人撿貨）")
 elif rsi > 70:
     ai_score -= 10
-    reasons.append("超買區（獲利了結）")
 
 if macd > macd_signal:
     ai_score += 10
@@ -239,45 +242,27 @@ ai_score = max(0, min(100, int(ai_score)))
 
 
 # =========================
-# 🔄 反轉區（V4.5機率版）
+# 反轉區（完整回來）
 # =========================
 
-reversal_prob = 50
-
-if ema5 > ema20:
-    reversal_prob -= 15
+if ema5 > ema20 and rsi < 40:
+    reversal = "BUY"
+elif ema5 < ema20 and rsi > 60:
+    reversal = "SELL"
 else:
-    reversal_prob += 15
-
-if rsi < 35:
-    reversal_prob += 20
-elif rsi > 65:
-    reversal_prob -= 20
-
-reversal_prob = max(0, min(100, reversal_prob))
-
-if reversal_prob >= 65:
-    reversal_signal = "BUY"
-elif reversal_prob <= 35:
-    reversal_signal = "SELL"
-else:
-    reversal_signal = "WATCH"
+    reversal = "WATCH"
 
 
 # =========================
-# UI Header
+# HEADER
 # =========================
 
 st.title(f"🏦 {name} ({stock_code})")
-
-if is_close:
-    st.error("已收盤")
-else:
-    st.success("即時法人盤")
+st.caption(f"更新時間：{now.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 # =========================
-# 走勢圖（完整）
+# 走勢圖（不會再消失）
 # =========================
 
 st.subheader("📈 法人走勢圖")
@@ -299,39 +284,37 @@ c4.metric("RSI", rsi)
 
 
 # =========================
-# AI區
+# AI 判斷
 # =========================
 
-col1, col2, col3 = st.columns(3)
+st.subheader("🤖 AI判斷")
 
-with col1:
-    st.subheader("🧠 AI判斷")
-    st.metric("分數", ai_score)
-    st.progress(ai_score / 100)
+st.progress(ai_score / 100)
+st.write(f"分數：{ai_score}/100")
 
-with col2:
-    st.subheader("🔄 反轉區")
-
-    st.metric("反轉機率", f"{reversal_prob}%")
-
-    if reversal_signal == "BUY":
-        st.success("可能反彈")
-    elif reversal_signal == "SELL":
-        st.error("可能轉弱")
-    else:
-        st.info("盤整")
-
-with col3:
-    st.subheader("📌 AI理由")
-    for r in reasons:
-        st.write("•", r)
+for r in reasons:
+    st.write("•", r)
 
 
 # =========================
-# 五檔（法人強化版）
+# 反轉區 UI
 # =========================
 
-st.subheader("📋 五檔法人盤口")
+st.subheader("🔄 反轉區")
+
+if reversal == "BUY":
+    st.success("📈 可能反彈（法人回補）")
+elif reversal == "SELL":
+    st.error("📉 可能轉弱（法人出貨）")
+else:
+    st.info("⚪ 盤整（觀望）")
+
+
+# =========================
+# 五檔
+# =========================
+
+st.subheader("📋 五檔")
 
 while len(bids) < 5:
     bids.append({"price": 0, "size": 0})
@@ -347,11 +330,3 @@ df = pd.DataFrame({
 })
 
 st.dataframe(df, use_container_width=True)
-
-
-# =========================
-# Footer
-# =========================
-
-st.markdown("---")
-st.caption("V4.5 法人級 AI 交易系統 | Institutional Flow Engine")
