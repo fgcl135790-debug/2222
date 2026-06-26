@@ -394,71 +394,69 @@ class ChartBuilder:
 
             )
 
-        # =========================
-        # 最高價
-        # =========================
+# =========================
+# 最高價
+# =========================
 
-        if len(prices) > 0:
+if len(prices) > 0:
 
-            high_price = max(prices)
+    high_price = max(prices)
+    high_index = prices.index(high_price)
 
-            high_index = prices.index(high_price)
+    fig.add_annotation(
 
-         fig.add_annotation(
-             x=min_idx,
-             y=min_price,
+        x=high_index,
+        y=high_price,
 
-             text=f"{min_price:.2f}",
+        text=f"{high_price:.2f}",
 
-             showarrow=True,
+        showarrow=True,
+        arrowhead=2,
 
-             arrowhead=2,
+        ay=-35,      # 往上
 
-             ay=35,          # 往下移文字
+        ax=0,
 
-             ax=0,
+        font=dict(
+            size=12,
+            color="#ff3333",   # 台股紅=上漲
+        ),
 
-             font=dict(
-                 size=12,
-                 color="#00ff66",
-             ),
+        arrowcolor="#ff3333",
 
-             arrowcolor="#00ff66",
-         )
+    )
 
+# =========================
+# 最低價
+# =========================
 
-        # =========================
-        # 最低價
-        # =========================
+if len(prices) > 0:
 
-        if len(prices) > 0:
+    low_price = min(prices)
+    low_index = prices.index(low_price)
 
-            low_price = min(prices)
+    fig.add_annotation(
 
-            low_index = prices.index(low_price)
+        x=low_index,
+        y=low_price,
 
-         fig.add_annotation(
-             x=min_idx,
-             y=min_price,
+        text=f"{low_price:.2f}",
 
-             text=f"{min_price:.2f}",
+        showarrow=True,
+        arrowhead=2,
 
-             showarrow=True,
+        ay=35,        # 往下
 
-             arrowhead=2,
+        ax=0,
 
-             ay=35,          # 往下移文字
+        font=dict(
+            size=12,
+            color="#00cc66",   # 台股綠=下跌
+        ),
 
-             ax=0,
+        arrowcolor="#00cc66",
 
-             font=dict(
-                 size=12,
-                 color="#00ff66",
-                 ),
-
-                 arrowcolor="#00ff66",
-         )
-
+    )
         # =========================
         # 最新價格水平線
         # =========================
