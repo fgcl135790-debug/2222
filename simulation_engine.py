@@ -1,504 +1,165 @@
 import random
+import math
+from datetime import datetime
 
 
 class SimulationEngine:
+    """
+    V4.5 Professional Market Simulation Engine
+    - trend + volatility + randomness
+    - scenario control
+    - stable output (no crash)
+    """
 
-    def __init__(
-
-        self,
-
-        mode="一般波動",
-
-        base_price=100,
-
-    ):
-
+    def __init__(self, mode="一般波動", base_price=100):
         self.mode = mode
+        self.base_price = float(base_price)
+        self.last_price = float(base_price)
 
-        self.base_price = base_price
+        self.step = 0
+
+        # 波動參數（核心）
+        self.volatility = 0.3
+        self.trend_bias = 0.0
+
+        # 不同情境
+        self._set_mode(mode)
 
     # =========================
-    # 建立最佳五檔
+    # 模式設定
     # =========================
+    def _set_mode(self, mode):
 
-    def _best5(
+        if mode == "一般波動":
+            self.volatility = 0.3
+            self.trend_bias = 0.0
 
-        self,
+        elif mode == "軋空行情":
+            self.volatility = 0.6
+            self.trend_bias = 0.15
 
-        price,
+        elif mode == "出貨":
+            self.volatility = 0.5
+            self.trend_bias = -0.2
 
-    ):
+        elif mode == "吸籌":
+            self.volatility = 0.25
+            self.trend_bias = 0.05
+
+        elif mode == "誘多出貨":
+            self.volatility = 0.4
+            self.trend_bias = -0.1
+
+        else:
+            self.volatility = 0.3
+            self.trend_bias = 0.0
+
+    # =========================
+    # 核心價格生成（重點）
+    # =========================
+    def _generate_change(self):
+
+        # sine 趨勢（市場節奏）
+        cycle = math.sin(self.step / 8)
+
+        # 隨機噪音
+        noise = random.uniform(-1, 1)
+
+        # 波動 + 趨勢 + 噪音
+        change = (
+            cycle * self.trend_bias * 2 +
+            noise * self.volatility
+        )
+
+        # 防呆（避免你之前 crash）
+        try:
+            return float(change)
+        except:
+            return 0.0
+
+    # =========================
+    # 成交量生成
+    # =========================
+    def _generate_volume(self):
+
+        base = random.randint(100, 1000)
+
+        spike = 1.0
+
+        # 模式影響量能
+        if self.mode == "軋空行情":
+            spike = random.uniform(1.5, 3.0)
+
+        elif self.mode == "出貨":
+            spike = random.uniform(1.2, 2.5)
+
+        elif self.mode == "吸籌":
+            spike = random.uniform(0.8, 1.5)
+
+        return int(base * spike)
+
+    # =========================
+    # 五檔生成（簡化券商風格）
+    # =========================
+    def _generate_orderbook(self, price):
 
         bids = []
-
         asks = []
 
         for i in range(5):
 
-            bids.append(
+            bid_price = round(price - (i * 0.1 + random.uniform(0, 0.05)), 2)
+            ask_price = round(price + (i * 0.1 + random.uniform(0, 0.05)), 2)
 
-                {
+            bids.append({
+                "price": bid_price,
+                "size": random.randint(50, 2000)
+            })
 
-                    "price": round(
-
-                        price - 0.1 * (i + 1),
-
-                        2,
-
-                    ),
-
-                    "size": random.randint(
-
-                        20,
-
-                        300,
-
-                    ),
-
-                }
-
-            )
-
-            asks.append(
-
-                {
-
-                    "price": round(
-
-                        price + 0.1 * (i + 1),
-
-                        2,
-
-                    ),
-
-                    "size": random.randint(
-
-                        20,
-
-                        300,
-
-                    ),
-
-                }
-
-            )
+            asks.append({
+                "price": ask_price,
+                "size": random.randint(50, 2000)
+            })
 
         return bids, asks
 
     # =========================
-    # 產生行情
+    # 主生成函數（Streamlit用）
     # =========================
+    def generate(self, tick, duration):
 
-    def generate(
+        self.step = tick
 
-        self,
+        change = self._generate_change()
 
-        tick,
+        # 💥 安全加總（你之前 crash 就在這）
+        try:
+            price = float(self.last_price) + float(change)
+        except:
+            price = float(self.last_price)
 
-        total_ticks,
+        # 防止極端值
+        price = max(price, self.base_price * 0.5)
+        price = min(price, self.base_price * 1.5)
 
-    ):
+        self.last_price = price
 
-        # =========================
-        # 一般波動
-        # =========================
+        volume = self._generate_volume()
 
-        if self.mode == "一般波動":
+        bids, asks = self._generate_orderbook(price)
 
-            change = random.uniform(
-
-                -0.4,
-
-                0.4,
-
-            )
-
-        # =========================
-        # 主力吸籌
-        # =========================
-
-        elif self.mode == "主力吸籌":
-
-            if tick < total_ticks * 0.7:
-
-                change = random.uniform(
-
-                    -0.1,
-
-                    0.15,
-
-                )
-
-            else:
-
-                change = random.uniform(
-
-                    0.3,
-
-                    1.2,
-
-                )
-
-        # =========================
-        # 洗盤
-        # =========================
-
-        elif self.mode == "洗盤":
-
-            if tick % 6 < 3:
-
-                change = random.uniform(
-
-                    -1.2,
-
-                    -0.2,
-
-                )
-
-            else:
-
-                change = random.uniform(
-
-                    0.2,
-
-                    1.2,
-
-                )
-
-        # =========================
-        # 突破
-        # =========================
-
-        elif self.mode == "突破":
-
-            if tick < total_ticks * 0.5:
-
-                change = random.uniform(
-
-                    -0.2,
-
-                    0.2,
-
-                )
-
-            else:
-
-                change = random.uniform(
-
-                    0.8,
-
-                    2.5,
-
-                )
-
-        # =========================
-        # 跌破
-        # =========================
-
-        elif self.mode == "跌破":
-
-            if tick < total_ticks * 0.5:
-
-                change = random.uniform(
-
-                    -0.2,
-
-                    0.2,
-
-                )
-
-            else:
-
-                change = random.uniform(
-
-                    -2.5,
-
-                    -0.8,
-
-                )
-
-        # =========================
-        # 一般波動
-        # =========================
-
-        if self.mode == "一般波動":
-
-            change = random.uniform(
-
-                -0.4,
-
-                0.4,
-
-            )
-
-        # =========================
-        # 主力吸籌
-        # =========================
-
-        elif self.mode == "主力吸籌":
-
-            if tick < total_ticks * 0.7:
-
-                change = random.uniform(
-
-                    -0.1,
-
-                    0.15,
-
-                )
-
-            else:
-
-                change = random.uniform(
-
-                    0.3,
-
-                    1.2,
-
-                )
-
-        # =========================
-        # 洗盤
-        # =========================
-
-        elif self.mode == "洗盤":
-
-            if tick % 6 < 3:
-
-                change = random.uniform(
-
-                    -1.2,
-
-                    -0.2,
-
-                )
-
-            else:
-
-                change = random.uniform(
-
-                    0.2,
-
-                    1.2,
-
-                )
-
-        # =========================
-        # 突破
-        # =========================
-
-        elif self.mode == "突破":
-
-            if tick < total_ticks * 0.5:
-
-                change = random.uniform(
-
-                    -0.2,
-
-                    0.2,
-
-                )
-
-            else:
-
-                change = random.uniform(
-
-                    0.8,
-
-                    2.5,
-
-                )
-
-        # =========================
-        # 跌破
-        # =========================
-
-        elif self.mode == "跌破":
-
-            if tick < total_ticks * 0.5:
-
-                change = random.uniform(
-
-                    -0.2,
-
-                    0.2,
-
-                )
-
-            else:
-
-                change = random.uniform(
-
-                    -2.5,
-
-                    -0.8,
-
-                )
-
-        # =========================
-        # 最新價格
-        # =========================
-
-        price = round(
-
-            self.base_price + change,
-
-            2,
-
-        )
-
-        if price <= 1:
-
-            price = 1
-
-        # 下一次價格基準
-        self.base_price = price
-
-        # =========================
-        # VWAP
-        # =========================
-
-        vwap = round(
-
-            price + random.uniform(
-
-                -0.3,
-
-                0.3,
-
-            ),
-
-            2,
-
-        )
-
-        # =========================
-        # 成交量
-        # =========================
-
-        if self.mode in [
-
-            "突破",
-
-            "軋空行情",
-
-            "拉高出貨",
-
-            "漲停鎖死",
-
-        ]:
-
-            volume = random.randint(
-
-                800,
-
-                3500,
-
-            )
-
-        elif self.mode in [
-
-            "跌破",
-
-            "跳空急跌",
-
-            "跌停鎖死",
-
-        ]:
-
-            volume = random.randint(
-
-                600,
-
-                2800,
-
-            )
-
-        else:
-
-            volume = random.randint(
-
-                20,
-
-                600,
-
-            )
-
-        # =========================
-        # Best5
-        # =========================
-
-        bids, asks = self._best5(
-
-            price,
-
-        )
-
-        # =========================
-        # 主力模式
-        # =========================
-
-        if self.mode in [
-
-            "主力吸籌",
-
-            "突破",
-
-            "軋空行情",
-
-            "漲停鎖死",
-
-        ]:
-
-            bids[0]["size"] *= 5
-
-            bids[1]["size"] *= 4
-
-        if self.mode in [
-
-            "拉高出貨",
-
-            "跌破",
-
-            "跳空急跌",
-
-            "跌停鎖死",
-
-        ]:
-
-            asks[0]["size"] *= 5
-
-            asks[1]["size"] *= 4
-
-        # =========================
-        # 回傳
-        # =========================
+        # 模擬 VWAP
+        vwap = price * random.uniform(0.998, 1.002)
 
         return {
-
             "name": "Simulation",
-
-            "price": price,
-
-            "vwap": vwap,
-
+            "price": round(price, 2),
+            "vwap": round(vwap, 2),
             "last_size": volume,
-
             "bids": bids,
-
             "asks": asks,
-
             "trade": {
-
-                "serial": tick,
-
+                "serial": tick
             },
-
-            "is_close": (
-
-                tick >= total_ticks
-
-            ),
-
+            "is_close": False
         }
-
