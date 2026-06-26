@@ -1,6 +1,5 @@
-# market_analyzer.py
-
 import pandas as pd
+import numpy as np
 
 
 class MarketAnalyzer:
@@ -23,6 +22,56 @@ class MarketAnalyzer:
         )
 
     # =========================
+    # SMA
+    # =========================
+
+    @staticmethod
+    def calculate_sma(prices, period):
+
+        if len(prices) < period:
+            return 0
+
+        return (
+            pd.Series(prices)
+            .rolling(period)
+            .mean()
+            .iloc[-1]
+        )
+
+    # =========================
+    # Momentum
+    # =========================
+
+    @staticmethod
+    def momentum(prices):
+
+        if len(prices) < 5:
+            return 0
+
+        return prices[-1] - prices[-5]
+
+    # =========================
+    # Price Slope
+    # =========================
+
+    @staticmethod
+    def price_slope(prices):
+
+        if len(prices) < 10:
+            return 0
+
+        x = np.arange(10)
+        y = np.array(prices[-10:])
+
+        slope = np.polyfit(
+            x,
+            y,
+            1
+        )[0]
+
+        return slope
+
+    # =========================
     # 趨勢判斷
     # =========================
 
@@ -34,20 +83,47 @@ class MarketAnalyzer:
         ema20,
     ):
 
-        if price > vwap and ema5 > ema20:
+        if (
+            price > vwap
+            and
+            ema5 > ema20
+        ):
             return "多頭"
 
-        if price < vwap and ema5 < ema20:
+        elif (
+            price < vwap
+            and
+            ema5 < ema20
+        ):
             return "空頭"
 
         return "盤整"
 
     # =========================
-    # AI交易判斷
+    # 波動率
+    # =========================
+
+    @staticmethod
+    def volatility(prices):
+
+        if len(prices) < 20:
+            return 0
+
+        return round(
+            pd.Series(prices)
+            .pct_change()
+            .std()
+            * 100,
+            2
+        )
+
+    # =========================
+    # AI交易判斷 v2
     # =========================
 
     @staticmethod
     def trading_signal(
+        prices,
         price,
         vwap,
         ema5,
@@ -61,7 +137,45 @@ class MarketAnalyzer:
 
         reasons = []
 
+        # =====================
+        # Momentum
+        # =====================
+
+        if len(prices) >= 5:
+
+            last3 = prices[-3:]
+
+            if (
+
+                last3[2] >
+                last3[1] >
+                last3[0]
+
+            ):
+
+                score += 15
+
+                reasons.append(
+                    "短線價格持續上升"
+                )
+
+            elif (
+
+                last3[2] <
+                last3[1] <
+                last3[0]
+
+            ):
+
+                score -= 15
+
+                reasons.append(
+                    "短線價格持續下降"
+                )
+
+        # =====================
         # VWAP
+        # =====================
 
         if price > vwap:
 
@@ -79,7 +193,9 @@ class MarketAnalyzer:
                 "現價跌破VWAP"
             )
 
-        # EMA5
+        # =====================
+        # EMA
+        # =====================
 
         if ema5 > ema20:
 
@@ -97,8 +213,6 @@ class MarketAnalyzer:
                 "EMA5跌破EMA20"
             )
 
-        # EMA20
-
         if ema20 > ema60:
 
             score += 20
@@ -115,22 +229,37 @@ class MarketAnalyzer:
                 "EMA20跌破EMA60"
             )
 
-        # 買賣盤力道
+        # =====================
+        # 委買委賣
+        # =====================
 
         bid_ratio = (
-            total_bid /
+
+            total_bid
+
+            /
+
             max(total_ask, 1)
+
         )
 
-        if bid_ratio > 1.5:
+        if bid_ratio >= 2:
 
-            score += 25
+            score += 30
 
             reasons.append(
-                "委買明顯大於委賣"
+                "委買遠大於委賣"
             )
 
-        elif bid_ratio > 1:
+        elif bid_ratio >= 1.5:
+
+            score += 20
+
+            reasons.append(
+                "委買明顯強勢"
+            )
+
+        elif bid_ratio >= 1:
 
             score += 10
 
@@ -138,12 +267,20 @@ class MarketAnalyzer:
                 "委買略強"
             )
 
-        elif bid_ratio < 0.67:
+        elif bid_ratio <= 0.5:
 
-            score -= 25
+            score -= 30
 
             reasons.append(
-                "委賣明顯大於委買"
+                "委賣遠大於委買"
+            )
+
+        elif bid_ratio <= 0.7:
+
+            score -= 20
+
+            reasons.append(
+                "委賣明顯強勢"
             )
 
         else:
@@ -154,16 +291,40 @@ class MarketAnalyzer:
                 "委賣略強"
             )
 
+        # =====================
+        # Momentum加權
+        # =====================
+
+        momentum = MarketAnalyzer.momentum(
+            prices
+        )
+
+        if momentum > 2:
+
+            score += 10
+
+            reasons.append(
+                "Momentum向上"
+            )
+
+        elif momentum < -2:
+
+            score -= 10
+
+            reasons.append(
+                "Momentum向下"
+            )
+
         confidence = min(
             abs(score),
             100
         )
 
-        if score >= 40:
+        if score >= 60:
 
             action = "做多"
 
-        elif score <= -40:
+        elif score <= -60:
 
             action = "做空"
 
@@ -172,274 +333,636 @@ class MarketAnalyzer:
             action = "觀望"
 
         return (
+
             action,
+
             confidence,
-            reasons
+
+            reasons,
+
         )
 
     # =========================
-    # 主力分數
+    # AI 趨勢反轉預測 v2
     # =========================
 
     @staticmethod
-    def institution_score(
-        total_bid,
-        total_ask,
-    ):
-
-        total = (
-            total_bid +
-            total_ask
-        )
-
-        if total == 0:
-            return 50
-
-        return int(
-            total_bid /
-            total *
-            100
-        )
-
-    # =========================
-    # 主力吸籌
-    # =========================
-
-    @staticmethod
-    def detect_accumulation(
-        total_bid,
-        total_ask,
-    ):
-
-        return (
-            total_bid >
-            total_ask * 2
-        )
-
-    # =========================
-    # 主力出貨
-    # =========================
-
-    @staticmethod
-    def detect_distribution(
-        total_bid,
-        total_ask,
-    ):
-
-        return (
-            total_ask >
-            total_bid * 2
-        )
-
-    # =========================
-    # 多頭排列
-    # =========================
-
-    @staticmethod
-    def bullish_alignment(
+    def reversal_prediction(
+        prices,
+        price,
+        vwap,
         ema5,
         ema20,
         ema60,
-    ):
-
-        return (
-            ema5 >
-            ema20 >
-            ema60
-        )
-
-    # =========================
-    # 空頭排列
-    # =========================
-
-    @staticmethod
-    def bearish_alignment(
-        ema5,
-        ema20,
-        ema60,
-    ):
-
-        return (
-            ema5 <
-            ema20 <
-            ema60
-        )
-
-    # =========================
-    # 軋空行情
-    # =========================
-
-    @staticmethod
-    def detect_short_squeeze(
-        price_change,
-        volume,
-    ):
-
-        return (
-            price_change > 5
-            and
-            volume > 1500
-        )
-
-    # =========================
-    # 拉高出貨
-    # =========================
-
-    @staticmethod
-    def detect_distribution_spike(
-        price_change,
-        volume,
-    ):
-
-        return (
-            price_change > 3
-            and
-            volume > 2000
-        )
-
-    # =========================
-    # 跌停風險
-    # =========================
-
-    @staticmethod
-    def limit_down_risk(
-        price,
-        vwap,
-        total_bid,
-        total_ask,
-    ):
-
-        if (
-            price < vwap
-            and
-            total_ask >
-            total_bid * 3
-        ):
-            return True
-
-        return False
-
-    # =========================
-    # 漲停機率
-    # =========================
-
-    @staticmethod
-    def limit_up_probability(
-        price,
-        vwap,
         total_bid,
         total_ask,
     ):
 
         score = 0
 
+        reasons = []
+
+        # =====================
+        # VWAP
+        # =====================
+
         if price > vwap:
-            score += 40
 
-        if total_bid > total_ask:
-            score += 30
+            score += 20
 
-        ratio = (
-            total_bid /
+            reasons.append(
+                "站上VWAP"
+            )
+
+        else:
+
+            reasons.append(
+                "仍在VWAP下"
+            )
+
+        # =====================
+        # EMA
+        # =====================
+
+        if ema5 > ema20:
+
+            score += 20
+
+            reasons.append(
+                "EMA5突破EMA20"
+            )
+
+        if ema20 > ema60:
+
+            score += 10
+
+            reasons.append(
+                "EMA20維持多頭"
+            )
+
+        # =====================
+        # 最近價格
+        # =====================
+
+        if len(prices) >= 5:
+
+            last5 = prices[-5:]
+
+            if (
+
+                last5[-1] >
+                last5[-2] >
+                last5[-3]
+
+            ):
+
+                score += 20
+
+                reasons.append(
+                    "最近價格開始走高"
+                )
+
+            elif (
+
+                last5[-1] <
+                last5[-2] <
+                last5[-3]
+
+            ):
+
+                score -= 20
+
+                reasons.append(
+                    "最近價格持續走弱"
+                )
+
+        # =====================
+        # 委買委賣
+        # =====================
+
+        bid_ratio = (
+
+            total_bid
+
+            /
+
             max(total_ask, 1)
+
         )
 
-        if ratio > 2:
-            score += 30
+        if bid_ratio >= 2:
 
-        return min(
-            score,
-            100
+            score += 25
+
+            reasons.append(
+                "委買非常強勢"
+            )
+
+        elif bid_ratio >= 1.5:
+
+            score += 15
+
+            reasons.append(
+                "委買大於委賣"
+            )
+
+        elif bid_ratio <= 0.5:
+
+            score -= 25
+
+            reasons.append(
+                "委賣非常強勢"
+            )
+
+        elif bid_ratio <= 0.7:
+
+            score -= 15
+
+            reasons.append(
+                "委賣大於委買"
+            )
+
+        # =====================
+        # Momentum
+        # =====================
+
+        momentum = MarketAnalyzer.momentum(
+            prices
+        )
+
+        if momentum > 2:
+
+            score += 10
+
+            reasons.append(
+                "Momentum向上"
+            )
+
+        elif momentum < -2:
+
+            score -= 10
+
+            reasons.append(
+                "Momentum向下"
+            )
+
+        # =====================
+        # 多頭排列
+        # =====================
+
+        if ema5 > ema20 > ema60:
+
+            score += 15
+
+            reasons.append(
+                "均線多頭排列"
+            )
+
+        elif ema5 < ema20 < ema60:
+
+            score -= 15
+
+            reasons.append(
+                "均線空頭排列"
+            )
+
+        probability = max(
+
+            0,
+
+            min(score, 100)
+
+        )
+
+        stars = "⭐" * max(
+            1,
+            probability // 20
+        )
+
+        if probability >= 80:
+
+            signal = "BUY"
+
+            text = "🟢 高機率反轉向上"
+
+        elif probability >= 60:
+
+            signal = "WATCH"
+
+            text = "🟡 有反轉跡象"
+
+        elif probability <= 20:
+
+            signal = "SELL"
+
+            text = "🔴 持續轉弱"
+
+        else:
+
+            signal = "NONE"
+
+            text = "⚪ 尚未形成反轉"
+
+        return (
+
+            signal,
+
+            text,
+
+            probability,
+
+            stars,
+
+            reasons,
+
         )
 
     # =========================
-# AI 趨勢反轉預測 v2
-# =========================
+    # AI 趨勢反轉預測 v2
+    # =========================
 
-@staticmethod
-def reversal_prediction(
-    prices,
-    price,
-    vwap,
-    ema5,
-    ema20,
-    ema60,
-    total_bid,
-    total_ask,
-):
+    @staticmethod
+    def reversal_prediction(
+        prices,
+        price,
+        vwap,
+        ema5,
+        ema20,
+        ema60,
+        total_bid,
+        total_ask,
+    ):
 
-    score = 0
-    reasons = []
+        score = 0
 
-    # VWAP
-    if price > vwap:
-        score += 20
-        reasons.append("站上VWAP")
-    else:
-        reasons.append("仍在VWAP下")
+        reasons = []
 
-    # EMA
-    if ema5 > ema20:
-        score += 20
-        reasons.append("EMA5突破EMA20")
+        # =====================
+        # VWAP
+        # =====================
 
-    if ema20 > ema60:
-        score += 10
-        reasons.append("EMA20維持多頭")
+        if price > vwap:
 
-    # 最近價格
-    if len(prices) >= 5:
-
-        last5 = prices[-5:]
-
-        if last5[-1] > last5[-2] > last5[-3]:
             score += 20
-            reasons.append("最近價格開始走高")
 
-        elif last5[-1] < last5[-2] < last5[-3]:
-            score -= 20
-            reasons.append("最近價格持續走弱")
+            reasons.append(
+                "站上VWAP"
+            )
 
-    # 買賣盤
-    bid_ratio = total_bid / max(total_ask, 1)
+        else:
 
-    if bid_ratio > 1.5:
-        score += 20
-        reasons.append("委買明顯大於委賣")
+            reasons.append(
+                "仍在VWAP下"
+            )
 
-    elif bid_ratio > 1:
-        score += 10
-        reasons.append("委買略強")
+        # =====================
+        # EMA
+        # =====================
 
-    # 多頭排列
-    if ema5 > ema20 > ema60:
-        score += 10
-        reasons.append("多頭排列")
+        if ema5 > ema20:
 
-    probability = max(0, min(score, 100))
+            score += 20
 
-    stars = "⭐" * max(1, probability // 20)
+            reasons.append(
+                "EMA5突破EMA20"
+            )
 
-    if probability >= 80:
-        signal = "BUY"
-        text = "🟢 高機率反轉向上"
+        if ema20 > ema60:
 
-    elif probability >= 60:
-        signal = "WATCH"
-        text = "🟡 有反轉跡象"
+            score += 10
 
-    elif probability <= 20:
-        signal = "SELL"
-        text = "🔴 持續轉弱"
+            reasons.append(
+                "EMA20維持多頭"
+            )
 
-    else:
-        signal = "NONE"
-        text = "⚪ 尚未形成反轉"
+        # =====================
+        # 最近價格
+        # =====================
 
-    return (
-        signal,
-        text,
-        probability,
-        stars,
-        reasons
-    )
+        if len(prices) >= 5:
+
+            last5 = prices[-5:]
+
+            if (
+
+                last5[-1] >
+                last5[-2] >
+                last5[-3]
+
+            ):
+
+                score += 20
+
+                reasons.append(
+                    "最近價格開始走高"
+                )
+
+            elif (
+
+                last5[-1] <
+                last5[-2] <
+                last5[-3]
+
+            ):
+
+                score -= 20
+
+                reasons.append(
+                    "最近價格持續走弱"
+                )
+
+        # =====================
+        # 委買委賣
+        # =====================
+
+        bid_ratio = (
+
+            total_bid
+
+            /
+
+            max(total_ask, 1)
+
+        )
+
+        if bid_ratio >= 2:
+
+            score += 25
+
+            reasons.append(
+                "委買非常強勢"
+            )
+
+        elif bid_ratio >= 1.5:
+
+            score += 15
+
+            reasons.append(
+                "委買大於委賣"
+            )
+
+        elif bid_ratio <= 0.5:
+
+            score -= 25
+
+            reasons.append(
+                "委賣非常強勢"
+            )
+
+        elif bid_ratio <= 0.7:
+
+            score -= 15
+
+            reasons.append(
+                "委賣大於委買"
+            )
+
+        # =====================
+        # Momentum
+        # =====================
+
+        momentum = MarketAnalyzer.momentum(
+            prices
+        )
+
+        if momentum > 2:
+
+            score += 10
+
+            reasons.append(
+                "Momentum向上"
+            )
+
+        elif momentum < -2:
+
+            score -= 10
+
+            reasons.append(
+                "Momentum向下"
+            )
+
+        # =====================
+        # 多頭排列
+        # =====================
+
+        if ema5 > ema20 > ema60:
+
+            score += 15
+
+            reasons.append(
+                "均線多頭排列"
+            )
+
+        elif ema5 < ema20 < ema60:
+
+            score -= 15
+
+            reasons.append(
+                "均線空頭排列"
+            )
+
+        probability = max(
+
+            0,
+
+            min(score, 100)
+
+        )
+
+        stars = "⭐" * max(
+            1,
+            probability // 20
+        )
+
+        if probability >= 80:
+
+            signal = "BUY"
+
+            text = "🟢 高機率反轉向上"
+
+        elif probability >= 60:
+
+            signal = "WATCH"
+
+            text = "🟡 有反轉跡象"
+
+        elif probability <= 20:
+
+            signal = "SELL"
+
+            text = "🔴 持續轉弱"
+
+        else:
+
+            signal = "NONE"
+
+            text = "⚪ 尚未形成反轉"
+
+        return (
+
+            signal,
+
+            text,
+
+            probability,
+
+            stars,
+
+            reasons,
+
+        )
+
+    # =========================
+    # Momentum
+    # =========================
+
+    @staticmethod
+    def momentum(
+        prices,
+        period=5,
+    ):
+
+        if len(prices) < period + 1:
+
+            return 0
+
+        return (
+
+            prices[-1]
+
+            -
+
+            prices[-period]
+
+        )
+
+    # =========================
+    # RSI
+    # =========================
+
+    @staticmethod
+    def calculate_rsi(
+        prices,
+        period=14,
+    ):
+
+        if len(prices) < period + 1:
+
+            return 50
+
+        delta = pd.Series(prices).diff()
+
+        gain = (
+            delta.where(delta > 0, 0)
+            .rolling(period)
+            .mean()
+        )
+
+        loss = (
+            (-delta.where(delta < 0, 0))
+            .rolling(period)
+            .mean()
+        )
+
+        rs = gain / loss.replace(0, 1)
+
+        rsi = (
+
+            100
+
+            -
+
+            100 / (1 + rs)
+
+        )
+
+        return round(
+
+            float(rsi.iloc[-1]),
+
+            2,
+
+        )
+
+    # =========================
+    # MACD
+    # =========================
+
+    @staticmethod
+    def calculate_macd(
+        prices,
+    ):
+
+        if len(prices) < 35:
+
+            return (
+
+                0,
+
+                0,
+
+                0,
+
+            )
+
+        close = pd.Series(prices)
+
+        ema12 = close.ewm(
+            span=12,
+            adjust=False
+        ).mean()
+
+        ema26 = close.ewm(
+            span=26,
+            adjust=False
+        ).mean()
+
+        macd = ema12 - ema26
+
+        signal = macd.ewm(
+            span=9,
+            adjust=False
+        ).mean()
+
+        hist = macd - signal
+
+        return (
+
+            round(float(macd.iloc[-1]), 3),
+
+            round(float(signal.iloc[-1]), 3),
+
+            round(float(hist.iloc[-1]), 3),
+
+        )
+
+    # =========================
+    # Volume Trend
+    # =========================
+
+    @staticmethod
+    def volume_trend(
+        volumes,
+    ):
+
+        if len(volumes) < 10:
+
+            return "NORMAL"
+
+        recent = sum(
+            volumes[-5:]
+        ) / 5
+
+        previous = sum(
+            volumes[-10:-5]
+        ) / 5
+
+        if recent > previous * 1.5:
+
+            return "UP"
+
+        elif recent < previous * 0.7:
+
+            return "DOWN"
+
+        return "NORMAL"
