@@ -342,53 +342,70 @@ st.plotly_chart(fig, use_container_width=True)
 
 
 # =========================
-# 📋 五檔（V5.6 正確位置）
+# 📋 五檔（V5.6）
 # =========================
 
 st.subheader("📋 五檔專業版（V5.6）")
 
-placeholder = st.empty()   # ⭐ 關鍵
+# =========================
+# 🔧 防呆（一定要）
+# =========================
+bids = bids or []
+asks = asks or []
 
-# ===== build html =====
-html = f"""
+while len(bids) < 5:
+    bids.append({"price": 0, "size": 0})
+
+while len(asks) < 5:
+    asks.append({"price": 0, "size": 0})
+
+buy_prices = [float(b.get("price", 0) or 0) for b in bids[:5]]
+buy_sizes  = [int(b.get("size", 0) or 0) for b in bids[:5]]
+
+sell_prices = [float(a.get("price", 0) or 0) for a in asks[:5]]
+sell_sizes  = [int(a.get("size", 0) or 0) for a in asks[:5]]
+
+# =========================
+# 🎨 HTML（穩定版）
+# =========================
+html = """
 <style>
-.orderbook {{
+.orderbook {
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
-    table-layout: fixed;
-}}
+}
 
-.orderbook th {{
+.orderbook th {
     color: #aaa;
     text-align: center;
     padding: 8px;
     border-bottom: 1px solid #333;
-}}
+}
 
-.orderbook td {{
+.orderbook td {
     text-align: center;
     padding: 8px;
     border-bottom: 1px solid #222;
-}}
+}
 
-.buy {{
+.buy {
     background: rgba(0, 230, 118, 0.12);
     color: #00e676;
     font-weight: 600;
-}}
+}
 
-.sell {{
+.sell {
     background: rgba(255, 82, 82, 0.12);
     color: #ff5252;
     font-weight: 600;
-}}
+}
 
-.mid {{
+.mid {
     background: #0f172a;
     color: #ffffff;
     font-weight: 700;
-}}
+}
 </style>
 
 <table class="orderbook">
@@ -402,19 +419,28 @@ html = f"""
 """
 
 for i in range(5):
-    spread = round(sell_prices[i] - buy_prices[i], 2)
+
+    bp = buy_prices[i]
+    sp = sell_prices[i]
+
+    # =========================
+    # 🔥 防止 None / 0 / 空值炸掉
+    # =========================
+    if bp == 0 or sp == 0:
+        spread = 0
+    else:
+        spread = round(sp - bp, 2)
 
     html += f"""
     <tr>
         <td class="buy">{buy_sizes[i]}</td>
-        <td class="buy">{buy_prices[i]}</td>
+        <td class="buy">{bp}</td>
         <td class="mid">{spread}</td>
-        <td class="sell">{sell_prices[i]}</td>
+        <td class="sell">{sp}</td>
         <td class="sell">{sell_sizes[i]}</td>
     </tr>
     """
 
 html += "</table>"
 
-# 🔥 強制刷新（重點）
-placeholder.markdown(html, unsafe_allow_html=True)
+st.markdown(html, unsafe_allow_html=True)
