@@ -12,8 +12,11 @@ class ChartBuilder:
 
     @staticmethod
     def calculate_ema(
+
         prices,
+
         span,
+
     ):
 
         if len(prices) == 0:
@@ -44,8 +47,11 @@ class ChartBuilder:
 
     @staticmethod
     def calculate_sma(
+
         prices,
+
         period,
+
     ):
 
         if len(prices) == 0:
@@ -65,7 +71,7 @@ class ChartBuilder:
         )
 
     # =========================
-    # Price Chart
+    # Professional TradingView Chart
     # =========================
 
     @staticmethod
@@ -76,28 +82,67 @@ class ChartBuilder:
         volumes,
 
     ):
+
+        if len(prices) == 0:
+
+            fig = go.Figure()
+
+            fig.update_layout(
+
+                template="plotly_dark",
+
+                height=430,
+
+                margin=dict(
+
+                    l=10,
+
+                    r=10,
+
+                    t=20,
+
+                    b=10,
+
+                ),
+
+            )
+
+            return fig
+
         # =========================
-        # EMA
+        # Moving Average
         # =========================
 
         ema5 = ChartBuilder.calculate_ema(
+
             prices,
+
             5,
+
         )
 
         ema20 = ChartBuilder.calculate_ema(
+
             prices,
+
             20,
+
         )
 
         ema60 = ChartBuilder.calculate_ema(
+
             prices,
+
             60,
+
         )
 
         sma20 = ChartBuilder.calculate_sma(
+
             prices,
+
             20,
+
         )
 
         # =========================
@@ -126,6 +171,8 @@ class ChartBuilder:
 
             go.Scatter(
 
+                x=list(range(len(prices))),
+
                 y=prices,
 
                 mode="lines",
@@ -140,6 +187,16 @@ class ChartBuilder:
 
                 ),
 
+                hovertemplate=
+
+                "<b>Price</b><br>"
+
+                "Index : %{x}<br>"
+
+                "Price : %{y:.2f}"
+
+                "<extra></extra>",
+
             ),
 
             row=1,
@@ -148,9 +205,15 @@ class ChartBuilder:
 
         )
 
+        # =========================
+        # EMA5
+        # =========================
+
         fig.add_trace(
 
             go.Scatter(
+
+                x=list(range(len(ema5))),
 
                 y=ema5,
 
@@ -174,9 +237,15 @@ class ChartBuilder:
 
         )
 
+        # =========================
+        # EMA20
+        # =========================
+
         fig.add_trace(
 
             go.Scatter(
+
+                x=list(range(len(ema20))),
 
                 y=ema20,
 
@@ -200,9 +269,15 @@ class ChartBuilder:
 
         )
 
+        # =========================
+        # EMA60
+        # =========================
+
         fig.add_trace(
 
             go.Scatter(
+
+                x=list(range(len(ema60))),
 
                 y=ema60,
 
@@ -226,9 +301,15 @@ class ChartBuilder:
 
         )
 
+        # =========================
+        # SMA20
+        # =========================
+
         fig.add_trace(
 
             go.Scatter(
+
+                x=list(range(len(sma20))),
 
                 y=sma20,
 
@@ -238,7 +319,7 @@ class ChartBuilder:
 
                 line=dict(
 
-                    color="#4CAF50",
+                    color="#66BB6A",
 
                     width=2,
 
@@ -255,7 +336,7 @@ class ChartBuilder:
         )
 
         # =========================
-        # 成交量
+        # 成交量（台股紅漲綠跌）
         # =========================
 
         volume_colors = []
@@ -264,29 +345,53 @@ class ChartBuilder:
 
             if i == 0:
 
-                volume_colors.append("#26A69A")
+                volume_colors.append("#9E9E9E")
 
             else:
 
+                # 台股：上漲=紅、下跌=綠
+
                 if prices[i] >= prices[i - 1]:
 
-                    volume_colors.append("#26A69A")
+                    volume_colors.append("#E53935")
 
                 else:
 
-                    volume_colors.append("#EF5350")
+                    volume_colors.append("#2EAF5D")
 
         fig.add_trace(
 
             go.Bar(
 
+                x=list(range(len(volumes))),
+
                 y=volumes,
 
                 name="Volume",
 
-                marker_color=volume_colors,
+                marker=dict(
 
-                opacity=0.8,
+                    color=volume_colors,
+
+                    line=dict(
+
+                        width=0,
+
+                    ),
+
+                ),
+
+                opacity=0.85,
+
+                hovertemplate=
+
+                "<b>Volume</b><br>"
+
+                "Index : %{x}<br>"
+
+                "Volume : %{y}"
+
+                "<extra></extra>",
 
             ),
 
@@ -297,7 +402,7 @@ class ChartBuilder:
         )
 
         # =========================
-        # Layout
+        # TradingView Layout
         # =========================
 
         fig.update_layout(
@@ -305,6 +410,12 @@ class ChartBuilder:
             template="plotly_dark",
 
             height=430,
+
+            hovermode="x unified",
+
+            paper_bgcolor="#111111",
+
+            plot_bgcolor="#111111",
 
             margin=dict(
 
@@ -318,35 +429,17 @@ class ChartBuilder:
 
             ),
 
-            hovermode="x unified",
-
             legend=dict(
 
                 orientation="h",
 
-                y=1.05,
+                y=1.03,
 
                 x=0,
 
-            ),
-
-            xaxis=dict(
-
-                showgrid=False,
+                bgcolor="rgba(0,0,0,0)",
 
             ),
-
-            yaxis=dict(
-
-                showgrid=True,
-
-                gridcolor="rgba(255,255,255,0.08)",
-
-            ),
-
-            plot_bgcolor="#111111",
-
-            paper_bgcolor="#111111",
 
         )
 
@@ -356,9 +449,15 @@ class ChartBuilder:
 
             zeroline=False,
 
+            showline=False,
+
         )
 
         fig.update_yaxes(
+
+            showgrid=True,
+
+            gridcolor="rgba(255,255,255,0.08)",
 
             zeroline=False,
 
@@ -370,13 +469,13 @@ class ChartBuilder:
 
         if len(ema20) > 0 and len(ema60) > 0:
 
-            if ema20[-1] > ema60[-1]:
+            if ema20[-1] >= ema60[-1]:
 
-                bg_color = "rgba(0,120,0,0.08)"
+                bg_color = "rgba(255,0,0,0.05)"
 
             else:
 
-                bg_color = "rgba(180,0,0,0.08)"
+                bg_color = "rgba(0,180,0,0.05)"
 
             fig.add_vrect(
 
@@ -394,115 +493,174 @@ class ChartBuilder:
 
             )
 
-# =========================
-# 最高價
-# =========================
+        # =========================
+        # 最高價（台股：紅）
+        # =========================
 
-if len(prices) > 0:
+        high_price = max(prices)
 
-    high_price = max(prices)
-    high_index = prices.index(high_price)
+        high_index = prices.index(high_price)
 
-    fig.add_annotation(
+        fig.add_annotation(
 
-        x=high_index,
-        y=high_price,
+            x=high_index,
 
-        text=f"{high_price:.2f}",
+            y=high_price,
 
-        showarrow=True,
-        arrowhead=2,
+            text=f"▲ {high_price:.2f}",
 
-        ay=-35,      # 往上
+            showarrow=True,
 
-        ax=0,
+            arrowhead=2,
 
-        font=dict(
-            size=12,
-            color="#ff3333",   # 台股紅=上漲
-        ),
+            arrowsize=1,
 
-        arrowcolor="#ff3333",
+            arrowwidth=2,
 
-    )
+            arrowcolor="#E53935",
 
-# =========================
-# 最低價
-# =========================
+            ax=0,
 
-if len(prices) > 0:
+            ay=-35,
 
-    low_price = min(prices)
-    low_index = prices.index(low_price)
+            bgcolor="rgba(229,57,53,0.15)",
 
-    fig.add_annotation(
+            bordercolor="#E53935",
 
-        x=low_index,
-        y=low_price,
+            borderwidth=1,
 
-        text=f"{low_price:.2f}",
+            font=dict(
 
-        showarrow=True,
-        arrowhead=2,
+                size=12,
 
-        ay=35,        # 往下
+                color="#E53935",
 
-        ax=0,
+            ),
 
-        font=dict(
-            size=12,
-            color="#00cc66",   # 台股綠=下跌
-        ),
+        )
 
-        arrowcolor="#00cc66",
+        # =========================
+        # 最低價（台股：綠）
+        # =========================
 
-    )
-# =========================
-# 最新價格水平線
-# =========================
+        low_price = min(prices)
 
-if len(prices) > 0:
+        low_index = prices.index(low_price)
 
-    fig.add_hline(
+        fig.add_annotation(
 
-        y=prices[-1],
+            x=low_index,
 
-        line_dash="dash",
+            y=low_price,
 
-        line_color="#00E5FF",
+            text=f"▼ {low_price:.2f}",
 
-        opacity=0.6,
+            showarrow=True,
 
-    )
+            arrowhead=2,
 
-# =========================
-# Layout 微調
-# =========================
+            arrowsize=1,
 
-fig.update_yaxes(
+            arrowwidth=2,
 
-    fixedrange=False,
+            arrowcolor="#2EAF5D",
 
-    showspikes=True,
+            ax=0,
 
-    spikemode="across",
+            ay=35,
 
-    spikesnap="cursor",
+            bgcolor="rgba(46,175,93,0.15)",
 
-)
+            bordercolor="#2EAF5D",
 
-fig.update_xaxes(
+            borderwidth=1,
 
-    showspikes=True,
+            font=dict(
 
-    spikemode="across",
+                size=12,
 
-    spikesnap="cursor",
+                color="#2EAF5D",
 
-)
+            ),
 
-# =========================
-# Return
-# =========================
+        )
 
-return fig
+        # =========================
+        # 最新價格水平線
+        # =========================
+
+        fig.add_hline(
+
+            y=prices[-1],
+
+            line_dash="dash",
+
+            line_color="#00E5FF",
+
+            line_width=1.5,
+
+            opacity=0.7,
+
+        )
+
+        # =========================
+        # TradingView Crosshair
+        # =========================
+
+        fig.update_xaxes(
+
+            showspikes=True,
+
+            spikecolor="#888888",
+
+            spikemode="across",
+
+            spikesnap="cursor",
+
+            spikethickness=1,
+
+        )
+
+        fig.update_yaxes(
+
+            showspikes=True,
+
+            spikecolor="#888888",
+
+            spikemode="across",
+
+            spikesnap="cursor",
+
+            spikethickness=1,
+
+            fixedrange=False,
+
+        )
+
+        # =========================
+        # Professional Layout
+        # =========================
+
+        fig.update_layout(
+
+            hoverlabel=dict(
+
+                bgcolor="#222222",
+
+                font_size=12,
+
+                font_color="white",
+
+            ),
+
+            dragmode="pan",
+
+            xaxis_rangeslider_visible=False,
+
+        )
+
+        # =========================
+        # Return
+        # =========================
+
+        return fig
