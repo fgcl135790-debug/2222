@@ -553,9 +553,7 @@ sell_strength = (
 # =========================
 
 action, confidence, reasons = (
-    AIPredictor.predict_trade(
-        prices=prices,
-        volumes=volumes,
+    AIPredictor.score(
         price=price,
         vwap=vwap,
         ema5=ema5,
@@ -564,8 +562,12 @@ action, confidence, reasons = (
         rsi=rsi,
         macd=macd,
         macd_signal=macd_signal,
+        macd_hist=macd_hist,
         total_bid=total_bid,
         total_ask=total_ask,
+        momentum=momentum,
+        volume_trend=volume_trend,
+        volatility=volatility,
     )
 )
 
@@ -577,8 +579,9 @@ action, confidence, reasons = (
     reversal_reasons,
 ) = (
     AIPredictor.predict_reversal(
-        prices=prices,
         price=price,
+        prices=prices,
+        vwap=vwap,
         ema5=ema5,
         ema20=ema20,
         ema60=ema60,
@@ -587,6 +590,7 @@ action, confidence, reasons = (
         macd_signal=macd_signal,
         total_bid=total_bid,
         total_ask=total_ask,
+        momentum=momentum,
     )
 )
 
