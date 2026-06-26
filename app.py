@@ -151,6 +151,20 @@ with st.sidebar:
 
     )
 
+refresh_sec = st.slider(
+
+    "更新秒數",
+
+    min_value=1,
+
+    max_value=30,
+
+    value=2,
+
+    step=1,
+
+)
+    
     # ---------------------
     # 大戶門檻
     # ---------------------
@@ -372,7 +386,7 @@ market_open = (
 
 st_autorefresh(
 
-    interval=2000,
+    interval=refresh_sec * 1000,
 
     key="refresh",
 
