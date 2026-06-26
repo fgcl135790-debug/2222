@@ -211,27 +211,30 @@ def signal_dot(color, text):
 
 st.subheader("🧠 AI 判讀")
 
-# ✅ 修正變數統一
 ai_confidence = score
 rebound_rate = rebound
 
 col1, col2, col3 = st.columns(3, gap="large")
 
-# =========================
-# 左：交易訊號
-# =========================
+# ======================
+# 🔴 / 🟢 訊號（台股制）
+# ======================
 with col1:
     if signal == "BUY":
         st.markdown("""
         <div style="
-            background: linear-gradient(90deg,#0b3d1a,#0f5a25);
+            background:#3b0d0d;
             padding:14px;
             border-radius:12px;
-            border-left:5px solid #00e676;
+            display:flex;
+            align-items:center;
+            gap:10px;
+            height:80px;
         ">
-            <div style="display:flex;align-items:center;gap:8px;">
-                <div style="width:10px;height:10px;border-radius:50%;background:#00e676;box-shadow:0 0 6px #00e676;"></div>
-                <b style="color:#00e676;">做多訊號</b>
+            <div style="width:10px;height:10px;border-radius:50%;
+                        background:#ff1744;box-shadow:0 0 8px #ff1744;"></div>
+            <div style="color:#ff5252;font-weight:700;">
+                做多訊號
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -239,43 +242,64 @@ with col1:
     elif signal == "SELL":
         st.markdown("""
         <div style="
-            background: linear-gradient(90deg,#3b0d0d,#5a1010);
+            background:#0b3d1f;
             padding:14px;
             border-radius:12px;
-            border-left:5px solid #ff5252;
+            display:flex;
+            align-items:center;
+            gap:10px;
+            height:80px;
         ">
-            <div style="display:flex;align-items:center;gap:8px;">
-                <div style="width:10px;height:10px;border-radius:50%;background:#ff5252;box-shadow:0 0 6px #ff5252;"></div>
-                <b style="color:#ff5252;">做空訊號</b>
+            <div style="width:10px;height:10px;border-radius:50%;
+                        background:#00e676;box-shadow:0 0 8px #00e676;"></div>
+            <div style="color:#00e676;font-weight:700;">
+                做空訊號
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     else:
-        st.info("盤整中")
+        st.info("盤整")
 
-
-# =========================
-# 中：AI信心（已修正）
-# =========================
+# ======================
+# 🧠 AI信心（中）
+# ======================
 with col2:
-    st.metric("AI信心", f"{ai_confidence}%")
+    st.markdown("""
+    <div style="
+        background:#111827;
+        padding:14px;
+        border-radius:12px;
+        height:80px;
+    ">
+        <div style="color:#9ca3af;font-size:12px;">AI信心</div>
+        <div style="font-size:22px;font-weight:700;">
+    """ + f"{ai_confidence}%" + """
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.progress(ai_confidence / 100)
 
-
-# =========================
-# 右：反彈機率（已修正）
-# =========================
+# ======================
+# 📈 反彈機率（右）
+# ======================
 with col3:
-    st.metric("反彈機率", f"{rebound_rate}%")
+    color = "#00e676" if rebound_rate > 60 else "#ff1744" if rebound_rate < 40 else "#ffc107"
 
-    if rebound_rate >= 60:
-        st.success("偏強（可能反彈）")
-    elif rebound_rate <= 40:
-        st.error("偏弱（續跌風險）")
-    else:
-        st.info("中性震盪")
-
+    st.markdown(f"""
+    <div style="
+        background:#111827;
+        padding:14px;
+        border-radius:12px;
+        height:80px;
+    ">
+        <div style="color:#9ca3af;font-size:12px;">反彈機率</div>
+        <div style="font-size:22px;font-weight:700;color:{color};">
+            {rebound_rate}%
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # =========================
 # 📡 主力雷達（台股正確顏色版）
