@@ -698,7 +698,7 @@ with col1:
 
     if action == "STRONG BUY":
 
-        st.success(f"🟢 強力買進　{confidence}%")
+        st.success(f"🔴 強力買進　{confidence}%")
 
     elif action == "BUY":
 
@@ -710,7 +710,7 @@ with col1:
 
     elif action == "STRONG SELL":
 
-        st.error(f"🔴 強力賣出　{confidence}%")
+        st.error(f"🔴🟢 強力賣出　{confidence}%")
 
     else:
 
@@ -791,9 +791,9 @@ with col3:
     )
 
     if macd > macd_signal:
-        macd_state = "🟢 多頭"
+        macd_state = "🔴 多頭"
     else:
-        macd_state = "🔴 空頭"
+        macd_state = "🟢 空頭"
 
     st.metric(
         "MACD",
@@ -843,7 +843,7 @@ with col4:
 
     if bid_ratio >= 2:
 
-        st.success("🟢 強力買盤")
+        st.success("🔴 強力買盤")
 
     elif bid_ratio >= 1.3:
 
@@ -851,7 +851,7 @@ with col4:
 
     elif bid_ratio <= 0.5:
 
-        st.error("🔴 強力賣盤")
+        st.error("🟢 強力賣盤")
 
     elif bid_ratio <= 0.8:
 
@@ -962,7 +962,7 @@ bid_ratio = (
 if bid_ratio >= 2:
 
     st.success(
-        "🟢 主力積極吸籌"
+        "🔴 主力積極吸籌"
     )
 
 elif bid_ratio >= 1.3:
@@ -974,7 +974,7 @@ elif bid_ratio >= 1.3:
 elif bid_ratio <= 0.5:
 
     st.error(
-        "🔴 主力大量出貨"
+        "🟢 主力大量出貨"
     )
 
 elif bid_ratio <= 0.8:
@@ -1096,11 +1096,11 @@ if (
 
     if total_bid > total_ask:
 
-        direction = "🟢 主力買進"
+        direction = "🔴 主力買進"
 
     elif total_ask > total_bid:
 
-        direction = "🔴 主力賣出"
+        direction = "🟢 主力賣出"
 
     else:
 
