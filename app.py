@@ -13,86 +13,239 @@ from streamlit_autorefresh import st_autorefresh
 
 
 # =========================
-# V5.5 券商級 UI
+# 🧠 V5.5 券商級設定
 # =========================
 
 st.set_page_config(
-    page_title="V5.5 券商雷達系統",
-    page_icon="🏦",
-    layout="wide"
+    page_title="V5.5 券商主力雷達",
+    layout="wide",
+    page_icon="🏦"
 )
 
 st.markdown("""
 <style>
-html, body, [class*="css"]  {
-    font-size: 13px;
-}
-
 .block-container {
-    padding: 0.5rem 0.8rem;
+    padding: 0.4rem 0.8rem;
+    font-size: 13px;
 }
 
 h1, h2, h3 {
     font-size: 16px !important;
 }
 
-/* 台股紅漲綠跌 */
-.up { color: #ff4d4f; }
-.down { color: #2ecc71; }
-
+.css-1d391kg {
+    padding-top: 0.5rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
 # =========================
-# 台灣時間
+# 🕒 台灣時間
 # =========================
-
 now = datetime.now(ZoneInfo("Asia/Taipei"))
 
 
 # =========================
-# Session State
+# 🧠 Session Reset（修復換股不清空）
 # =========================
+def reset_state():
+    st.session_state.price_history = []
+    st.session_state.volume_history = []
+    st.session_state.tick = 0
+    st.session_state.last_serial = None
 
-default_state = {
-    "price_history": [],
-    "volume_history": [],
-    "tick": 0,
-    "last_serial": None,
-    "stock_code": None
-}
 
-for k, v in default_state.items():
+for k in ["price_history", "volume_history", "tick", "last_serial"]:
     if k not in st.session_state:
-        st.session_state[k] = v
+        st.session_state[k] = [] if "history" in k else 0
 
 
 # =========================
-# Sidebar（券商級控制中心）
+# 🧠 Sidebar（券商級控制中心）
 # =========================
-
 with st.sidebar:
 
-    st.title("⚙️ V5.5 券商雷達")
+    st.title("⚙️ V5.5 控制中心")
 
-    data_source = st.radio("資料來源", ["真實盤", "情境模擬"])
     stock_code = st.text_input("股票代號", "2330")
+
+    data_source = st.radio("資料來源", ["真實盤", "模擬盤"])
 
     api_key = st.text_input("Fugle API Key", type="password")
 
-    sim_mode = st.selectbox(
-        "模擬模式",
-        ["一般波動", "軋空", "出貨", "吸籌"]
-    )
+    mode = st.selectbox("AI模式", ["一般", "激進", "保守"])
 
-    refresh_sec = st.slider("刷新秒數", 1, 5, 2)
+    refresh_sec = st.slider("更新秒數", 1, 5, 2)
 
-    if st.button("重置系統"):
-        st.session_state.price_history = []
-        st.session_state.volume_history = []
-        st.session_state.tick = 0
-        st.session_state.last_serial = None
+    if st.button("重置股票"):
+        reset_state()
         st.rerun()
 
-st_autorefresh(interval=refresh_sec * 1000, key="refresh")
+
+# =========================
+# ⏱ Auto refresh
+# =========================
+st_autorefresh(interval=refresh_sec * 1000, key="v55")
+
+
+# =========================
+# 📡 取得資料
+# =========================
+if data_source == "真實盤":
+    if not api_key:
+        st.warning("請輸入 API KEY")
+        st.stop()
+
+    provider = FugleProvider(api_key)
+    quote = provider.get_quote(stock_code)
+
+else:
+    engine = SimulationEngine(mode="normal", base_price=100)
+    quote = engine.generate(st.session_state.tick, 300)
+    st.session_state.tick += 1
+
+
+# =========================
+# 📊 Quote解析
+# =========================
+name = quote.get("name", "Unknown")
+price = quote["price"]
+vwap = quote["vwap"]
+volume = quote.get("last_size", 0)
+
+bids = quote.get("bids", [])
+asks = quote.get("asks", [])
+
+trade = quote.get("trade", {})
+serial = trade.get("serial", 0)
+
+
+# =========================
+# 🧠 換股自動清空（修復bug）
+# =========================
+if st.session_state.get("last_stock") != stock_code:
+    reset_state()
+    st.session_state.last_stock = stock_code
+
+
+# =========================
+# 📈 記錄價格
+# =========================
+if st.session_state.last_serial != serial:
+    st.session_state.last_serial = serial
+    st.session_state.price_history.append(price)
+    st.session_state.volume_history.append(volume)
+
+prices = st.session_state.price_history
+volumes = st.session_state.volume_history
+
+
+# =========================
+# 📊 技術指標
+# =========================
+ema5 = MarketAnalyzer.calculate_ema(prices, 5)
+ema20 = MarketAnalyzer.calculate_ema(prices, 20)
+ema60 = MarketAnalyzer.calculate_ema(prices, 60)
+
+rsi = MarketAnalyzer.calculate_rsi(prices)
+macd, macd_signal, _ = MarketAnalyzer.calculate_macd(prices)
+
+momentum = MarketAnalyzer.momentum(prices)
+
+
+# =========================
+# 🧠 AI Predict（V5.5）
+# =========================
+ai = AIPredictor.predict_trade(
+    prices, volumes,
+    ema5, ema20, ema60,
+    rsi, macd, macd_signal,
+    momentum,
+    bid_ratio=1.2,
+    vwap=vwap
+)
+
+signal = ai["signal"]
+score = ai["score"]
+risk = ai["risk"]
+state = ai["market_state"]
+rebound = ai["rebound_prob"]
+
+
+# =========================
+# 🧾 Header（券商級）
+# =========================
+st.title(f"🏦 V5.5 {name} ({stock_code})")
+
+colA, colB, colC, colD = st.columns(4)
+
+colA.metric("現價", price)
+colB.metric("AI信心", f"{score}%")
+colC.metric("風險", f"{risk}%")
+colD.metric("狀態", state)
+
+
+# =========================
+# 🚦 交易燈號（核心）
+# =========================
+if signal == "BUY":
+    st.success("🟢 做多訊號")
+elif signal == "SELL":
+    st.error("🔴 做空訊號")
+else:
+    st.warning("🟡 觀望")
+
+
+# =========================
+# 📉 反彈區（你要的）
+# =========================
+st.subheader("🔄 反彈區")
+
+st.progress(rebound / 100)
+st.write(f"反彈機率：{rebound}%")
+
+
+# =========================
+# 📊 主力雷達（簡化券商版）
+# =========================
+st.subheader("📡 主力雷達")
+
+bid_ratio = sum([b["size"] for b in bids]) / max(sum([a["size"] for a in asks]), 1)
+
+if bid_ratio > 1.3:
+    st.success("🟢 主力偏多（吃貨）")
+elif bid_ratio < 0.8:
+    st.error("🔴 主力偏空（出貨）")
+else:
+    st.info("🟡 籌碼平衡")
+
+
+# =========================
+# 📈 走勢圖（修復清空問題）
+# =========================
+st.subheader("📈 分時趨勢")
+
+fig = ChartBuilder.build_price_chart(prices, volumes)
+st.plotly_chart(fig, use_container_width=True)
+
+
+# =========================
+# 📋 五檔（券商級）
+# =========================
+st.subheader("📋 五檔報價")
+
+while len(bids) < 5:
+    bids.append({"price": 0, "size": 0})
+
+while len(asks) < 5:
+    asks.append({"price": 0, "size": 0})
+
+df = pd.DataFrame({
+    "買價": [b["price"] for b in bids[:5]],
+    "買量": [b["size"] for b in bids[:5]],
+    "賣價": [a["price"] for a in asks[:5]],
+    "賣量": [a["size"] for a in asks[:5]],
+})
+
+st.dataframe(df, use_container_width=True)
