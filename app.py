@@ -1,68 +1,59 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
+
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fugle_provider import FugleProvider
 from simulation_engine import SimulationEngine
 from market_analyzer import MarketAnalyzer
-from ai_predictor import AIPredictor
 from charts import ChartBuilder
+
 from streamlit_autorefresh import st_autorefresh
 
 
 # =========================
-# ⚙️ Page Config（券商級）
+# 🏦 V5.5 券商級設定
 # =========================
 st.set_page_config(
-    page_title="V4.6 券商系統",
-    page_icon="🏦",
-    layout="wide",
+    page_title="V5.5 券商主力雷達",
+    layout="wide"
 )
 
-# 台股風格（紅漲綠跌）
 st.markdown("""
 <style>
-.block-container {padding:0.4rem 0.8rem;}
-html, body {font-size: 13px;}
+html, body {font-size: 12.5px;}
+.block-container {padding:0.4rem 0.6rem;}
 
-.up {color:#ff3b3b;}
-.down {color:#00c853;}
+.up {color:#ff3b3b;}   /* 台股紅漲 */
+.down {color:#00c853;} /* 台股綠跌 */
 
+.card {
+    border-radius:10px;
+    padding:10px;
+    background:#111;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
-# =========================
-# Time
-# =========================
 now = datetime.now(ZoneInfo("Asia/Taipei"))
 
 
 # =========================
-# Session init（關鍵修復）
+# Session Reset Fix（你之前UI錯亂主因）
 # =========================
-def reset_stock():
+def reset_state():
     st.session_state.price_history = []
     st.session_state.volume_history = []
     st.session_state.tick = 0
     st.session_state.last_serial = None
 
 
-if "current_stock" not in st.session_state:
-    st.session_state.current_stock = None
-
-if "price_history" not in st.session_state:
-    st.session_state.price_history = []
-
-if "volume_history" not in st.session_state:
-    st.session_state.volume_history = []
-
-if "tick" not in st.session_state:
-    st.session_state.tick = 0
-
-if "last_serial" not in st.session_state:
-    st.session_state.last_serial = None
+for k in ["price_history", "volume_history", "tick", "last_serial", "current_stock"]:
+    if k not in st.session_state:
+        st.session_state[k] = [] if "history" in k else 0
 
 
 # =========================
@@ -70,38 +61,36 @@ if "last_serial" not in st.session_state:
 # =========================
 with st.sidebar:
 
-    st.title("⚙️ V4.6 券商中心")
+    st.title("⚙️ V5.5 主力雷達")
 
-    data_source = st.radio("資料來源", ["真實盤", "情境模擬"])
-    stock_code = st.text_input("股票代號", "2330")
-    api_key = st.text_input("Fugle API Key", type="password")
+    source = st.radio("資料來源", ["真實盤", "情境模擬"])
+    stock = st.text_input("股票代號", "2330")
+    api_key = st.text_input("API Key", type="password")
 
-    sim_mode = st.selectbox("模擬", ["一般波動", "軋空行情", "誘空嘎空", "主力吸籌"])
+    mode = st.selectbox("模擬模式", ["一般", "主力拉抬", "出貨", "洗盤"])
 
-    refresh_sec = st.slider("更新秒數", 1, 10, 2)
+    refresh = st.slider("更新秒數", 1, 10, 2)
 
-    # 換股 -> 清空（修復你UI錯亂主因）
-    if st.session_state.current_stock != stock_code:
-        st.session_state.current_stock = stock_code
-        reset_stock()
+    if st.session_state.current_stock != stock:
+        st.session_state.current_stock = stock
+        reset_state()
 
-    if st.button("重置系統"):
-        reset_stock()
+    if st.button("重置"):
+        reset_state()
         st.rerun()
 
 
-st_autorefresh(interval=refresh_sec * 1000, key="tick")
-
+st_autorefresh(interval=refresh * 1000, key="tick")
 
 # =========================
-# Data
+# Data Source
 # =========================
 try:
-    if data_source == "真實盤":
+    if source == "真實盤":
         provider = FugleProvider(api_key)
-        quote = provider.get_quote(stock_code)
+        quote = provider.get_quote(stock)
     else:
-        engine = SimulationEngine(mode=sim_mode, base_price=100)
+        engine = SimulationEngine(mode=mode, base_price=100)
         quote = engine.generate(st.session_state.tick, 600)
         st.session_state.tick += 1
 
@@ -111,36 +100,27 @@ except Exception as e:
 
 
 # =========================
-# Safe unpack（防爆）
+# Safe Data
 # =========================
-name = quote.get("name", stock_code)
 price = quote.get("price", 0)
 vwap = quote.get("vwap", price)
 
-volume = quote.get("last_size", 0)
 bids = quote.get("bids") or []
 asks = quote.get("asks") or []
+
+volume = quote.get("last_size", 0)
 
 trade = quote.get("trade", {})
 serial = trade.get("serial", 0)
 
-is_close = quote.get("is_close", False)
-
 
 # =========================
-# Market session
+# History
 # =========================
-market_open = 9 <= now.hour <= 13
-
-
-# =========================
-# History（修復：不會亂掉）
-# =========================
-if market_open and not is_close:
-    if st.session_state.last_serial != serial:
-        st.session_state.last_serial = serial
-        st.session_state.price_history.append(price)
-        st.session_state.volume_history.append(volume)
+if st.session_state.last_serial != serial:
+    st.session_state.last_serial = serial
+    st.session_state.price_history.append(price)
+    st.session_state.volume_history.append(volume)
 
 st.session_state.price_history = st.session_state.price_history[-300:]
 st.session_state.volume_history = st.session_state.volume_history[-300:]
@@ -155,94 +135,123 @@ volumes = st.session_state.volume_history
 ema5 = MarketAnalyzer.calculate_ema(prices, 5)
 ema20 = MarketAnalyzer.calculate_ema(prices, 20)
 rsi = MarketAnalyzer.calculate_rsi(prices)
-macd, macd_signal, macd_hist = MarketAnalyzer.calculate_macd(prices)
 momentum = MarketAnalyzer.momentum(prices)
 
 
 # =========================
-# Buy/Sell pressure
+# 📡 主力雷達 V5.5（核心）
 # =========================
-total_bid = sum(x.get("size", 0) for x in bids)
-total_ask = sum(x.get("size", 0) for x in asks)
 
-buy_strength = total_bid / max(total_bid + total_ask, 1)
+bid_total = sum(x.get("size", 0) for x in bids)
+ask_total = sum(x.get("size", 0) for x in asks)
 
+buy_pressure = bid_total / max(bid_total + ask_total, 1)
+
+big_order_flow = bid_total - ask_total
+
+if big_order_flow > 500:
+    smart_money = "大戶進場"
+elif big_order_flow < -500:
+    smart_money = "大戶出場"
+else:
+    smart_money = "中性"
+
+
+# 主力分數（核心模型）
+main_score = (
+    buy_pressure * 40 +
+    (1 if ema5 > ema20 else -1) * 20 +
+    momentum * 10 +
+    (1 if price > vwap else -1) * 30
+)
+
+main_score = np.clip(main_score, 0, 100)
 
 # =========================
-# AI Signal（券商核心）
+# 🧠 AI語意層（穩定版）
 # =========================
+
+ai_score = 50
+reasons = []
+
 if price > vwap:
-    signal = "BUY"
-elif price < vwap:
-    signal = "SELL"
+    ai_score += 10
+    reasons.append("站上VWAP")
 else:
-    signal = "HOLD"
+    ai_score -= 10
 
-
-# =========================
-# Reverse Zone（修復回來）
-# =========================
-if ema5 > ema20 and rsi < 40:
-    reversal = "反彈區"
-elif ema5 < ema20 and rsi > 60:
-    reversal = "轉弱區"
+if ema5 > ema20:
+    ai_score += 15
 else:
-    reversal = "盤整"
+    ai_score -= 15
+
+if rsi < 30:
+    ai_score += 10
+elif rsi > 70:
+    ai_score -= 10
+
+ai_score = np.clip(ai_score, 0, 100)
 
 
 # =========================
-# Header
+# 🎯 語意輸出
 # =========================
-st.title(f"🏦 {name} {stock_code}")
+if ai_score >= 65:
+    bias = "做多偏多"
+elif ai_score <= 35:
+    bias = "做空偏空"
+else:
+    bias = "盤整觀望"
 
-st.subheader("📈 法人走勢圖")
+
+# =========================
+# 🔄 市場結構（反彈/續跌）
+# =========================
+if ema5 < ema20 and rsi < 40:
+    regime = "🔄 可能反彈區"
+elif ema5 > ema20 and rsi > 60:
+    regime = "📈 可能續漲"
+else:
+    regime = "📊 盤整區"
+
+
+# =========================
+# UI
+# =========================
+st.title(f"🏦 V5.5 {stock}")
 
 fig = ChartBuilder.build_price_chart(prices, volumes)
 st.plotly_chart(fig, use_container_width=True)
 
 
 # =========================
-# Quote board
+# AI Panel
 # =========================
-c1, c2, c3, c4 = st.columns(4)
+st.subheader("🧠 AI 判讀")
 
-c1.metric("現價", price)
-c2.metric("VWAP", round(vwap, 2))
-c3.metric("EMA20", round(float(ema20), 2))
-c4.metric("RSI", rsi)
+col1, col2, col3 = st.columns(3)
 
-
-# =========================
-# AI panel
-# =========================
-st.subheader("🧠 AI 進出場訊號")
-
-if signal == "BUY":
-    st.success("🟢 多方進場")
-elif signal == "SELL":
-    st.error("🔴 空方出場")
-else:
-    st.info("⚪ 觀望")
+col1.metric("市場傾向", bias)
+col2.metric("AI信心", f"{ai_score}%")
+col3.metric("主力分數", int(main_score))
 
 
-st.write("🔄 反轉區：", reversal)
+st.info(regime)
 
 
 # =========================
-# Radar（主力雷達）
+# 📡 主力雷達 UI
 # =========================
 st.subheader("📡 主力雷達")
 
-radar = buy_strength * 100
-
-st.progress(radar / 100)
-st.write(f"買盤強度：{radar:.1f}%")
+st.write("大單流向：", smart_money)
+st.progress(main_score / 100)
 
 
 # =========================
-# Best5
+# 📋 五檔
 # =========================
-st.subheader("📋 五檔")
+st.subheader("五檔")
 
 while len(bids) < 5:
     bids.append({"price": 0, "size": 0})
@@ -250,11 +259,9 @@ while len(bids) < 5:
 while len(asks) < 5:
     asks.append({"price": 0, "size": 0})
 
-df = pd.DataFrame({
+st.dataframe(pd.DataFrame({
     "買價": [x["price"] for x in bids[:5]],
     "買量": [x["size"] for x in bids[:5]],
     "賣價": [x["price"] for x in asks[:5]],
     "賣量": [x["size"] for x in asks[:5]],
-})
-
-st.dataframe(df, use_container_width=True)
+}))
