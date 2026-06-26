@@ -288,7 +288,7 @@ with col2:
 with col3:
 
     # =========================
-    # 🧠 分級判讀
+    # 🧠 判斷邏輯
     # =========================
     if rebound_rate >= 75:
         label = "強勢反彈"
@@ -326,77 +326,26 @@ with col3:
         color = "#ff1744"
 
     # =========================
-    # 🎨 統一卡片 UI（更穩）
+    # 🚀 用 Streamlit 原生 UI（關鍵修正）
     # =========================
-    st.markdown(f"""
-    <div style="
-        background:#0f172a;
-        padding:16px;
-        border-radius:14px;
-        border:1px solid rgba(255,255,255,0.08);
-        height:150px;
-    ">
 
-        <div style="color:#9ca3af;font-size:12px;">
-            反彈機率
-        </div>
+    st.markdown("### 📈 反彈機率")
 
-        <div style="
-            font-size:26px;
-            font-weight:800;
-            color:{color};
-            margin-top:4px;
-        ">
-            {rebound_rate}%
-        </div>
+    st.markdown(f"## **{rebound_rate}%**")
 
-        <div style="
-            margin-top:6px;
-            font-size:14px;
-            font-weight:700;
-            color:{color};
-        ">
-            {label}
-        </div>
+    st.markdown(
+        f"**<span style='color:{color}'>{label}</span>**",
+        unsafe_allow_html=True
+    )
 
-        <div style="
-            margin-top:4px;
-            font-size:12px;
-            color:#cbd5e1;
-        ">
-            {desc}
-        </div>
+    st.write(desc)
 
-        <div style="
-            margin-top:6px;
-            font-size:12px;
-            color:#94a3b8;
-        ">
-            👉 {signal_hint} ｜ {risk_text}
-        </div>
-
-        <!-- 🔥 加入內嵌進度條（關鍵修正） -->
-        <div style="
-            margin-top:10px;
-            background:#1f2937;
-            height:6px;
-            border-radius:999px;
-            overflow:hidden;
-        ">
-            <div style="
-                width:{rebound_rate}%;
-                background:{color};
-                height:6px;
-            "></div>
-        </div>
-
-    </div>
-    """, unsafe_allow_html=True)
+    st.caption(f"👉 {signal_hint} ｜ {risk_text}")
 
     # =========================
-    # 📊 視覺條（加強券商感）
+    # 📊 進度條（穩定版）
     # =========================
-    st.progress(rebound_rate / 100)
+    st.progress(min(max(rebound_rate / 100, 0), 1.0))
 
 # =========================
 # 📡 主力雷達（台股正確顏色版）
