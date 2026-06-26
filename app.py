@@ -379,17 +379,20 @@ else:
     """, unsafe_allow_html=True)
 
 # =========================
-# 📈 走勢圖（修復空白 V6）
+# 📈 走勢圖（安全版）
 # =========================
+
+fig = ChartBuilder.build_price_chart(prices, volumes)
+
+# ⭐ 如果要改 layout，一定要在 fig 之後
 fig.update_layout(
-    height=520,   # ⭐ 核心：撐高圖表
-    margin=dict(l=10, r=10, t=20, b=10),
+    height=520,
+    margin=dict(l=10, r=10, t=20, b=10)
 )
 
 st.plotly_chart(
     fig,
-    use_container_width=True,
-    height=520   # ⭐ Streamlit 外層同步撐高
+    use_container_width=True
 )
 
 # =========================
