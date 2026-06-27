@@ -269,6 +269,6 @@ st.markdown(
 
     components.html(
         html,
-        height=86,
+        height=92,
         scrolling=False,
     )
