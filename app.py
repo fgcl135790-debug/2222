@@ -463,15 +463,19 @@ def main():
     # =========================
 
     with main_right:
-        render_alerts(alerts)
-
+        # 1. 核心交易決策
         render_decision_card(decision)
 
+        # 2. 即時警示
+        render_alerts(alerts)
+
+        # 3. 反彈 / 假突破分析
         render_rebound_panel(
             decision=decision,
             trade_alert=trade_alert,
         )
 
+        # 4. 主力籌碼結論
         render_chip_panel(
             bids=bids,
             asks=asks,
