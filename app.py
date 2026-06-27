@@ -260,6 +260,8 @@ decision = DecisionEngine.generate(
     macd=macd,
     macd_signal=macd_signal,
     bid_ratio=bid_ratio,
+    prices=prices,
+    volumes=volumes,
 )
 
 # =========================
