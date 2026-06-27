@@ -121,6 +121,7 @@ footer {
 # =========================
 
 try:
+    import random
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
@@ -165,6 +166,8 @@ def _safe_float(value, default=0.0):
 
 def reset_state():
     MarketFlowEngine.reset_market_state(st)
+    st.session_state.market_context_key = None
+    st.session_state.sim_run_id = random.randint(100000, 999999)
 
 
 def init_session_state():
@@ -194,13 +197,19 @@ def main():
     ) = render_sidebar(reset_state)
 
     # =========================
-    # 換股清空
+    # 切換股票 / 資料來源 / 模擬模式時清空
     # =========================
 
-    MarketFlowEngine.reset_if_stock_changed(
-        st=st,
-        stock_code=stock_code,
-    )
+    context_key = f"{stock_code}|{data_source}|{mode}"
+
+    if st.session_state.get("market_context_key") != context_key:
+        MarketFlowEngine.reset_market_state(
+            st=st,
+            keep_stock=stock_code,
+        )
+
+    st.session_state.market_context_key = context_key
+    st.session_state.sim_run_id = random.randint(100000, 999999)
 
     # =========================
     # Auto Refresh
@@ -232,6 +241,7 @@ def main():
                 stock_code=stock_code,
                 tick=st.session_state.tick,
                 mode=mode,
+                sim_run_id=st.session_state.get("sim_run_id", 0),
             )
 
         if not quote:
