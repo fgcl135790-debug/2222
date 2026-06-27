@@ -38,7 +38,7 @@ st.set_page_config(
 st.markdown("""
 <style>
 .block-container {
-    padding: 0.4rem 0.8rem;
+    padding: 0.35rem 0.75rem;
     font-size: 13px;
 }
 
@@ -46,12 +46,29 @@ h1, h2, h3 {
     font-size: 16px !important;
 }
 
-.css-1d391kg {
-    padding-top: 0.5rem;
+div[data-testid="stVerticalBlock"] {
+    gap: 0.35rem;
+}
+
+div[data-testid="stHorizontalBlock"] {
+    gap: 0.6rem;
+}
+
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+}
+
+.stTabs [data-baseweb="tab"] {
+    height: 32px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.stDataFrame {
+    font-size: 12px;
 }
 </style>
 """, unsafe_allow_html=True)
-
 
 # =========================
 # 台灣時間
@@ -336,24 +353,35 @@ with right:
 
     st.divider()
 
-    render_power_panel(decision)
-
-    st.divider()
-
-    render_big_order_panel(
-        st.session_state.big_order_log
+    tab_power, tab_big_order, tab_radar, tab_orderbook = st.tabs(
+        [
+            "⚔️ 多空",
+            "🐋 大單",
+            "📡 雷達",
+            "📋 五檔",
+        ]
     )
 
-    st.divider()
+    with tab_power:
 
-    render_radar(
-        bids=bids,
-        asks=asks,
-    )
+        render_power_panel(decision)
 
-    st.divider()
+    with tab_big_order:
 
-    render_orderbook(
-        bids=bids,
-        asks=asks,
-    )
+        render_big_order_panel(
+            st.session_state.big_order_log
+        )
+
+    with tab_radar:
+
+        render_radar(
+            bids=bids,
+            asks=asks,
+        )
+
+    with tab_orderbook:
+
+        render_orderbook(
+            bids=bids,
+            asks=asks,
+        )
