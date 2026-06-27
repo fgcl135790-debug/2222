@@ -464,7 +464,7 @@ with main_left:
 
 
 # =========================
-# 右側：警示 + 決策 + 監控 + 雷達
+# 右側：警示 + 決策 + 監控 + 主力資訊
 # =========================
 
 with main_right:
@@ -475,8 +475,8 @@ with main_right:
 
     render_trade_alert_panel(trade_alert)
 
-render_market_info_panel(
-    bids=bids,
-    asks=asks,
-    big_order_log=st.session_state.big_order_log,
-)
+    render_market_info_panel(
+        bids=bids,
+        asks=asks,
+        big_order_log=st.session_state.big_order_log,
+    )
