@@ -370,8 +370,6 @@ render_header(
 # V7.5 Dashboard Layout
 # =========================
 
-
-
 main_left, main_right = st.columns([1.72, 1])
 
 
@@ -400,39 +398,13 @@ with main_left:
         render_power_panel(decision)
 
 
+# =========================
+# 右側：警示 + 決策 + 監控 + 雷達
+# =========================
+
 with main_right:
 
     render_alerts(alerts)
-
-    render_decision_card(decision)
-
-    render_trade_alert_panel(trade_alert)
-
-    tab_radar, tab_big_order = st.tabs(
-        [
-            "📡 主力雷達",
-            "🐋 主力大單",
-        ]
-    )
-
-    with tab_radar:
-
-        render_radar(
-            bids=bids,
-            asks=asks,
-        )
-
-    with tab_big_order:
-
-        render_big_order_panel(
-            st.session_state.big_order_log
-        )
-
-# =========================
-# 右側：決策 + 監控 + 雷達
-# =========================
-
-with main_right:
 
     render_decision_card(decision)
 
