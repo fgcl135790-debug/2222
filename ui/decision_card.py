@@ -4,124 +4,143 @@ import plotly.graph_objects as go
 
 def render_decision_card(decision):
 
-    action = decision["action"]
+    action = decision.get("action", "WAIT")
+    score = decision.get("score", 50)
 
-    score = decision["score"]
+    entry = decision.get("entry", "-")
+    stop = decision.get("stop_loss", "-")
+    target = decision.get("take_profit", "-")
+    rr = decision.get("rr", "-")
+    reasons = decision.get("reasons", [])
 
-    entry = decision["entry"]
-
-    stop = decision["stop_loss"]
-
-    target = decision["take_profit"]
-
-    rr = decision["rr"]
-
-    reasons = decision["reasons"]
-
-    # ==========================
+    # ------------------------
     # 顏色
-    # ==========================
+    # ------------------------
 
     if action == "BUY":
-        color = "#ff1744"
-        text = "建議做多"
+        color = "#00e676"
+        title = "可當沖做多"
 
     elif action == "SELL":
-        color = "#00e676"
-        text = "建議做空"
+        color = "#ff5252"
+        title = "可當沖做空"
 
     else:
         color = "#ffc107"
-        text = "等待"
+        title = "等待進場"
+
+    st.markdown("### 🎯 交易決策 (V7.5)")
+
+    left, right = st.columns([3, 2])
 
     # ==========================
-    # UI
+    # 左邊
     # ==========================
 
-    st.subheader("🎯 交易決策")
+    with left:
 
-# ==========================
-# Gauge
-# ==========================
+        st.markdown(
+            f"""
+            <div style="
+            font-size:30px;
+            font-weight:700;
+            color:{color};
+            ">
+            {title}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-fig = go.Figure(
-    go.Indicator(
-        mode="gauge+number",
-        value=score,
-        number={
-            "suffix": "%",
-            "font": {
-                "size": 34
-            }
-        },
-        title={
-            "text": "AI Decision"
-        },
-        gauge={
+        st.write("")
 
-            "axis": {
-                "range": [0,100]
-            },
+        st.markdown(f"**進場區間**　{entry}")
+        st.markdown(f"**停損價位**　{stop}")
+        st.markdown(f"**停利目標**　{target}")
+        st.markdown(f"**風險報酬比**　{rr}")
 
-            "bar": {
-                "color": color
-            },
+    # ==========================
+    # 右邊 Gauge
+    # ==========================
 
-            "steps":[
+    with right:
 
-                {
-                    "range":[0,40],
-                    "color":"#3b0d0d"
+        fig = go.Figure(
+            go.Indicator(
+                mode="gauge+number",
+                value=score,
+                number={
+                    "suffix": "",
+                    "font": {"size": 34},
                 },
+                gauge={
+                    "shape": "angular",
 
-                {
-                    "range":[40,60],
-                    "color":"#3f3f3f"
-                },
+                    "axis": {
+                        "range": [0, 100]
+                    },
 
-                {
-                    "range":[60,100],
-                    "color":"#083d17"
+                    "bar": {
+                        "color": color,
+                        "thickness": 0.25
+                    },
+
+                    "bgcolor": "#1b1f2a",
+
+                    "steps": [
+
+                        {
+                            "range": [0, 30],
+                            "color": "#401515"
+                        },
+
+                        {
+                            "range": [30, 60],
+                            "color": "#665522"
+                        },
+
+                        {
+                            "range": [60, 80],
+                            "color": "#225533"
+                        },
+
+                        {
+                            "range": [80, 100],
+                            "color": "#00c853"
+                        }
+
+                    ]
                 }
+            )
+        )
 
-            ]
-        }
-    )
-)
+        fig.update_layout(
+            height=220,
+            margin=dict(
+                l=0,
+                r=0,
+                t=10,
+                b=0
+            ),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)"
+        )
 
-fig.update_layout(
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
 
-    height=230,
+    st.divider()
 
-    margin=dict(
-        l=10,
-        r=10,
-        t=20,
-        b=0
-    )
+    st.markdown("#### AI 判斷依據")
 
-)
+    if len(reasons) == 0:
 
-st.plotly_chart(
-    fig,
-    use_container_width=True
-)
+        st.write("目前無分析內容")
 
-st.markdown(
-    f"## <span style='color:{color}'>{text}</span>",
-    unsafe_allow_html=True
-)
+    else:
 
-st.write(f"**進場：** {entry}")
+        for r in reasons:
 
-st.write(f"**停損：** {stop}")
-
-st.write(f"**停利：** {target}")
-
-st.write(f"**RR：** {rr}")
-
-st.caption("判斷依據")
-
-for r in reasons:
-
-    st.write("•", r)
+            st.markdown(f"✅ {r}")
