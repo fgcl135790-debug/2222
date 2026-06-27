@@ -166,6 +166,8 @@ def _safe_float(value, default=0.0):
 
 def reset_state():
     MarketFlowEngine.reset_market_state(st)
+
+    # 手動重置時，下一次會重新建立模擬路徑
     st.session_state.market_context_key = None
     st.session_state.sim_run_id = random.randint(100000, 999999)
 
@@ -181,6 +183,12 @@ def init_session_state():
 def main():
 
     init_session_state()
+
+    if "market_context_key" not in st.session_state:
+        st.session_state.market_context_key = None
+
+    if "sim_run_id" not in st.session_state:
+        st.session_state.sim_run_id = random.randint(100000, 999999)
 
     now = datetime.now(ZoneInfo("Asia/Taipei"))
 
@@ -201,16 +209,21 @@ def main():
     # =========================
 
     context_key = f"{stock_code}|{data_source}|{mode}"
+    old_context_key = st.session_state.get("market_context_key")
 
-    if st.session_state.get("market_context_key") != context_key:
+    if old_context_key != context_key:
         MarketFlowEngine.reset_market_state(
             st=st,
             keep_stock=stock_code,
         )
 
-    st.session_state.market_context_key = context_key
-    st.session_state.sim_run_id = random.randint(100000, 999999)
+        st.session_state.market_context_key = context_key
 
+        # 只有切換情境 / 股票 / 資料來源時，才重新產生模擬走勢
+        # 不能每次 refresh 都 random
+        if data_source == "模擬盤":
+            st.session_state.sim_run_id = random.randint(100000, 999999)
+            
     # =========================
     # Auto Refresh
     # =========================
