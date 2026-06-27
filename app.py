@@ -123,7 +123,8 @@ def reset_state():
     st.session_state.tick = 0
     st.session_state.last_serial = None
     st.session_state.big_order_last_serial = None
-
+    st.session_state.last_good_quote = None
+    st.session_state.api_error_message = None
 
 for k in ["price_history", "volume_history"]:
     if k not in st.session_state:
@@ -143,6 +144,12 @@ if "big_order_last_serial" not in st.session_state:
 
 if "last_stock" not in st.session_state:
     st.session_state.last_stock = None
+
+if "last_good_quote" not in st.session_state:
+    st.session_state.last_good_quote = None
+
+if "api_error_message" not in st.session_state:
+    st.session_state.api_error_message = None
 
 
 # =========================
@@ -176,12 +183,32 @@ if data_source == "真實盤" and not api_key:
     st.warning("請輸入 API KEY")
     st.stop()
 
-quote = get_market_data(
-    data_source=data_source,
-    api_key=api_key,
-    stock_code=stock_code,
-    tick=st.session_state.tick,
-)
+try:
+    quote = get_market_data(
+        data_source=data_source,
+        api_key=api_key,
+        stock_code=stock_code,
+        tick=st.session_state.tick,
+    )
+
+    if not quote:
+        raise ValueError("empty quote")
+
+    st.session_state.last_good_quote = quote
+    st.session_state.api_error_message = None
+
+except Exception as e:
+
+    st.session_state.api_error_message = type(e).__name__
+
+    if st.session_state.last_good_quote is not None:
+
+        quote = st.session_state.last_good_quote
+
+    else:
+
+        st.error("Fugle API 暫時異常，且目前沒有上一筆有效資料可使用。請稍後重試，或先切換到模擬盤測試 UI。")
+        st.stop()
 
 if data_source == "模擬盤":
     st.session_state.tick += 1
@@ -355,7 +382,11 @@ alerts = AlertEngine.build(
 # Header
 # =========================
 
-connection_status = "連線正常" if quote else "連線異常"
+connection_status = (
+    "資料延遲"
+    if st.session_state.get("api_error_message")
+    else "連線正常"
+)
 
 render_header(
     name=name,
