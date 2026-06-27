@@ -1,5 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
+from html import escape
 
 from ui.theme import (
     UP_COLOR,
@@ -50,6 +51,17 @@ def _fmt_size(value):
     return f"{value:.1f}"
 
 
+def _fmt_value(value):
+    if value is None:
+        return "-"
+
+    try:
+        value = float(value)
+        return f"{value:.2f}"
+    except Exception:
+        return str(value)
+
+
 def _normalize(levels):
     rows = []
 
@@ -59,10 +71,12 @@ def _normalize(levels):
         else:
             item = {}
 
-        rows.append({
-            "price": _safe_float(item.get("price", 0)),
-            "size": _safe_float(item.get("size", 0)),
-        })
+        rows.append(
+            {
+                "price": _safe_float(item.get("price", 0)),
+                "size": _safe_float(item.get("size", 0)),
+            }
+        )
 
     return rows
 
@@ -77,20 +91,24 @@ def render_depth_panel(bids, asks, decision):
 
     depth_ratio = bid_total / max(ask_total, 1)
 
+    # 五檔顏色：買方多為低於現價，偏綠；賣方多為高於現價，偏紅
     buy_color = DOWN_COLOR
     sell_color = UP_COLOR
 
-    if depth_ratio >= 1.3:
+    if depth_ratio >= 1.35:
         depth_status = "委買偏強"
         depth_color = buy_color
+        depth_desc = "買方掛單支撐較明顯"
 
-    elif depth_ratio <= 0.77:
+    elif depth_ratio <= 0.74:
         depth_status = "委賣偏強"
         depth_color = sell_color
+        depth_desc = "賣方掛單壓力較明顯"
 
     else:
         depth_status = "委買委賣均衡"
         depth_color = WAIT_COLOR
+        depth_desc = "買賣雙方暫時拉鋸"
 
     long_score = _safe_int(decision.get("long_score", 0))
     short_score = _safe_int(decision.get("short_score", 0))
@@ -104,17 +122,55 @@ def render_depth_panel(bids, asks, decision):
     if bias >= 4:
         force_status = "多方優勢"
         force_color = UP_COLOR
-        strategy = "偏多觀察"
+        force_desc = "多方條件較完整"
 
     elif bias <= -4:
         force_status = "空方優勢"
         force_color = DOWN_COLOR
-        strategy = "避免追多"
+        force_desc = "空方壓力較明顯"
 
     else:
         force_status = "多空拉鋸"
         force_color = WAIT_COLOR
-        strategy = "等待確認"
+        force_desc = "等待方向確認"
+
+    action = decision.get("action", "WAIT")
+    score = _safe_int(decision.get("score", 0))
+    rebound = _safe_int(decision.get("rebound", 0))
+    rr = _fmt_value(decision.get("rr", "-"))
+    fake_signal = decision.get("fake_signal", "NONE")
+
+    if action == "BUY":
+        action_text = "偏多觀察"
+        action_color = UP_COLOR
+
+    elif action == "SELL":
+        action_text = "偏空觀察"
+        action_color = DOWN_COLOR
+
+    else:
+        action_text = "等待訊號"
+        action_color = WAIT_COLOR
+
+    if fake_signal == "FAKE_BREAKOUT":
+        fake_text = "疑似假突破"
+        fake_color = WAIT_COLOR
+
+    elif fake_signal == "FAKE_BREAKDOWN":
+        fake_text = "疑似假跌破"
+        fake_color = WAIT_COLOR
+
+    elif fake_signal == "REAL_BREAKOUT":
+        fake_text = "有效突破"
+        fake_color = UP_COLOR
+
+    elif fake_signal == "REAL_BREAKDOWN":
+        fake_text = "有效跌破"
+        fake_color = DOWN_COLOR
+
+    else:
+        fake_text = "無明顯假訊號"
+        fake_color = SUBTEXT
 
     rows_html = ""
 
@@ -131,7 +187,7 @@ def render_depth_panel(bids, asks, decision):
         </tr>
         """
 
-    st.markdown("### 📊 委買委賣 / 多空力道")
+    st.markdown("### 📊 市場深度 / 多空結構")
 
     html = f"""
 <!DOCTYPE html>
@@ -147,10 +203,11 @@ def render_depth_panel(bids, asks, decision):
             overflow: hidden;
         }}
 
-        .wrap {{
+        .grid {{
             display: grid;
-            grid-template-columns: 1.08fr 0.92fr;
-            gap: 10px;
+            grid-template-columns: 1.12fr 0.88fr;
+            grid-template-rows: auto auto;
+            gap: 9px;
             width: 100%;
             box-sizing: border-box;
         }}
@@ -159,13 +216,13 @@ def render_depth_panel(bids, asks, decision):
             background: {CARD_BG};
             border: 1px solid {CARD_BORDER};
             border-radius: 14px;
-            padding: 11px;
+            padding: 10px;
             box-sizing: border-box;
             width: 100%;
-            height: 100%;
+            min-height: 126px;
         }}
 
-        .top {{
+        .card-title-row {{
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -178,9 +235,13 @@ def render_depth_panel(bids, asks, decision):
             font-weight: 900;
         }}
 
-        .status {{
-            font-size: 13px;
+        .tag {{
+            font-size: 11px;
             font-weight: 900;
+            border-radius: 999px;
+            padding: 3px 8px;
+            border: 1px solid currentColor;
+            white-space: nowrap;
         }}
 
         table {{
@@ -191,18 +252,18 @@ def render_depth_panel(bids, asks, decision):
 
         th {{
             color: {SUBTEXT};
-            font-size: 11.5px;
+            font-size: 10.8px;
             font-weight: 800;
-            padding: 5px 3px;
+            padding: 4px 3px;
             border-bottom: 1px solid rgba(255,255,255,0.12);
         }}
 
         td {{
-            font-size: 12.5px;
+            font-size: 12.2px;
             font-weight: 900;
             text-align: center;
-            padding: 5px 3px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 4px 3px;
+            border-bottom: 1px solid rgba(255,255,255,0.055);
         }}
 
         .buy-size,
@@ -215,11 +276,74 @@ def render_depth_panel(bids, asks, decision):
             color: {sell_color};
         }}
 
-        .summary {{
-            margin-top: 8px;
+        .force-status {{
+            color: {force_color};
+            font-size: 22px;
+            font-weight: 900;
+            line-height: 1;
+            margin-top: 2px;
+        }}
+
+        .desc {{
+            color: {SUBTEXT};
+            font-size: 11.2px;
+            margin-top: 5px;
+            line-height: 1.35;
+        }}
+
+        .force-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+            margin-bottom: 6px;
+        }}
+
+        .long {{
+            color: {UP_COLOR};
+            font-size: 12.5px;
+            font-weight: 900;
+        }}
+
+        .short {{
+            color: {DOWN_COLOR};
+            font-size: 12.5px;
+            font-weight: 900;
+        }}
+
+        .bar {{
+            width: 100%;
+            height: 12px;
+            background: rgba(255,255,255,0.10);
+            border-radius: 999px;
+            overflow: hidden;
+            display: flex;
+        }}
+
+        .long-bar {{
+            width: {long_pct}%;
+            height: 100%;
+            background: {UP_COLOR};
+        }}
+
+        .short-bar {{
+            width: {short_pct}%;
+            height: 100%;
+            background: {DOWN_COLOR};
+        }}
+
+        .stat-grid {{
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 6px;
+            margin-top: 8px;
+        }}
+
+        .stat-grid-2 {{
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            margin-top: 8px;
         }}
 
         .box {{
@@ -238,101 +362,36 @@ def render_depth_panel(bids, asks, decision):
         .box-value {{
             font-size: 14px;
             font-weight: 900;
+            line-height: 1.15;
         }}
 
-        .force-head {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }}
-
-        .force-status {{
-            color: {force_color};
+        .main-status {{
+            color: {depth_color};
             font-size: 20px;
             font-weight: 900;
+            line-height: 1;
+            margin-top: 4px;
         }}
 
-        .force-row {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 6px;
-        }}
-
-        .long {{
-            color: {UP_COLOR};
-            font-size: 13px;
+        .tech-status {{
+            color: {action_color};
+            font-size: 20px;
             font-weight: 900;
+            line-height: 1;
+            margin-top: 4px;
         }}
 
-        .short {{
-            color: {DOWN_COLOR};
-            font-size: 13px;
-            font-weight: 900;
-        }}
-
-        .bar {{
-            width: 100%;
-            height: 13px;
-            background: rgba(255,255,255,0.10);
-            border-radius: 999px;
-            overflow: hidden;
-            display: flex;
-            margin-bottom: 7px;
-        }}
-
-        .long-bar {{
-            width: {long_pct}%;
-            height: 100%;
-            background: {UP_COLOR};
-        }}
-
-        .short-bar {{
-            width: {short_pct}%;
-            height: 100%;
-            background: {DOWN_COLOR};
-        }}
-
-        .pct-row {{
-            display: flex;
-            justify-content: space-between;
-            color: {SUBTEXT};
-            font-size: 11.5px;
-            margin-bottom: 8px;
-        }}
-
-        .mini-grid {{
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 6px;
-        }}
-
-        .hint {{
+        .note {{
             margin-top: 8px;
-            padding-top: 8px;
+            padding-top: 7px;
             border-top: 1px solid rgba(255,255,255,0.08);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-        }}
-
-        .hint-left {{
             color: {SUBTEXT};
-            font-size: 11.5px;
+            font-size: 11px;
             line-height: 1.35;
         }}
 
-        .hint-right {{
-            color: {force_color};
-            font-size: 15px;
-            font-weight: 900;
-            white-space: nowrap;
-        }}
-
         @media (max-width: 900px) {{
-            .wrap {{
+            .grid {{
                 grid-template-columns: 1fr;
             }}
         }}
@@ -340,13 +399,12 @@ def render_depth_panel(bids, asks, decision):
 </head>
 
 <body>
-    <div class="wrap">
+    <div class="grid">
 
         <div class="card">
-
-            <div class="top">
-                <div class="title">即時五檔</div>
-                <div class="status" style="color:{depth_color};">{depth_status}</div>
+            <div class="card-title-row">
+                <div class="title">五檔報價</div>
+                <div class="tag" style="color:{depth_color};">{depth_status}</div>
             </div>
 
             <table>
@@ -363,8 +421,50 @@ def render_depth_panel(bids, asks, decision):
                     {rows_html}
                 </tbody>
             </table>
+        </div>
 
-            <div class="summary">
+        <div class="card">
+            <div class="card-title-row">
+                <div class="title">即時多空力道</div>
+                <div class="tag" style="color:{force_color};">{force_status}</div>
+            </div>
+
+            <div class="force-status">{force_status}</div>
+            <div class="desc">{force_desc}</div>
+
+            <div class="force-row">
+                <div class="long">多方 {long_score}</div>
+                <div class="short">空方 {short_score}</div>
+            </div>
+
+            <div class="bar">
+                <div class="long-bar"></div>
+                <div class="short-bar"></div>
+            </div>
+
+            <div class="stat-grid-2">
+                <div class="box">
+                    <div class="box-label">多空差距</div>
+                    <div class="box-value" style="color:{force_color};">{bias}</div>
+                </div>
+
+                <div class="box">
+                    <div class="box-label">多方占比</div>
+                    <div class="box-value" style="color:{UP_COLOR};">{long_pct}%</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title-row">
+                <div class="title">委買委賣統計</div>
+                <div class="tag" style="color:{depth_color};">{depth_status}</div>
+            </div>
+
+            <div class="main-status">{depth_status}</div>
+            <div class="desc">{depth_desc}</div>
+
+            <div class="stat-grid">
                 <div class="box">
                     <div class="box-label">委買</div>
                     <div class="box-value" style="color:{buy_color};">{_fmt_size(bid_total)}</div>
@@ -380,69 +480,38 @@ def render_depth_panel(bids, asks, decision):
                     <div class="box-value" style="color:{sell_color};">{_fmt_size(ask_total)}</div>
                 </div>
             </div>
-
         </div>
 
         <div class="card">
-
-            <div class="force-head">
-                <div>
-                    <div class="title">多空力道</div>
-                    <div style="color:{SUBTEXT};font-size:11.5px;margin-top:3px;">DecisionEngine 綜合判斷</div>
-                </div>
-
-                <div class="force-status">{force_status}</div>
+            <div class="card-title-row">
+                <div class="title">技術狀態</div>
+                <div class="tag" style="color:{action_color};">{escape(action_text)}</div>
             </div>
 
-            <div class="force-row">
-                <div class="long">多方 {long_score}</div>
-                <div class="short">空方 {short_score}</div>
-            </div>
+            <div class="tech-status">{escape(action_text)}</div>
+            <div class="desc">依交易決策、反彈機率、假突破訊號綜合判斷。</div>
 
-            <div class="bar">
-                <div class="long-bar"></div>
-                <div class="short-bar"></div>
-            </div>
-
-            <div class="pct-row">
-                <div>多方 {long_pct}%</div>
-                <div>空方 {short_pct}%</div>
-            </div>
-
-            <div class="mini-grid">
-
+            <div class="stat-grid-2">
                 <div class="box">
-                    <div class="box-label">多空差距</div>
-                    <div class="box-value" style="color:{force_color};">{bias}</div>
+                    <div class="box-label">Score</div>
+                    <div class="box-value" style="color:{action_color};">{score}</div>
                 </div>
 
                 <div class="box">
-                    <div class="box-label">目前策略</div>
-                    <div class="box-value" style="color:{WAIT_COLOR};">{strategy}</div>
+                    <div class="box-label">反彈率</div>
+                    <div class="box-value" style="color:{WAIT_COLOR};">{rebound}%</div>
                 </div>
 
                 <div class="box">
-                    <div class="box-label">委買比</div>
-                    <div class="box-value" style="color:{depth_color};">{depth_ratio:.2f}</div>
+                    <div class="box-label">RR</div>
+                    <div class="box-value" style="color:{action_color};">{escape(rr)}</div>
                 </div>
 
                 <div class="box">
-                    <div class="box-label">狀態</div>
-                    <div class="box-value" style="color:{force_color};">{force_status}</div>
-                </div>
-
-            </div>
-
-            <div class="hint">
-                <div class="hint-left">
-                    五檔與多空分數綜合參考。
-                </div>
-
-                <div class="hint-right">
-                    {strategy}
+                    <div class="box-label">假訊號</div>
+                    <div class="box-value" style="color:{fake_color};font-size:12.5px;">{escape(fake_text)}</div>
                 </div>
             </div>
-
         </div>
 
     </div>
@@ -452,6 +521,6 @@ def render_depth_panel(bids, asks, decision):
 
     components.html(
         html,
-        height=275,
+        height=292,
         scrolling=False,
     )
