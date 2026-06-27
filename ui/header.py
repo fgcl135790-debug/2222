@@ -1,3 +1,4 @@
+import streamlit as st
 import streamlit.components.v1 as components
 from html import escape
 
@@ -117,6 +118,28 @@ def render_header(
     force_color, force_title, force_sub = _force_style(bid_ratio)
     status_color, status_title, status_sub = _status_style(signal, state)
 
+    # =========================
+    # 原生 Topbar
+    # =========================
+
+    title_col, meta_col = st.columns([1.05, 2.2])
+
+    with title_col:
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:8px;font-size:17px;font-weight:900;color:{TEXT};height:24px;">🏦 {name} ({stock_code}) <span style="color:#facc15;">★</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    with meta_col:
+        st.markdown(
+            f'<div style="display:flex;justify-content:flex-end;align-items:center;gap:14px;color:{SUBTEXT};font-size:12px;height:24px;white-space:nowrap;"><span>◎ {source_text} {time_text}</span><span><span style="display:inline-block;width:8px;height:8px;border-radius:99px;background:{conn_color};box-shadow:0 0 8px {conn_color};margin-right:5px;"></span>{connection_status}</span><span>⚙ 設定</span><span>🔔 聲音警示</span><span>自訂布局</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    # =========================
+    # 狀態卡片
+    # =========================
+
     html = f"""
 <!DOCTYPE html>
 <html>
@@ -129,48 +152,6 @@ def render_header(
             font-family: Arial, "Microsoft JhengHei", sans-serif;
             color: {TEXT};
             overflow: hidden;
-        }}
-
-        .topbar {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 9px;
-            height: 24px;
-        }}
-
-        .title {{
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 17px;
-            font-weight: 900;
-            color: {TEXT};
-            white-space: nowrap;
-        }}
-
-        .star {{
-            color: #facc15;
-            font-size: 16px;
-        }}
-
-        .meta {{
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            color: {SUBTEXT};
-            font-size: 12px;
-            white-space: nowrap;
-        }}
-
-        .dot {{
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 99px;
-            background: {conn_color};
-            box-shadow: 0 0 8px {conn_color};
-            margin-right: 5px;
         }}
 
         .grid {{
@@ -233,30 +214,11 @@ def render_header(
             .grid {{
                 grid-template-columns: repeat(2, 1fr);
             }}
-
-            .meta .hide-mobile {{
-                display: none;
-            }}
         }}
     </style>
 </head>
 
 <body>
-
-    <div class="topbar">
-        <div class="title">
-            🏦 {name} ({stock_code})
-            <span class="star">★</span>
-        </div>
-
-        <div class="meta">
-            <span>◎ {source_text} {time_text}</span>
-            <span><span class="dot"></span>{connection_status}</span>
-            <span class="hide-mobile">⚙ 設定</span>
-            <span class="hide-mobile">🔔 聲音警示</span>
-            <span class="hide-mobile">自訂布局</span>
-        </div>
-    </div>
 
     <div class="grid">
 
@@ -306,6 +268,6 @@ def render_header(
 
     components.html(
         html,
-        height=118,
+        height=86,
         scrolling=False,
     )
