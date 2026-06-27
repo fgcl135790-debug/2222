@@ -33,6 +33,10 @@ class SimulationEngine:
 
     TOTAL_MINUTES = 271  # 09:00 ~ 13:30
 
+    # 關鍵：快取同一條模擬日內路徑
+    # key = stock_code | scenario | sim_run_id
+    PATH_CACHE = {}
+
     @staticmethod
     def _safe_int(value, default=0):
         try:
@@ -107,6 +111,12 @@ class SimulationEngine:
 
     @staticmethod
     def _make_full_day_path(stock_code, scenario, sim_run_id=0):
+        """
+        產生完整 09:00 ~ 13:30 走勢。
+        注意：這裡的 seed 絕對不能包含 tick。
+        tick 只能控制目前播放到第幾分鐘。
+        """
+
         profile = SimulationEngine._stock_profile(stock_code)
 
         name = profile["name"]
@@ -122,12 +132,8 @@ class SimulationEngine:
 
         rng = random.Random(seed)
 
-        start = datetime.now().replace(
-            hour=9,
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
+        # 固定日期時間，不使用現在的秒數，避免 x 軸每秒改變
+        start = datetime(2026, 1, 1, 9, 0, 0)
 
         open_gap = rng.uniform(-0.006, 0.006)
 
@@ -238,11 +244,31 @@ class SimulationEngine:
             "tick_size": tick_size,
             "base_volume": base_volume,
             "history": history,
+            "sim_run_id": sim_run_id,
+            "scenario": scenario,
         }
 
     @staticmethod
+    def _get_cached_full_day_path(stock_code, scenario, sim_run_id):
+        cache_key = f"{stock_code}|{scenario}|{sim_run_id}"
+
+        if cache_key not in SimulationEngine.PATH_CACHE:
+            SimulationEngine.PATH_CACHE[cache_key] = SimulationEngine._make_full_day_path(
+                stock_code=stock_code,
+                scenario=scenario,
+                sim_run_id=sim_run_id,
+            )
+
+            # 避免快取無限長大，只保留最近 20 條
+            if len(SimulationEngine.PATH_CACHE) > 20:
+                oldest_key = list(SimulationEngine.PATH_CACHE.keys())[0]
+                SimulationEngine.PATH_CACHE.pop(oldest_key, None)
+
+        return SimulationEngine.PATH_CACHE[cache_key]
+
+    @staticmethod
     def _make_intraday_replay(stock_code, tick=0, scenario="一般波動", sim_run_id=0):
-        profile = SimulationEngine._make_full_day_path(
+        profile = SimulationEngine._get_cached_full_day_path(
             stock_code=stock_code,
             scenario=scenario,
             sim_run_id=sim_run_id,
@@ -264,14 +290,15 @@ class SimulationEngine:
         tick_size = profile["tick_size"]
         base_volume = profile["base_volume"]
 
-        seed = (
+        # 五檔可以隨 tick 微變，這不會影響走勢線
+        book_seed = (
             sum(ord(c) for c in str(stock_code))
             + tick * 17
             + sum(ord(c) for c in str(scenario)) * 19
             + int(sim_run_id) * 97
         )
 
-        rng = random.Random(seed)
+        rng = random.Random(book_seed)
 
         bid_bias = 1.0
         ask_bias = 1.0
