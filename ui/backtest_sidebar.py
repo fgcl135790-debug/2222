@@ -28,143 +28,156 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             st.warning("請先輸入 Fugle API KEY。")
             return
 
-        symbol = st.text_input(
-            "回測股票",
-            value=str(stock_code),
-            key="bt_symbol",
-        )
+        # =========================
+        # 用 form 包起來，避免 auto refresh 吃掉按鈕狀態
+        # =========================
 
-        timeframe = st.selectbox(
-            "K 線週期",
-            options=["1", "5", "15", "30"],
-            index=0,
-            format_func=lambda x: f"{x} 分K",
-            key="bt_timeframe",
-        )
+        with st.form(
+            key="backtest_form",
+            clear_on_submit=False,
+        ):
+            symbol = st.text_input(
+                "回測股票",
+                value=str(stock_code),
+                key="bt_symbol",
+            )
 
-        day_scope_label = st.selectbox(
-            "回測範圍",
-            options=[
-                "最後一個開市日",
-                "最近 5 個開市日",
-                "近 30 日全部資料",
-            ],
-            index=0,
-            key="bt_day_scope_label",
-        )
+            timeframe = st.selectbox(
+                "K 線週期",
+                options=["1", "5", "15", "30"],
+                index=0,
+                format_func=lambda x: f"{x} 分K",
+                key="bt_timeframe",
+            )
 
-        day_scope_map = {
-            "最後一個開市日": "last_open_day",
-            "最近 5 個開市日": "recent_5_days",
-            "近 30 日全部資料": "all",
-        }
+            day_scope_label = st.selectbox(
+                "回測範圍",
+                options=[
+                    "最後一個開市日",
+                    "最近 5 個開市日",
+                    "近 30 日全部資料",
+                ],
+                index=1,
+                key="bt_day_scope_label",
+            )
 
-        day_scope = day_scope_map.get(
-            day_scope_label,
-            "last_open_day",
-        )
+            day_scope_map = {
+                "最後一個開市日": "last_open_day",
+                "最近 5 個開市日": "recent_5_days",
+                "近 30 日全部資料": "all",
+            }
 
-        score_threshold = st.slider(
-            "最低 Score",
-            min_value=50,
-            max_value=95,
-            value=75,
-            step=5,
-            key="bt_score_threshold",
-        )
+            day_scope = day_scope_map.get(
+                day_scope_label,
+                "recent_5_days",
+            )
 
-        require_resonance = st.checkbox(
-            "只測多週期共振",
-            value=True,
-            key="bt_require_resonance",
-        )
+            score_threshold = st.slider(
+                "最低 Score",
+                min_value=50,
+                max_value=95,
+                value=75,
+                step=5,
+                key="bt_score_threshold",
+            )
 
-        avoid_open_minutes = st.slider(
-            "避開開盤前幾分鐘",
-            min_value=0,
-            max_value=30,
-            value=15,
-            step=5,
-            key="bt_avoid_open",
-        )
+            require_resonance = st.checkbox(
+                "只測多週期共振",
+                value=True,
+                key="bt_require_resonance",
+            )
 
-        max_hold_bars = st.slider(
-            "最多持有 K 數",
-            min_value=10,
-            max_value=90,
-            value=45,
-            step=5,
-            key="bt_max_hold_bars",
-        )
-        default_stop_pct = st.slider(
-            "回測停損 %",
-            min_value=0.2,
-            max_value=3.0,
-            value=0.6,
-            step=0.1,
-            key="bt_default_stop_pct",
-        )
+            avoid_open_minutes = st.slider(
+                "避開開盤前幾分鐘",
+                min_value=0,
+                max_value=30,
+                value=15,
+                step=5,
+                key="bt_avoid_open",
+            )
 
-        default_take_pct = st.slider(
-            "回測停利 %",
-            min_value=0.3,
-            max_value=5.0,
-            value=1.0,
-            step=0.1,
-            key="bt_default_take_pct",
-        )
+            max_hold_bars = st.slider(
+                "最多持有 K 數",
+                min_value=10,
+                max_value=90,
+                value=50,
+                step=5,
+                key="bt_max_hold_bars",
+            )
 
-        commission_discount = st.slider(
-            "手續費折扣",
-            min_value=0.1,
-            max_value=1.0,
-            value=1.0,
-            step=0.1,
-            key="bt_commission_discount",
-        )
+            default_stop_pct = st.slider(
+                "回測停損 %",
+                min_value=0.2,
+                max_value=3.0,
+                value=0.6,
+                step=0.1,
+                key="bt_default_stop_pct",
+            )
 
-        tax_rate_pct = st.slider(
-            "證交稅 %",
-            min_value=0.0,
-            max_value=0.3,
-            value=0.15,
-            step=0.01,
-            key="bt_tax_rate_pct",
-        )
+            default_take_pct = st.slider(
+                "回測停利 %",
+                min_value=0.3,
+                max_value=5.0,
+                value=1.0,
+                step=0.1,
+                key="bt_default_take_pct",
+            )
 
-        commission_rate_pct = 0.1425
-        effective_commission_pct = commission_rate_pct * commission_discount
+            commission_discount = st.slider(
+                "手續費折扣",
+                min_value=0.1,
+                max_value=1.0,
+                value=1.0,
+                step=0.1,
+                key="bt_commission_discount",
+            )
 
-        estimated_round_trip_cost = (
-            effective_commission_pct
-            + effective_commission_pct
-            + tax_rate_pct
-        )
-        
-        st.caption(
-            f"股價目標：停損 {default_stop_pct:.1f}%｜"
-            f"停利 {default_take_pct:.1f}%｜"
-            f"最多持有 {max_hold_bars} 根K"
-        )
+            tax_rate_pct = st.slider(
+                "證交稅 %",
+                min_value=0.0,
+                max_value=0.3,
+                value=0.15,
+                step=0.01,
+                key="bt_tax_rate_pct",
+            )
 
-        st.caption(
-            f"成本只扣在損益：手續費 {effective_commission_pct:.4f}% × 2｜"
-            f"證交稅 {tax_rate_pct:.2f}%｜"
-            f"單趟來回約 {estimated_round_trip_cost:.3f}%"
-        )
+            commission_rate_pct = 0.1425
+            effective_commission_pct = commission_rate_pct * commission_discount
 
-        run_clicked = st.button(
-            "執行回測",
-            use_container_width=True,
-            key="bt_run",
-        )
+            estimated_round_trip_cost = (
+                effective_commission_pct
+                + effective_commission_pct
+                + tax_rate_pct
+            )
+
+            st.caption(
+                f"股價目標：停損 {default_stop_pct:.1f}%｜"
+                f"停利 {default_take_pct:.1f}%｜"
+                f"最多持有 {max_hold_bars} 根K"
+            )
+
+            st.caption(
+                f"成本只扣在損益：手續費 {effective_commission_pct:.4f}% × 2｜"
+                f"證交稅 {tax_rate_pct:.2f}%｜"
+                f"單趟來回約 {estimated_round_trip_cost:.3f}%"
+            )
+
+            run_clicked = st.form_submit_button(
+                "執行回測",
+                use_container_width=True,
+            )
+
+        # =========================
+        # 執行回測
+        # =========================
 
         if run_clicked:
-            st.session_state.backtest_result = None
             st.session_state.backtest_status = "running"
+            st.session_state.backtest_result = None
+            st.session_state.backtest_message = "已收到回測指令，正在抓歷史 K 線..."
 
             status_box = st.empty()
-            status_box.info("已收到回測指令，正在抓歷史 K 線...")
+            status_box.info(st.session_state.backtest_message)
 
             try:
                 with st.spinner("回測中，請稍等..."):
@@ -188,9 +201,17 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 st.session_state.backtest_status = "done"
 
                 if result.get("ok"):
-                    status_box.success(result.get("message", "回測完成"))
+                    st.session_state.backtest_message = result.get(
+                        "message",
+                        "回測完成",
+                    )
+                    status_box.success(st.session_state.backtest_message)
                 else:
-                    status_box.error(result.get("message", "回測失敗"))
+                    st.session_state.backtest_message = result.get(
+                        "message",
+                        "回測失敗",
+                    )
+                    status_box.error(st.session_state.backtest_message)
 
             except Exception as e:
                 st.session_state.backtest_status = "error"
@@ -200,9 +221,14 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                     "summary": {},
                     "trades": [],
                 }
+                st.session_state.backtest_message = str(e)
 
                 status_box.error("回測執行時發生錯誤")
                 st.exception(e)
+
+        # =========================
+        # 顯示狀態
+        # =========================
 
         result = st.session_state.get("backtest_result")
 
@@ -248,9 +274,37 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             f"最大連敗 {summary.get('max_consecutive_loss', 0)}"
         )
 
+        if "gross_total_pnl" in summary or "total_cost_pct" in summary:
+            st.divider()
+            st.caption("損益拆解")
+
+            c3, c4 = st.columns(2)
+
+            with c3:
+                st.metric(
+                    "未扣成本",
+                    _fmt_pct(summary.get("gross_total_pnl", 0)),
+                )
+
+                st.metric(
+                    "成本合計",
+                    _fmt_pct(summary.get("total_cost_pct", 0)),
+                )
+
+            with c4:
+                st.metric(
+                    "扣成本後",
+                    _fmt_pct(summary.get("net_total_pnl", summary.get("total_pnl", 0))),
+                )
+
+                st.metric(
+                    "平均每筆",
+                    _fmt_pct(summary.get("avg_pnl", 0)),
+                )
+
         if not trades:
             st.warning(
-                "這次沒有符合條件的交易。可以先把最低 Score 降到 60，"
+                "這次沒有符合條件的交易。可以降低最低 Score，"
                 "或取消「只測多週期共振」。"
             )
             return
@@ -294,7 +348,13 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             "result",
         ]
 
-        df = df[[col for col in show_cols if col in df.columns]]
+        df = df[
+            [
+                col
+                for col in show_cols
+                if col in df.columns
+            ]
+        ]
 
         st.dataframe(
             df,
