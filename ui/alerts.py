@@ -1,5 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
+from html import escape
 
 from ui.theme import (
     UP_COLOR,
@@ -49,13 +50,16 @@ def render_alerts(alerts):
             "message": "行情暫時沒有明顯異常。",
         }]
 
+    # 右側空間有限，只顯示前三則
+    show_alerts = alerts[:3]
+
     rows_html = ""
 
-    for alert in alerts:
+    for alert in show_alerts:
 
         level = alert.get("level", "INFO")
-        title = alert.get("title", "-")
-        message = alert.get("message", "-")
+        title = escape(str(alert.get("title", "-")))
+        message = escape(str(alert.get("message", "-")))
 
         color, icon = _style(level)
 
@@ -70,63 +74,90 @@ def render_alerts(alerts):
         </div>
         """
 
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{
-                margin: 0;
-                padding: 0;
-                background: transparent;
-                font-family: Arial, "Microsoft JhengHei", sans-serif;
-                color: {TEXT};
-            }}
+    more_html = ""
 
-            .card {{
-                background: {CARD_BG};
-                border: 1px solid {CARD_BORDER};
-                border-radius: 14px;
-                padding: 10px;
-                box-sizing: border-box;
-                width: 100%;
-            }}
-
-            .alert-row {{
-                background: rgba(255,255,255,0.035);
-                border-radius: 10px;
-                padding: 9px 10px;
-                margin-bottom: 8px;
-                box-sizing: border-box;
-            }}
-
-            .alert-row:last-child {{
-                margin-bottom: 0;
-            }}
-
-            .alert-title {{
-                font-size: 14px;
-                font-weight: 900;
-                margin-bottom: 4px;
-            }}
-
-            .alert-message {{
-                color: {SUBTEXT};
-                font-size: 12px;
-                line-height: 1.45;
-            }}
-        </style>
-    </head>
-
-    <body>
-        <div class="card">
-            {rows_html}
+    if len(alerts) > 3:
+        more_html = f"""
+        <div class="more">
+            另有 {len(alerts) - 3} 則警示已收合
         </div>
-    </body>
-    </html>
-    """
+        """
 
-    height = 70 + len(alerts) * 72
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            font-family: Arial, "Microsoft JhengHei", sans-serif;
+            color: {TEXT};
+            overflow: hidden;
+        }}
+
+        .card {{
+            background: {CARD_BG};
+            border: 1px solid {CARD_BORDER};
+            border-radius: 14px;
+            padding: 10px;
+            box-sizing: border-box;
+            width: 100%;
+        }}
+
+        .alert-row {{
+            background: rgba(255,255,255,0.035);
+            border-radius: 10px;
+            padding: 8px 10px;
+            margin-bottom: 7px;
+            box-sizing: border-box;
+        }}
+
+        .alert-row:last-child {{
+            margin-bottom: 0;
+        }}
+
+        .alert-title {{
+            font-size: 13px;
+            font-weight: 900;
+            margin-bottom: 3px;
+            line-height: 1.25;
+        }}
+
+        .alert-message {{
+            color: {SUBTEXT};
+            font-size: 11.5px;
+            line-height: 1.35;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+
+        .more {{
+            margin-top: 7px;
+            padding-top: 7px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            color: {SUBTEXT};
+            font-size: 11px;
+            text-align: right;
+        }}
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        {rows_html}
+        {more_html}
+    </div>
+</body>
+</html>
+"""
+
+    height = 58 + len(show_alerts) * 50
+
+    if len(alerts) > 3:
+        height += 24
 
     components.html(
         html,
