@@ -205,8 +205,15 @@ rebound = ai["rebound_prob"]
 decision = DecisionEngine.generate(
     ai=ai,
     price=price,
+    vwap=vwap,
+    ema5=ema5,
+    ema20=ema20,
+    ema60=ema60,
+    rsi=rsi,
+    macd=macd,
+    macd_signal=macd_signal,
+    bid_ratio=bid_ratio,
 )
-
 
 # =========================
 # Header
