@@ -96,6 +96,29 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             step=5,
             key="bt_max_hold_bars",
         )
+                default_stop_pct = st.slider(
+            "回測停損 %",
+            min_value=0.2,
+            max_value=3.0,
+            value=0.6,
+            step=0.1,
+            key="bt_default_stop_pct",
+        )
+
+        default_take_pct = st.slider(
+            "回測停利 %",
+            min_value=0.3,
+            max_value=5.0,
+            value=1.0,
+            step=0.1,
+            key="bt_default_take_pct",
+        )
+
+        st.caption(
+            f"本次回測設定：停損 {default_stop_pct:.1f}%｜"
+            f"停利 {default_take_pct:.1f}%｜"
+            f"最多持有 {max_hold_bars} 根K"
+        )
 
         run_clicked = st.button(
             "執行回測",
@@ -121,6 +144,8 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                         avoid_open_minutes=avoid_open_minutes,
                         max_hold_bars=max_hold_bars,
                         day_scope=day_scope,
+                        default_stop_pct=default_stop_pct,
+                        default_take_pct=default_take_pct,
                     )
 
                 st.session_state.backtest_result = result
@@ -218,8 +243,15 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             "action",
             "score",
             "entry_time",
+            "entry_price",
+            "stop_loss_pct",
+            "take_profit_pct",
+            "stop_loss",
+            "take_profit",
             "exit_time",
+            "exit_price",
             "exit_reason",
+            "hold_bars",
             "pnl_pct",
             "result",
         ]
