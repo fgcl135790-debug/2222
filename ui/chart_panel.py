@@ -30,10 +30,6 @@ def _safe_int(value, default=0):
         return default
 
 
-def _clamp(value, low=0, high=100):
-    return max(low, min(high, value))
-
-
 def _ema(values, span):
     nums = [_safe_float(v) for v in values]
 
@@ -128,21 +124,29 @@ def _bucket_time(dt, minutes):
 def _prepare_ticks(prices, volumes, vwaps, times):
     clean = []
 
-    for i, price in enumerate(prices or []):
+    prices = prices or []
+    volumes = volumes or []
+    vwaps = vwaps or []
+    times = times or []
+
+    for i, price in enumerate(prices):
         p = _safe_float(price)
 
         if p <= 0:
             continue
 
-        v = _safe_float(volumes[i]) if i < len(volumes or []) else 0
-        w = _safe_float(vwaps[i]) if i < len(vwaps or []) else p
-        t = _to_datetime(times[i]) if i < len(times or []) else None
+        v = _safe_float(volumes[i]) if i < len(volumes) else 0
+        w = _safe_float(vwaps[i]) if i < len(vwaps) else p
+        t = _to_datetime(times[i]) if i < len(times) else None
+
+        if w <= 0:
+            w = p
 
         clean.append(
             {
                 "price": p,
                 "volume": v,
-                "vwap": w if w > 0 else p,
+                "vwap": w,
                 "time": t,
             }
         )
@@ -151,13 +155,6 @@ def _prepare_ticks(prices, volumes, vwaps, times):
 
 
 def _aggregate_line(prices, volumes, vwaps, times, period):
-    """
-    分時線圖資料。
-    1分：原始即時點
-    5/15/30分：用區間最後價
-    日：日內全部資料線圖
-    """
-
     clean = _prepare_ticks(prices, volumes, vwaps, times)
 
     if not clean:
@@ -176,23 +173,20 @@ def _aggregate_line(prices, volumes, vwaps, times, period):
                 else:
                     labels.append(item["time"].strftime("%H:%M:%S"))
             else:
-                labels.append(
-                    f"T-{len(clean) - idx - 1}"
-                    if idx < len(clean) - 1
-                    else "最新"
-                )
+                labels.append(f"T{idx + 1}")
 
         return agg_prices, agg_volumes, agg_vwaps, labels
 
     minutes = _period_minutes(period)
     buckets = {}
+    bucket_order = []
     fallback_index = 0
 
     for item in clean:
         key = _bucket_time(item["time"], minutes)
 
         if key is None:
-            key = f"bucket_{fallback_index // minutes}"
+            key = f"T{fallback_index + 1}"
             fallback_index += 1
 
         if key not in buckets:
@@ -202,6 +196,7 @@ def _aggregate_line(prices, volumes, vwaps, times, period):
                 "vwaps": [],
                 "label": key,
             }
+            bucket_order.append(key)
 
         buckets[key]["prices"].append(item["price"])
         buckets[key]["volumes"].append(item["volume"])
@@ -212,8 +207,11 @@ def _aggregate_line(prices, volumes, vwaps, times, period):
     agg_vwaps = []
     labels = []
 
-    for key in sorted(buckets.keys(), key=lambda x: str(x)):
+    for key in bucket_order:
         group = buckets[key]
+
+        if not group["prices"]:
+            continue
 
         agg_prices.append(group["prices"][-1])
         agg_volumes.append(sum(group["volumes"]))
@@ -238,16 +236,6 @@ def _aggregate_line(prices, volumes, vwaps, times, period):
 
 
 def _aggregate_ohlc(prices, volumes, vwaps, times, period):
-    """
-    K線資料。
-    open = 區間第一筆
-    high = 區間最高
-    low = 區間最低
-    close = 區間最後一筆
-    volume = 區間量加總
-    vwap = 區間 vwap 平均
-    """
-
     clean = _prepare_ticks(prices, volumes, vwaps, times)
 
     if not clean:
@@ -263,13 +251,14 @@ def _aggregate_ohlc(prices, volumes, vwaps, times, period):
 
     minutes = _period_minutes(period)
     buckets = {}
+    bucket_order = []
     fallback_index = 0
 
     for item in clean:
         key = _bucket_time(item["time"], minutes)
 
         if key is None:
-            key = f"bucket_{fallback_index // max(minutes, 1)}"
+            key = f"T{fallback_index + 1}"
             fallback_index += 1
 
         if key not in buckets:
@@ -279,6 +268,7 @@ def _aggregate_ohlc(prices, volumes, vwaps, times, period):
                 "vwaps": [],
                 "label": key,
             }
+            bucket_order.append(key)
 
         buckets[key]["prices"].append(item["price"])
         buckets[key]["volumes"].append(item["volume"])
@@ -292,7 +282,7 @@ def _aggregate_ohlc(prices, volumes, vwaps, times, period):
     vols = []
     k_vwaps = []
 
-    for key in sorted(buckets.keys(), key=lambda x: str(x)):
+    for key in bucket_order:
         group = buckets[key]
         ps = group["prices"]
 
@@ -335,6 +325,90 @@ def _aggregate_ohlc(prices, volumes, vwaps, times, period):
     }
 
 
+def _select_control(label, options, default, key):
+    if hasattr(st, "segmented_control"):
+        value = st.segmented_control(
+            label,
+            options,
+            default=default,
+            key=key,
+            label_visibility="collapsed",
+        )
+
+        if value is None:
+            return default
+
+        return value
+
+    return st.radio(
+        label,
+        options,
+        index=options.index(default),
+        horizontal=True,
+        label_visibility="collapsed",
+        key=key,
+    )
+
+
+def _render_period_selector():
+    try:
+        box = st.container(border=True)
+    except TypeError:
+        box = st.container()
+
+    with box:
+        col1, col2, col3 = st.columns(
+            [1.1, 1.1, 0.9],
+            gap="small",
+            vertical_alignment="top",
+        )
+
+        with col1:
+            st.caption("圖表模式")
+            mode = _select_control(
+                label="圖表模式",
+                options=["分時走勢", "K線走勢", "多週期分析"],
+                default="分時走勢",
+                key="chart_mode_selector",
+            )
+
+        with col2:
+            st.caption("週期")
+            period = _select_control(
+                label="週期",
+                options=["1分", "5分", "15分", "30分", "日"],
+                default="1分",
+                key="chart_period_selector",
+            )
+
+        with col3:
+            st.caption("工具")
+            tool1, tool2, tool3 = st.columns(3, gap="small")
+
+            with tool1:
+                st.button(
+                    "技術",
+                    key="chart_tool_indicator",
+                    use_container_width=True,
+                )
+
+            with tool2:
+                st.button(
+                    "畫線",
+                    key="chart_tool_line",
+                    use_container_width=True,
+                )
+
+            with tool3:
+                st.button(
+                    "全屏",
+                    key="chart_tool_full",
+                    use_container_width=True,
+                )
+
+    return mode, period
+
+
 def _render_chart_toolbar(
     mode,
     period,
@@ -345,7 +419,6 @@ def _render_chart_toolbar(
     ema60,
     data_points,
 ):
-
     current_price = _safe_float(current_price)
     vwap = _safe_float(vwap)
     ema5 = _safe_float(ema5)
@@ -377,27 +450,30 @@ def _render_chart_toolbar(
             background: {CARD_BG};
             border: 1px solid {CARD_BORDER};
             border-radius: 13px;
-            padding: 8px 10px;
+            padding: 7px 10px;
             box-sizing: border-box;
             width: 100%;
         }}
 
-        .top {{
+        .line {{
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
             gap: 10px;
-            margin-bottom: 7px;
+            width: 100%;
         }}
 
-        .mode {{
+        .left {{
             display: flex;
             align-items: center;
             gap: 7px;
-            color: {TEXT};
+            white-space: nowrap;
+        }}
+
+        .mode {{
+            color: #ffffff;
             font-size: 12px;
             font-weight: 900;
-            white-space: nowrap;
         }}
 
         .pill {{
@@ -405,43 +481,22 @@ def _render_chart_toolbar(
             background: rgba(59,130,246,0.22);
             border: 1px solid rgba(59,130,246,0.55);
             border-radius: 999px;
-            padding: 4px 9px;
+            padding: 3px 8px;
             font-size: 11px;
             font-weight: 900;
         }}
 
-        .tools {{
+        .right {{
             display: flex;
             align-items: center;
-            gap: 7px;
-            color: {SUBTEXT};
-            font-size: 11.5px;
-            white-space: nowrap;
-        }}
-
-        .tool {{
-            padding: 4px 7px;
-            border-radius: 8px;
-            background: rgba(255,255,255,0.035);
-        }}
-
-        .bottom {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-        }}
-
-        .info {{
-            display: flex;
-            gap: 10px;
+            gap: 9px;
             color: {SUBTEXT};
             font-size: 11.5px;
             white-space: nowrap;
             overflow: hidden;
         }}
 
-        .info b {{
+        .right b {{
             color: {TEXT};
         }}
 
@@ -451,14 +506,12 @@ def _render_chart_toolbar(
         }}
 
         @media (max-width: 900px) {{
-            .top,
-            .bottom {{
+            .line {{
                 align-items: flex-start;
                 flex-direction: column;
             }}
 
-            .tools,
-            .info {{
+            .right {{
                 flex-wrap: wrap;
                 white-space: normal;
             }}
@@ -468,23 +521,15 @@ def _render_chart_toolbar(
 
 <body>
     <div class="wrap">
+        <div class="line">
 
-        <div class="top">
-            <div class="mode">
-                <span>{mode}</span>
+            <div class="left">
+                <span class="mode">{mode}</span>
                 <span class="pill">{period}</span>
                 <span class="pill">資料 {data_points}</span>
             </div>
 
-            <div class="tools">
-                <div class="tool">技術指標</div>
-                <div class="tool">畫線工具</div>
-                <div class="tool">全螢幕</div>
-            </div>
-        </div>
-
-        <div class="bottom">
-            <div class="info">
+            <div class="right">
                 <span>Price <b>{current_price:.2f}</b></span>
                 <span>VWAP <b>{vwap:.2f}</b></span>
                 <span>EMA5 <b>{ema5:.2f}</b></span>
@@ -492,8 +537,8 @@ def _render_chart_toolbar(
                 <span>EMA60 <b>{ema60:.2f}</b></span>
                 <span class="state">{price_state}</span>
             </div>
-        </div>
 
+        </div>
     </div>
 </body>
 </html>
@@ -501,105 +546,10 @@ def _render_chart_toolbar(
 
     components.html(
         html,
-        height=65,
+        height=44,
         scrolling=False,
     )
 
-
-def _select_control(label, options, default, key):
-    """
-    優先使用 Streamlit segmented_control。
-    如果環境不支援，就自動退回 radio。
-    """
-
-    if hasattr(st, "segmented_control"):
-        value = st.segmented_control(
-            label,
-            options,
-            default=default,
-            key=key,
-            label_visibility="collapsed",
-        )
-
-        if value is None:
-            return default
-
-        return value
-
-    return st.radio(
-        label,
-        options,
-        index=options.index(default),
-        horizontal=True,
-        label_visibility="collapsed",
-        key=key,
-    )
-
-
-def _render_period_selector():
-
-    st.markdown(
-        """
-<style>
-.chart-control-title {
-    color: #9ca3af;
-    font-size: 11px;
-    font-weight: 800;
-    margin-bottom: 3px;
-}
-
-div[data-testid="stHorizontalBlock"] {
-    align-items: center;
-}
-
-div[data-testid="stRadio"] label {
-    font-size: 11px !important;
-}
-
-div[data-testid="stRadio"] div[role="radiogroup"] {
-    gap: 6px;
-}
-
-div[data-testid="stRadio"] div[role="radiogroup"] label {
-    background: rgba(255,255,255,0.035);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 999px;
-    padding: 4px 10px;
-}
-</style>
-""",
-        unsafe_allow_html=True,
-    )
-
-    col1, col2 = st.columns([0.92, 1.08], gap="small")
-
-    with col1:
-        st.markdown(
-            '<div class="chart-control-title">圖表模式</div>',
-            unsafe_allow_html=True,
-        )
-
-        mode = _select_control(
-            label="圖表模式",
-            options=["分時走勢", "K線走勢", "多週期分析"],
-            default="分時走勢",
-            key="chart_mode_selector",
-        )
-
-    with col2:
-        st.markdown(
-            '<div class="chart-control-title">週期</div>',
-            unsafe_allow_html=True,
-        )
-
-        period = _select_control(
-            label="週期",
-            options=["1分", "5分", "15分", "30分", "日"],
-            default="1分",
-            key="chart_period_selector",
-        )
-
-    return mode, period
 
 def _add_common_layout(fig, chart_key):
     fig.update_layout(
@@ -1271,7 +1221,6 @@ def _render_k_chart(ohlc, mode, period):
 
 
 def render_chart(prices, volumes, vwap_values=None, time_values=None):
-
     st.markdown("### 📈 分時 / K線 / VWAP / MACD")
 
     if not prices:
