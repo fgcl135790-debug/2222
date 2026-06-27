@@ -25,13 +25,36 @@ def _ema(values, span):
         return []
 
     alpha = 2 / (span + 1)
-
     result = [nums[0]]
 
     for v in nums[1:]:
         result.append(alpha * v + (1 - alpha) * result[-1])
 
     return result
+
+
+def _macd(values):
+    nums = [_safe_float(v) for v in values]
+
+    if not nums:
+        return [], [], []
+
+    ema12 = _ema(nums, 12)
+    ema26 = _ema(nums, 26)
+
+    macd_line = []
+
+    for i in range(len(nums)):
+        macd_line.append(ema12[i] - ema26[i])
+
+    signal_line = _ema(macd_line, 9)
+
+    hist = []
+
+    for i in range(len(nums)):
+        hist.append(macd_line[i] - signal_line[i])
+
+    return macd_line, signal_line, hist
 
 
 def _to_lot(volume):
@@ -45,7 +68,7 @@ def _to_lot(volume):
 
 def render_chart(prices, volumes):
 
-    st.markdown("### 📈 分時趨勢")
+    st.markdown("### 📈 分時走勢")
 
     if not prices:
         st.caption("等待行情資料中...")
@@ -65,7 +88,7 @@ def render_chart(prices, volumes):
         st.caption("尚無有效價格資料")
         return
 
-    clean_prices = clean_prices[-120:]
+    clean_prices = clean_prices[-160:]
 
     clean_volumes = [
         _to_lot(v)
@@ -86,7 +109,6 @@ def render_chart(prices, volumes):
             x.append(f"T-{n - i - 1}" if i < n - 1 else "最新")
 
     current_price = clean_prices[-1]
-
     prev_price = clean_prices[-2] if len(clean_prices) >= 2 else current_price
 
     price_color = UP_COLOR if current_price >= prev_price else DOWN_COLOR
@@ -95,9 +117,11 @@ def render_chart(prices, volumes):
     ema20 = _ema(clean_prices, 20)
     ema60 = _ema(clean_prices, 60)
 
+    macd_line, signal_line, hist = _macd(clean_prices)
+
     # =========================
-    # 成交量顏色
-    # 台股：漲紅、跌綠
+    # 成交量 / MACD 顏色
+    # 台股：上漲紅，下跌綠
     # =========================
 
     volume_colors = []
@@ -113,24 +137,36 @@ def render_chart(prices, volumes):
             else:
                 volume_colors.append(DOWN_COLOR)
 
+    hist_colors = []
+
+    for h in hist:
+
+        if h >= 0:
+            hist_colors.append(UP_COLOR)
+        else:
+            hist_colors.append(DOWN_COLOR)
+
     # =========================
-    # 建立圖表
+    # 建立三層圖表
     # =========================
 
     fig = make_subplots(
-        rows=2,
+        rows=3,
         cols=1,
         shared_xaxes=True,
-        row_heights=[0.72, 0.28],
-        vertical_spacing=0.03,
+        row_heights=[0.58, 0.22, 0.20],
+        vertical_spacing=0.025,
     )
 
+    # =========================
     # 價格線
+    # =========================
+
     fig.add_trace(
         go.Scatter(
             x=x,
             y=clean_prices,
-            mode="lines+markers" if n <= 6 else "lines",
+            mode="lines+markers" if n <= 8 else "lines",
             name="Price",
             line=dict(
                 color=price_color,
@@ -145,7 +181,6 @@ def render_chart(prices, volumes):
         col=1,
     )
 
-    # EMA5
     fig.add_trace(
         go.Scatter(
             x=x,
@@ -154,14 +189,13 @@ def render_chart(prices, volumes):
             name="EMA5",
             line=dict(
                 color="#facc15",
-                width=1.4,
+                width=1.3,
             ),
         ),
         row=1,
         col=1,
     )
 
-    # EMA20
     fig.add_trace(
         go.Scatter(
             x=x,
@@ -170,14 +204,13 @@ def render_chart(prices, volumes):
             name="EMA20",
             line=dict(
                 color="#fb7185",
-                width=1.4,
+                width=1.3,
             ),
         ),
         row=1,
         col=1,
     )
 
-    # EMA60
     fig.add_trace(
         go.Scatter(
             x=x,
@@ -186,26 +219,24 @@ def render_chart(prices, volumes):
             name="EMA60",
             line=dict(
                 color="#a855f7",
-                width=1.4,
+                width=1.3,
             ),
         ),
         row=1,
         col=1,
     )
 
-    # 現價水平線
     fig.add_hline(
         y=current_price,
         line=dict(
             color="#00e5ff",
-            width=1.2,
+            width=1.1,
             dash="dot",
         ),
         row=1,
         col=1,
     )
 
-    # 現價標籤
     fig.add_annotation(
         x=x[-1],
         y=current_price,
@@ -213,18 +244,21 @@ def render_chart(prices, volumes):
         showarrow=True,
         arrowhead=2,
         ax=0,
-        ay=-32,
+        ay=-30,
         bgcolor=price_color,
         bordercolor=price_color,
         font=dict(
             color="#ffffff",
-            size=11,
+            size=10,
         ),
         row=1,
         col=1,
     )
 
+    # =========================
     # 成交量
+    # =========================
+
     fig.add_trace(
         go.Bar(
             x=x,
@@ -236,6 +270,64 @@ def render_chart(prices, volumes):
             ),
         ),
         row=2,
+        col=1,
+    )
+
+    # =========================
+    # MACD
+    # =========================
+
+    fig.add_trace(
+        go.Bar(
+            x=x,
+            y=hist,
+            name="MACD Hist",
+            marker=dict(
+                color=hist_colors,
+                opacity=0.75,
+            ),
+        ),
+        row=3,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=macd_line,
+            mode="lines",
+            name="MACD",
+            line=dict(
+                color="#38bdf8",
+                width=1.4,
+            ),
+        ),
+        row=3,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=signal_line,
+            mode="lines",
+            name="Signal",
+            line=dict(
+                color="#f97316",
+                width=1.2,
+            ),
+        ),
+        row=3,
+        col=1,
+    )
+
+    fig.add_hline(
+        y=0,
+        line=dict(
+            color="rgba(255,255,255,0.18)",
+            width=1,
+        ),
+        row=3,
         col=1,
     )
 
@@ -271,6 +363,32 @@ def render_chart(prices, volumes):
         col=1,
     )
 
+    if hist:
+        macd_high = max(
+            max(macd_line),
+            max(signal_line),
+            max(hist),
+        )
+        macd_low = min(
+            min(macd_line),
+            min(signal_line),
+            min(hist),
+        )
+
+        macd_padding = max(
+            (macd_high - macd_low) * 0.35,
+            0.01,
+        )
+
+        fig.update_yaxes(
+            range=[
+                macd_low - macd_padding,
+                macd_high + macd_padding,
+            ],
+            row=3,
+            col=1,
+        )
+
     # =========================
     # 資料不足提示
     # =========================
@@ -280,7 +398,7 @@ def render_chart(prices, volumes):
             xref="paper",
             yref="paper",
             x=0.5,
-            y=0.58,
+            y=0.62,
             text="資料累積中",
             showarrow=False,
             font=dict(
@@ -294,7 +412,7 @@ def render_chart(prices, volumes):
     # =========================
 
     fig.update_layout(
-        height=335,
+        height=390,
         margin=dict(
             l=12,
             r=12,
@@ -305,7 +423,7 @@ def render_chart(prices, volumes):
         plot_bgcolor="#0b0f16",
         font=dict(
             color=TEXT,
-            size=11,
+            size=10,
         ),
         legend=dict(
             orientation="h",
@@ -314,7 +432,7 @@ def render_chart(prices, volumes):
             xanchor="left",
             x=0,
             font=dict(
-                size=11,
+                size=10,
                 color=TEXT,
             ),
         ),
@@ -322,56 +440,34 @@ def render_chart(prices, volumes):
         bargap=0.18,
     )
 
-    fig.update_xaxes(
-        showgrid=False,
-        zeroline=False,
-        showline=False,
-        tickfont=dict(
-            color=SUBTEXT,
-            size=10,
-        ),
-        row=1,
-        col=1,
-    )
+    for row in [1, 2, 3]:
 
-    fig.update_xaxes(
-        showgrid=False,
-        zeroline=False,
-        showline=False,
-        tickfont=dict(
-            color=SUBTEXT,
-            size=10,
-        ),
-        row=2,
-        col=1,
-    )
+        fig.update_xaxes(
+            showgrid=False,
+            zeroline=False,
+            showline=False,
+            tickfont=dict(
+                color=SUBTEXT,
+                size=9,
+            ),
+            row=row,
+            col=1,
+        )
 
-    fig.update_yaxes(
-        gridcolor="rgba(255,255,255,0.08)",
-        zeroline=False,
-        showline=False,
-        tickfont=dict(
-            color=TEXT,
-            size=10,
-        ),
-        row=1,
-        col=1,
-    )
-
-    fig.update_yaxes(
-        gridcolor="rgba(255,255,255,0.06)",
-        zeroline=False,
-        showline=False,
-        tickfont=dict(
-            color=TEXT,
-            size=10,
-        ),
-        row=2,
-        col=1,
-    )
+        fig.update_yaxes(
+            gridcolor="rgba(255,255,255,0.07)",
+            zeroline=False,
+            showline=False,
+            tickfont=dict(
+                color=TEXT,
+                size=9,
+            ),
+            row=row,
+            col=1,
+        )
 
     st.plotly_chart(
         fig,
         use_container_width=True,
-        key="main_price_chart",
+        key="main_price_volume_macd_chart",
     )
