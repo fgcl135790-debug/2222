@@ -168,10 +168,7 @@ def _aggregate_line(prices, volumes, vwaps, times, period):
 
         for idx, item in enumerate(clean):
             if item["time"] is not None:
-                if period == "日":
-                    labels.append(item["time"].strftime("%H:%M"))
-                else:
-                    labels.append(item["time"].strftime("%H:%M:%S"))
+                labels.append(item["time"])
             else:
                 labels.append(f"T{idx + 1}")
 
@@ -227,10 +224,7 @@ def _aggregate_line(prices, volumes, vwaps, times, period):
         else:
             agg_vwaps.append(group["prices"][-1])
 
-        if isinstance(group["label"], datetime):
-            labels.append(group["label"].strftime("%H:%M"))
-        else:
-            labels.append(str(group["label"]))
+        labels.append(group["label"])
 
     return agg_prices, agg_volumes, agg_vwaps, labels
 
@@ -306,13 +300,7 @@ def _aggregate_ohlc(prices, volumes, vwaps, times, period):
         else:
             k_vwaps.append(ps[-1])
 
-        if isinstance(group["label"], datetime):
-            if period == "日":
-                x.append(group["label"].strftime("%m/%d"))
-            else:
-                x.append(group["label"].strftime("%H:%M"))
-        else:
-            x.append(str(group["label"]))
+        x.append(group["label"])
 
     return {
         "x": x,
@@ -404,11 +392,17 @@ def _render_period_selector():
                 )
 
             with tool3:
-                st.button(
-                    "全屏",
+                is_full = st.session_state.get("chart_fullscreen", False)
+
+                clicked = st.button(
+                    "返回" if is_full else "全屏",
                     key="chart_tool_full",
                     use_container_width=True,
                 )
+
+                if clicked:
+                    st.session_state.chart_fullscreen = not is_full
+                    st.rerun()
 
     return mode, period
 
@@ -555,6 +549,39 @@ def _render_chart_toolbar(
     )
 
 
+def _trend_state(price, vwap, ema5, ema20, macd, signal):
+    bull = 0
+    bear = 0
+
+    if price > vwap:
+        bull += 1
+    elif price < vwap:
+        bear += 1
+
+    if ema5 > ema20:
+        bull += 1
+    elif ema5 < ema20:
+        bear += 1
+
+    if macd > signal:
+        bull += 1
+    elif macd < signal:
+        bear += 1
+
+    if price > ema5:
+        bull += 1
+    elif price < ema5:
+        bear += 1
+
+    if bull >= 3:
+        return "BULL"
+
+    if bear >= 3:
+        return "BEAR"
+
+    return "WAIT"
+
+
 def _build_signal_points(
     x,
     prices,
@@ -575,66 +602,79 @@ def _build_signal_points(
 
     n = len(prices)
 
-    for i in range(1, n):
-        p0 = _safe_float(prices[i - 1])
-        p1 = _safe_float(prices[i])
+    if n < 10:
+        return {
+            "buy_x": [],
+            "buy_y": [],
+            "buy_text": [],
+            "sell_x": [],
+            "sell_y": [],
+            "sell_text": [],
+        }
 
-        v0 = _safe_float(vwaps[i - 1]) if i - 1 < len(vwaps) else p0
-        v1 = _safe_float(vwaps[i]) if i < len(vwaps) else p1
+    min_gap = max(18, n // 12)
+    last_mark_index = -999
+    current_position = "NONE"
 
-        e5 = _safe_float(ema5[i]) if i < len(ema5) else p1
-        e20 = _safe_float(ema20[i]) if i < len(ema20) else p1
+    for i in range(2, n):
+        price = _safe_float(prices[i])
+        vwap = _safe_float(vwaps[i]) if i < len(vwaps) else price
+        e5 = _safe_float(ema5[i]) if i < len(ema5) else price
+        e20 = _safe_float(ema20[i]) if i < len(ema20) else price
+        macd = _safe_float(macd_line[i]) if i < len(macd_line) else 0
+        sig = _safe_float(signal_line[i]) if i < len(signal_line) else 0
 
-        macd0 = _safe_float(macd_line[i - 1]) if i - 1 < len(macd_line) else 0
-        macd1 = _safe_float(macd_line[i]) if i < len(macd_line) else 0
+        prev_price = _safe_float(prices[i - 1])
+        prev_vwap = _safe_float(vwaps[i - 1]) if i - 1 < len(vwaps) else prev_price
+        prev_e5 = _safe_float(ema5[i - 1]) if i - 1 < len(ema5) else prev_price
+        prev_e20 = _safe_float(ema20[i - 1]) if i - 1 < len(ema20) else prev_price
+        prev_macd = _safe_float(macd_line[i - 1]) if i - 1 < len(macd_line) else 0
+        prev_sig = _safe_float(signal_line[i - 1]) if i - 1 < len(signal_line) else 0
 
-        sig0 = _safe_float(signal_line[i - 1]) if i - 1 < len(signal_line) else 0
-        sig1 = _safe_float(signal_line[i]) if i < len(signal_line) else 0
-
-        cross_vwap_up = p0 <= v0 and p1 > v1
-        cross_vwap_down = p0 >= v0 and p1 < v1
-
-        macd_cross_up = macd0 <= sig0 and macd1 > sig1
-        macd_cross_down = macd0 >= sig0 and macd1 < sig1
-
-        buy_signal = (
-            cross_vwap_up and e5 >= e20
-        ) or (
-            macd_cross_up and p1 >= v1 and e5 >= e20
+        state = _trend_state(price, vwap, e5, e20, macd, sig)
+        prev_state = _trend_state(
+            prev_price,
+            prev_vwap,
+            prev_e5,
+            prev_e20,
+            prev_macd,
+            prev_sig,
         )
 
-        sell_signal = (
-            cross_vwap_down and e5 <= e20
-        ) or (
-            macd_cross_down and p1 <= v1 and e5 <= e20
-        )
+        enough_gap = i - last_mark_index >= min_gap
 
-        if buy_signal:
+        if state == "BULL" and prev_state != "BULL" and current_position != "LONG" and enough_gap:
             buy_x.append(x[i])
-            buy_y.append(p1)
+            buy_y.append(price)
             buy_text.append("買進訊號")
+            current_position = "LONG"
+            last_mark_index = i
 
-        if sell_signal:
+        elif state == "BEAR" and prev_state != "BEAR" and current_position == "LONG" and enough_gap:
             sell_x.append(x[i])
-            sell_y.append(p1)
+            sell_y.append(price)
             sell_text.append("賣出訊號")
+            current_position = "NONE"
+            last_mark_index = i
 
     decision = decision or {}
     action = decision.get("action", "WAIT")
     score = _safe_int(decision.get("score", 0))
 
-    if n >= 1 and score >= 65:
+    if n >= 1 and score >= 75:
         if action == "BUY":
-            buy_x.append(x[-1])
-            buy_y.append(prices[-1])
-            buy_text.append("即時買進訊號")
+            if not buy_x or buy_x[-1] != x[-1]:
+                buy_x.append(x[-1])
+                buy_y.append(prices[-1])
+                buy_text.append("即時買進觀察")
 
         elif action == "SELL":
-            sell_x.append(x[-1])
-            sell_y.append(prices[-1])
-            sell_text.append("即時賣出訊號")
+            if not sell_x or sell_x[-1] != x[-1]:
+                sell_x.append(x[-1])
+                sell_y.append(prices[-1])
+                sell_text.append("即時賣出觀察")
 
-    max_marks = 8
+    max_marks = 4
 
     return {
         "buy_x": buy_x[-max_marks:],
@@ -679,7 +719,7 @@ def _add_signal_markers(
                 textposition="bottom center",
                 marker=dict(
                     symbol="triangle-up",
-                    size=13,
+                    size=14,
                     color=UP_COLOR,
                     line=dict(
                         color="#ffffff",
@@ -707,7 +747,7 @@ def _add_signal_markers(
                 textposition="top center",
                 marker=dict(
                     symbol="triangle-down",
-                    size=13,
+                    size=14,
                     color=DOWN_COLOR,
                     line=dict(
                         color="#ffffff",
@@ -757,12 +797,48 @@ def _add_right_price_label(fig, current_price, color):
     )
 
 
-def _add_common_layout(fig, chart_key):
+def _apply_intraday_xaxis(fig, x_values):
+    dt_values = [
+        x
+        for x in x_values
+        if isinstance(x, datetime)
+    ]
+
+    if not dt_values:
+        return
+
+    base = dt_values[0].replace(
+        hour=9,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+    end = dt_values[0].replace(
+        hour=13,
+        minute=30,
+        second=0,
+        microsecond=0,
+    )
+
+    for row in [1, 2, 3]:
+        fig.update_xaxes(
+            range=[base, end],
+            tickformat="%H:%M",
+            dtick=30 * 60 * 1000,
+            row=row,
+            col=1,
+        )
+
+
+def _add_common_layout(fig, chart_key, x_values=None):
+    is_full = st.session_state.get("chart_fullscreen", False)
+
     fig.update_layout(
-        height=430,
+        height=740 if is_full else 430,
         margin=dict(
             l=12,
-            r=62,
+            r=70,
             t=18,
             b=8,
         ),
@@ -784,7 +860,7 @@ def _add_common_layout(fig, chart_key):
             ),
         ),
         hovermode="x unified",
-        bargap=0.12,
+        bargap=0.10,
         xaxis_rangeslider_visible=False,
     )
 
@@ -815,10 +891,18 @@ def _add_common_layout(fig, chart_key):
             col=1,
         )
 
+    if x_values is not None:
+        _apply_intraday_xaxis(fig, x_values)
+
     st.plotly_chart(
         fig,
         use_container_width=True,
         key=chart_key,
+        config={
+            "displayModeBar": True,
+            "scrollZoom": True,
+            "responsive": True,
+        },
     )
 
 
@@ -1079,6 +1163,7 @@ def _render_line_chart(
     _add_common_layout(
         fig,
         chart_key=f"line_chart_{mode}_{period}",
+        x_values=x,
     )
 
 
@@ -1327,6 +1412,7 @@ def _render_k_chart(ohlc, mode, period, decision=None):
     _add_common_layout(
         fig,
         chart_key=f"k_chart_{mode}_{period}",
+        x_values=x,
     )
 
 
@@ -1385,10 +1471,10 @@ def render_chart(
         st.caption("尚無有效價格資料")
         return
 
-    clean_prices = clean_prices[-240:]
-    clean_volumes = clean_volumes[-240:]
-    clean_vwap = clean_vwap[-240:]
-    x = x[-240:]
+    clean_prices = clean_prices[-270:]
+    clean_volumes = clean_volumes[-270:]
+    clean_vwap = clean_vwap[-270:]
+    x = x[-270:]
 
     clean_volumes = [
         _to_lot(v)
