@@ -26,9 +26,22 @@ def render_win_rate_sidebar_panel():
 
             st.write(
                 f"{active.get('action')}｜"
-                f"進場 {active.get('entry_price')}｜"
-                f"停損 {active.get('stop_loss')}｜"
-                f"停利 {active.get('take_profit')}"
+                f"進場 {active.get('entry_price')}"
+            )
+
+            st.write(
+                f"停損 {active.get('stop_loss')} "
+                f"({active.get('stop_loss_pct')}%)"
+            )
+
+            st.write(
+                f"停利 {active.get('take_profit')} "
+                f"({active.get('take_profit_pct')}%)"
+            )
+
+            st.write(
+                f"追蹤 {active.get('bars_held', 0)} / "
+                f"{active.get('max_hold_bars', 50)} 根K"
             )
 
         else:
@@ -71,7 +84,14 @@ def render_win_rate_sidebar_panel():
                 "action",
                 "score",
                 "entry_time",
+                "entry_price",
+                "stop_loss_pct",
+                "take_profit_pct",
+                "stop_loss",
+                "take_profit",
                 "exit_time",
+                "exit_reason",
+                "hold_bars",
                 "pnl_pct",
                 "result",
             ]
