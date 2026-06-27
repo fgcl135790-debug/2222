@@ -127,6 +127,7 @@ try:
     from market_analyzer import MarketAnalyzer
     from ai_predictor import AIPredictor
     from decision_engine import DecisionEngine
+    from multi_period_engine import MultiPeriodEngine
     from big_order_engine import BigOrderEngine
     from trade_alert_engine import TradeAlertEngine
     from alert_engine import AlertEngine
@@ -319,7 +320,8 @@ def main():
     prices = st.session_state.price_history
     volumes = st.session_state.volume_history
     vwaps = st.session_state.vwap_history
-
+    times = st.session_state.time_history
+    
     # =========================
     # 主力大單偵測
     # =========================
@@ -409,6 +411,22 @@ def main():
         volumes=volumes,
     )
 
+    multi_period = MultiPeriodEngine.analyze(
+        prices=prices,
+        volumes=volumes,
+        vwap_values=vwaps,
+        time_values=times,
+    )
+
+    decision = MultiPeriodEngine.apply_to_decision(
+        decision=decision,
+        multi_period=multi_period,
+    )
+
+    score = decision.get("score", score)
+    signal = decision.get("action", signal)
+    rebound = decision.get("rebound", rebound)
+    
     # =========================
     # Trade Alert
     # =========================
