@@ -8,6 +8,7 @@ def get_market_data(
     stock_code="2330",
     tick=0,
     mode="一般波動",
+    sim_run_id=0,
 ):
     """
     統一資料入口：
@@ -20,6 +21,7 @@ def get_market_data(
             stock_code=stock_code,
             tick=tick,
             scenario=mode or "一般波動",
+            sim_run_id=sim_run_id,
         )
 
     if data_source == "真實盤":
