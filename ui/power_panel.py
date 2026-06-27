@@ -1,5 +1,5 @@
 import streamlit as st
-from textwrap import dedent
+import streamlit.components.v1 as components
 
 from ui.theme import (
     UP_COLOR,
@@ -45,104 +45,132 @@ def render_power_panel(decision):
     st.markdown("### ⚔️ 多空力道")
 
     html = f"""
-<div style="
-    background:{CARD_BG};
-    border:1px solid {CARD_BORDER};
-    border-radius:14px;
-    padding:14px;
-    margin-bottom:8px;
-">
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{
+                margin: 0;
+                padding: 0;
+                background: transparent;
+                font-family: Arial, "Microsoft JhengHei", sans-serif;
+                color: {TEXT};
+            }}
 
-    <div style="
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        margin-bottom:10px;
-    ">
-        <div style="
-            font-size:14px;
-            color:{SUBTEXT};
-        ">
-            目前狀態
+            .card {{
+                background: {CARD_BG};
+                border: 1px solid {CARD_BORDER};
+                border-radius: 14px;
+                padding: 14px;
+                box-sizing: border-box;
+                width: 100%;
+            }}
+
+            .row {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }}
+
+            .label {{
+                font-size: 13px;
+                color: {SUBTEXT};
+            }}
+
+            .status {{
+                font-size: 18px;
+                font-weight: 800;
+                color: {status_color};
+            }}
+
+            .score-row {{
+                margin-top: 12px;
+                margin-bottom: 6px;
+                display: flex;
+                justify-content: space-between;
+                font-size: 13px;
+                font-weight: 700;
+            }}
+
+            .long {{
+                color: {UP_COLOR};
+            }}
+
+            .short {{
+                color: {DOWN_COLOR};
+            }}
+
+            .bar {{
+                width: 100%;
+                height: 12px;
+                background: #263241;
+                border-radius: 99px;
+                overflow: hidden;
+                display: flex;
+            }}
+
+            .long-bar {{
+                width: {long_pct}%;
+                background: {UP_COLOR};
+            }}
+
+            .short-bar {{
+                width: {short_pct}%;
+                background: {DOWN_COLOR};
+            }}
+
+            .pct-row {{
+                margin-top: 8px;
+                display: flex;
+                justify-content: space-between;
+                color: {SUBTEXT};
+                font-size: 12px;
+            }}
+
+            .bias {{
+                margin-top: 12px;
+                padding-top: 10px;
+                border-top: 1px solid rgba(255,255,255,0.08);
+                font-size: 13px;
+                color: {TEXT};
+            }}
+        </style>
+    </head>
+
+    <body>
+        <div class="card">
+
+            <div class="row">
+                <div class="label">目前狀態</div>
+                <div class="status">{status}</div>
+            </div>
+
+            <div class="score-row">
+                <div class="long">多方 {long_score}</div>
+                <div class="short">空方 {short_score}</div>
+            </div>
+
+            <div class="bar">
+                <div class="long-bar"></div>
+                <div class="short-bar"></div>
+            </div>
+
+            <div class="pct-row">
+                <div>多方占比 {long_pct}%</div>
+                <div>空方占比 {short_pct}%</div>
+            </div>
+
+            <div class="bias">
+                多空差距：<b>{bias}</b>
+            </div>
+
         </div>
+    </body>
+    </html>
+    """
 
-        <div style="
-            font-size:18px;
-            font-weight:800;
-            color:{status_color};
-        ">
-            {status}
-        </div>
-    </div>
-
-    <div style="
-        display:flex;
-        justify-content:space-between;
-        margin-bottom:6px;
-        font-size:13px;
-    ">
-        <div style="
-            color:{UP_COLOR};
-            font-weight:700;
-        ">
-            多方 {long_score}
-        </div>
-
-        <div style="
-            color:{DOWN_COLOR};
-            font-weight:700;
-        ">
-            空方 {short_score}
-        </div>
-    </div>
-
-    <div style="
-        width:100%;
-        height:10px;
-        background:#263241;
-        border-radius:99px;
-        overflow:hidden;
-        margin-bottom:8px;
-    ">
-        <div style="
-            width:{long_pct}%;
-            height:100%;
-            background:{UP_COLOR};
-            float:left;
-        "></div>
-
-        <div style="
-            width:{short_pct}%;
-            height:100%;
-            background:{DOWN_COLOR};
-            float:left;
-        "></div>
-    </div>
-
-    <div style="
-        display:flex;
-        justify-content:space-between;
-        color:{SUBTEXT};
-        font-size:12px;
-    ">
-        <div>多方占比 {long_pct}%</div>
-        <div>空方占比 {short_pct}%</div>
-    </div>
-
-    <div style="
-        margin-top:10px;
-        padding-top:10px;
-        border-top:1px solid rgba(255,255,255,0.08);
-        color:{TEXT};
-        font-size:13px;
-    ">
-        多空差距：<b>{bias}</b>
-    </div>
-
-</div>
-"""
-
-    st.markdown(
-        dedent(html),
-        unsafe_allow_html=True,
+    components.html(
+        html,
+        height=170,
+        scrolling=False,
     )
