@@ -131,6 +131,7 @@ try:
     from big_order_engine import BigOrderEngine
     from trade_alert_engine import TradeAlertEngine
     from alert_engine import AlertEngine
+    from market_flow_engine import MarketFlowEngine
 
     from ui.header import render_header
     from ui.chart_panel import render_chart
@@ -163,43 +164,11 @@ def _safe_float(value, default=0.0):
 
 
 def reset_state():
-    st.session_state.price_history = []
-    st.session_state.volume_history = []
-    st.session_state.vwap_history = []
-    st.session_state.time_history = []
-    st.session_state.big_order_log = []
-    st.session_state.tick = 0
-    st.session_state.last_serial = None
-    st.session_state.big_order_last_serial = None
-    st.session_state.last_good_quote = None
-    st.session_state.api_error_message = None
+    MarketFlowEngine.reset_market_state(st)
 
 
 def init_session_state():
-    for k in ["price_history", "volume_history", "vwap_history", "time_history"]:
-        if k not in st.session_state:
-            st.session_state[k] = []
-
-    if "big_order_log" not in st.session_state:
-        st.session_state.big_order_log = []
-
-    if "tick" not in st.session_state:
-        st.session_state.tick = 0
-
-    if "last_serial" not in st.session_state:
-        st.session_state.last_serial = None
-
-    if "big_order_last_serial" not in st.session_state:
-        st.session_state.big_order_last_serial = None
-
-    if "last_stock" not in st.session_state:
-        st.session_state.last_stock = None
-
-    if "last_good_quote" not in st.session_state:
-        st.session_state.last_good_quote = None
-
-    if "api_error_message" not in st.session_state:
-        st.session_state.api_error_message = None
+    MarketFlowEngine.init_session_state(st)
 
 
 # =========================
@@ -223,6 +192,15 @@ def main():
         mode,
         refresh_sec,
     ) = render_sidebar(reset_state)
+
+    # =========================
+    # 換股清空
+    # =========================
+
+    MarketFlowEngine.reset_if_stock_changed(
+        st=st,
+        stock_code=stock_code,
+    )
 
     # =========================
     # Auto Refresh
@@ -275,57 +253,31 @@ def main():
         st.session_state.tick += 1
 
     # =========================
-    # Quote 解析
+    # 統一資料流 Snapshot
     # =========================
 
-    name = quote.get("name", "Unknown")
-    price = _safe_float(quote.get("price", 0))
-    vwap = _safe_float(quote.get("vwap", price), price)
-    volume = _safe_float(quote.get("last_size", 0))
+    snapshot = MarketFlowEngine.build_snapshot(
+        st=st,
+        quote=quote,
+        stock_code=stock_code,
+        now=now,
+    )
 
-    bids = quote.get("bids", []) or []
-    asks = quote.get("asks", []) or []
+    name = snapshot["name"]
+    price = snapshot["price"]
+    vwap = snapshot["vwap"]
+    volume = snapshot["volume"]
+    high = snapshot["high"]
+    low = snapshot["low"]
+    bids = snapshot["bids"]
+    asks = snapshot["asks"]
+    serial = snapshot["serial"]
 
-    trade = quote.get("trade", {}) or {}
-    raw_serial = trade.get("serial", None)
+    prices = snapshot["prices"]
+    volumes = snapshot["volumes"]
+    vwaps = snapshot["vwaps"]
+    times = snapshot["times"]
 
-    if raw_serial:
-        serial = raw_serial
-    else:
-        serial = f"{stock_code}_{st.session_state.tick}_{price}_{volume}"
-
-    # =========================
-    # 換股清空
-    # =========================
-
-    if st.session_state.get("last_stock") != stock_code:
-        reset_state()
-        st.session_state.last_stock = stock_code
-        st.session_state.last_good_quote = quote
-
-    # =========================
-    # 歷史資料
-    # =========================
-
-    if st.session_state.last_serial != serial:
-        st.session_state.last_serial = serial
-
-        st.session_state.price_history.append(price)
-        st.session_state.volume_history.append(volume)
-        st.session_state.vwap_history.append(vwap)
-        st.session_state.time_history.append(now)
-        
-        if len(st.session_state.price_history) > 500:
-            st.session_state.price_history = st.session_state.price_history[-500:]
-            st.session_state.volume_history = st.session_state.volume_history[-500:]
-            st.session_state.vwap_history = st.session_state.vwap_history[-500:]
-            st.session_state.time_history = st.session_state.time_history[-500:]
-            
-    prices = st.session_state.price_history
-    volumes = st.session_state.volume_history
-    vwaps = st.session_state.vwap_history
-    times = st.session_state.get("time_history", [])
-    
     # =========================
     # 主力大單偵測
     # =========================
@@ -367,8 +319,19 @@ def main():
     # 五檔買賣力道
     # =========================
 
-    bid_total = sum([_safe_float(b.get("size", 0)) for b in bids])
-    ask_total = sum([_safe_float(a.get("size", 0)) for a in asks])
+    bid_total = sum(
+        [
+            _safe_float(b.get("size", 0))
+            for b in bids
+        ]
+    )
+
+    ask_total = sum(
+        [
+            _safe_float(a.get("size", 0))
+            for a in asks
+        ]
+    )
 
     bid_ratio = bid_total / max(ask_total, 1)
 
@@ -415,6 +378,10 @@ def main():
         volumes=volumes,
     )
 
+    # =========================
+    # Multi Period Engine
+    # =========================
+
     multi_period = MultiPeriodEngine.analyze(
         prices=prices,
         volumes=volumes,
@@ -449,7 +416,6 @@ def main():
     else:
         state = f"等待確認｜{final_state}"
 
-
     if score >= 80:
         risk = "方向明確"
 
@@ -461,7 +427,7 @@ def main():
 
     else:
         risk = "等待確認"
-    
+
     # =========================
     # Trade Alert
     # =========================
@@ -516,7 +482,7 @@ def main():
     )
 
     # =========================
-    # 左側：主圖 + 唯一五檔 / 多空區
+    # 左側：主圖 + 市場資訊 + 大單事件流
     # =========================
 
     with main_left:
@@ -546,9 +512,9 @@ def main():
             big_order_log=st.session_state.big_order_log,
             decision=decision,
         )
-        
+
     # =========================
-    # 右側：警示 + 決策 + 反彈 + 籌碼結論
+    # 右側：決策 + 反彈 + 主力 + 警示
     # =========================
 
     with main_right:
