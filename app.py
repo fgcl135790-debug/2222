@@ -163,6 +163,15 @@ macd, macd_signal, _ = MarketAnalyzer.calculate_macd(prices)
 
 momentum = MarketAnalyzer.momentum(prices)
 
+# =========================
+# 五檔買賣力道
+# =========================
+
+bid_ratio = (
+    sum([b.get("size", 0) for b in bids])
+    /
+    max(sum([a.get("size", 0) for a in asks]), 1)
+)
 
 # =========================
 # AI Predict
@@ -178,7 +187,7 @@ ai = AIPredictor.predict_trade(
     macd,
     macd_signal,
     momentum,
-    bid_ratio=1.2,
+    bid_ratio=bid_ratio,
     vwap=vwap,
 )
 
