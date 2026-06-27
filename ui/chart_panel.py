@@ -294,7 +294,7 @@ def render_chart(prices, volumes):
     # =========================
 
     fig.update_layout(
-        height=385,
+        height=335,
         margin=dict(
             l=12,
             r=12,
