@@ -118,24 +118,25 @@ def render_header(
     force_color, force_title, force_sub = _force_style(bid_ratio)
     status_color, status_title, status_sub = _status_style(signal, state)
 
-    # =========================
-    # 原生 Topbar
-    # =========================
+# =========================
+# 原生 Topbar
+# =========================
 
-    title_col, meta_col = st.columns([1.05, 2.2])
-
-    with title_col:
-        st.markdown(
-            f'<div style="display:flex;align-items:center;gap:8px;font-size:17px;font-weight:900;color:{TEXT};height:24px;">🏦 {name} ({stock_code}) <span style="color:#facc15;">★</span></div>',
-            unsafe_allow_html=True,
-        )
-
-    with meta_col:
-        st.markdown(
-            f'<div style="display:flex;justify-content:flex-end;align-items:center;gap:14px;color:{SUBTEXT};font-size:12px;height:24px;white-space:nowrap;"><span>◎ {source_text} {time_text}</span><span><span style="display:inline-block;width:8px;height:8px;border-radius:99px;background:{conn_color};box-shadow:0 0 8px {conn_color};margin-right:5px;"></span>{connection_status}</span><span>⚙ 設定</span><span>🔔 聲音警示</span><span>自訂布局</span></div>',
-            unsafe_allow_html=True,
-        )
-
+st.markdown(
+    f'<div style="width:100%;display:flex;justify-content:space-between;align-items:center;margin:0 0 10px 0;padding:2px 4px;box-sizing:border-box;">'
+    f'<div style="display:flex;align-items:center;gap:8px;font-size:17px;font-weight:900;color:{TEXT};white-space:nowrap;">'
+    f'🏦 {name} ({stock_code}) <span style="color:#facc15;">★</span>'
+    f'</div>'
+    f'<div style="display:flex;align-items:center;gap:14px;color:{SUBTEXT};font-size:12px;white-space:nowrap;">'
+    f'<span>◎ {source_text} {time_text}</span>'
+    f'<span><span style="display:inline-block;width:8px;height:8px;border-radius:99px;background:{conn_color};box-shadow:0 0 8px {conn_color};margin-right:5px;"></span>{connection_status}</span>'
+    f'<span>⚙ 設定</span>'
+    f'<span>🔔 聲音警示</span>'
+    f'<span>自訂布局</span>'
+    f'</div>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
     # =========================
     # 狀態卡片
     # =========================
