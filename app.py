@@ -133,10 +133,10 @@ try:
 
     from ui.header import render_header
     from ui.chart_panel import render_chart
-    from ui.depth_panel import render_depth_panel
+    from ui.lower_market_grid import render_lower_market_grid
     from ui.decision_card import render_decision_card
     from ui.rebound_panel import render_rebound_panel
-    from ui.chip_panel import render_chip_panel
+    from ui.main_force_panel import render_main_force_panel
     from ui.alerts import render_alerts
     from ui.sidebar import render_sidebar
 
@@ -473,36 +473,40 @@ def main():
             vwap_values=vwaps,
         )
 
-        render_depth_panel(
+        render_lower_market_grid(
             bids=bids,
             asks=asks,
             decision=decision,
+            price=price,
+            vwap=vwap,
+            ema5=ema5,
+            ema20=ema20,
+            rsi=rsi,
+            macd=macd,
+            macd_signal=macd_signal,
+            volume=volume,
+            volumes=volumes,
         )
-
     # =========================
     # 右側：警示 + 決策 + 反彈 + 籌碼結論
     # =========================
 
     with main_right:
-        # 1. 核心交易決策
         render_decision_card(decision)
 
-        # 2. 即時警示
-        render_alerts(alerts)
-
-        # 3. 反彈 / 假突破分析
         render_rebound_panel(
             decision=decision,
             trade_alert=trade_alert,
         )
 
-        # 4. 主力籌碼結論
-        render_chip_panel(
+        render_main_force_panel(
             bids=bids,
             asks=asks,
             big_order_log=st.session_state.big_order_log,
             decision=decision,
         )
+
+        render_alerts(alerts)
 
 
 # =========================
