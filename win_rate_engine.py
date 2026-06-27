@@ -42,7 +42,13 @@ class WinRateEngine:
             return default
 
     @staticmethod
-    def _get_stop_take(action, entry_price, decision):
+    def _get_stop_take(
+        action,
+        entry_price,
+        decision,
+        default_stop_pct=0.6,
+        default_take_pct=1.0,
+    ):
         stop_loss = WinRateEngine._safe_float(
             decision.get("stop_loss"),
             0,
@@ -53,21 +59,37 @@ class WinRateEngine:
             0,
         )
 
+        default_stop_pct = WinRateEngine._safe_float(default_stop_pct, 0.6)
+        default_take_pct = WinRateEngine._safe_float(default_take_pct, 1.0)
+
+        stop_rate = default_stop_pct / 100
+        take_rate = default_take_pct / 100
+
         if action == "BUY":
             if stop_loss <= 0 or stop_loss >= entry_price:
-                stop_loss = entry_price * 0.994
+                stop_loss = entry_price * (1 - stop_rate)
 
             if take_profit <= entry_price:
-                take_profit = entry_price * 1.010
+                take_profit = entry_price * (1 + take_rate)
+
+            stop_loss_pct = (entry_price - stop_loss) / entry_price * 100
+            take_profit_pct = (take_profit - entry_price) / entry_price * 100
 
         elif action == "SELL":
             if stop_loss <= entry_price:
-                stop_loss = entry_price * 1.006
+                stop_loss = entry_price * (1 + stop_rate)
 
             if take_profit <= 0 or take_profit >= entry_price:
-                take_profit = entry_price * 0.990
+                take_profit = entry_price * (1 - take_rate)
 
-        return stop_loss, take_profit
+            stop_loss_pct = (stop_loss - entry_price) / entry_price * 100
+            take_profit_pct = (entry_price - take_profit) / entry_price * 100
+
+        else:
+            stop_loss_pct = 0
+            take_profit_pct = 0
+
+        return stop_loss, take_profit, stop_loss_pct, take_profit_pct
 
     @staticmethod
     def update_live(
@@ -79,6 +101,7 @@ class WinRateEngine:
         decision,
         now,
         min_score=75,
+        max_hold_bars=50,
     ):
         action = decision.get("action", "WAIT")
         score = WinRateEngine._safe_int(decision.get("score", 0))
@@ -92,6 +115,8 @@ class WinRateEngine:
 
         # 先檢查現有交易是否出場
         if active is not None:
+            active["bars_held"] = active.get("bars_held", 0) + 1
+            st.session_state.winrate_active_trade = active
             active_action = active.get("action")
             entry_price = WinRateEngine._safe_float(active.get("entry_price"))
             stop_loss = WinRateEngine._safe_float(active.get("stop_loss"))
@@ -106,6 +131,8 @@ class WinRateEngine:
                     exit_reason = "停利"
                 elif action == "SELL" and score >= min_score:
                     exit_reason = "反向訊號"
+                elif active.get("bars_held", 0) >= active.get("max_hold_bars", max_hold_bars):
+                    exit_reason = "時間出場"    
 
                 pnl_pct = (price - entry_price) / entry_price * 100
 
@@ -116,6 +143,8 @@ class WinRateEngine:
                     exit_reason = "停利"
                 elif action == "BUY" and score >= min_score:
                     exit_reason = "反向訊號"
+                elif active.get("bars_held", 0) >= active.get("max_hold_bars", max_hold_bars):
+                    exit_reason = "時間出場"    
 
                 pnl_pct = (entry_price - price) / entry_price * 100
 
@@ -138,6 +167,12 @@ class WinRateEngine:
                     "score": active.get("score"),
                     "pnl_pct": round(pnl_pct, 3),
                     "result": result,
+                    "stop_loss": active.get("stop_loss"),
+                    "take_profit": active.get("take_profit"),
+                    "stop_loss_pct": active.get("stop_loss_pct"),
+                    "take_profit_pct": active.get("take_profit_pct"),
+                    "hold_bars": active.get("bars_held", 0),
+                    "max_hold_bars": active.get("max_hold_bars", max_hold_bars),
                 }
 
                 st.session_state.winrate_trades.append(trade)
@@ -161,12 +196,12 @@ class WinRateEngine:
             if st.session_state.get("winrate_last_signal_key") == signal_key:
                 return
 
-            stop_loss, take_profit = WinRateEngine._get_stop_take(
+            stop_loss, take_profit, stop_loss_pct, take_profit_pct = WinRateEngine._get_stop_take(
                 action=action,
                 entry_price=price,
                 decision=decision,
             )
-
+            
             st.session_state.winrate_active_trade = {
                 "source": data_source,
                 "stock_code": stock_code,
@@ -176,7 +211,11 @@ class WinRateEngine:
                 "entry_price": round(price, 2),
                 "stop_loss": round(stop_loss, 2),
                 "take_profit": round(take_profit, 2),
+                "stop_loss_pct": round(stop_loss_pct, 2),
+                "take_profit_pct": round(take_profit_pct, 2),
                 "score": score,
+                "bars_held": 0,
+                "max_hold_bars": max_hold_bars,
             }
 
             st.session_state.winrate_last_signal_key = signal_key
