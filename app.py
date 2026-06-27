@@ -133,6 +133,7 @@ try:
     from trade_alert_engine import TradeAlertEngine
     from alert_engine import AlertEngine
     from market_flow_engine import MarketFlowEngine
+    from win_rate_engine import WinRateEngine
 
     from ui.header import render_header
     from ui.chart_panel import render_chart
@@ -143,6 +144,7 @@ try:
     from ui.alerts import render_alerts
     from ui.sidebar import render_sidebar
     from ui.backtest_sidebar import render_backtest_sidebar_panel
+    from ui.win_rate_sidebar import render_win_rate_sidebar_panel
     from ui.event_stream_panel import render_event_stream_panel
 
     from core.data_engine import get_market_data
@@ -184,6 +186,7 @@ def init_session_state():
 def main():
 
     init_session_state()
+    WinRateEngine.init_session_state(st)
 
     if "market_context_key" not in st.session_state:
         st.session_state.market_context_key = None
@@ -210,6 +213,8 @@ def main():
     stock_code=stock_code,
     )
 
+    render_win_rate_sidebar_panel()
+
     # =========================
     # 切換股票 / 資料來源 / 模擬模式時清空
     # =========================
@@ -229,6 +234,8 @@ def main():
         # 不能每次 refresh 都 random
         if data_source == "模擬盤":
             st.session_state.sim_run_id = random.randint(100000, 999999)
+
+        WinRateEngine.reset(st)
             
     # =========================
     # Auto Refresh
@@ -478,6 +485,17 @@ def main():
     trade_alert = TradeAlertEngine.track(
         decision=decision,
         price=price,
+    )
+    
+    WinRateEngine.update_live(
+    st=st,
+    stock_code=stock_code,
+    name=name,
+    data_source=data_source,
+    price=price,
+    decision=decision,
+    now=now,
+    min_score=75,
     )
 
     # =========================
