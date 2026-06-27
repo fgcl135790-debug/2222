@@ -258,7 +258,7 @@ def render_decision_card(decision):
         }}
 
         .reason-list {{
-            max-height: 150px;
+            max-height: 105px;
             overflow: hidden;
         }}
 
@@ -355,6 +355,6 @@ def render_decision_card(decision):
 
     components.html(
         html,
-        height=405,
+        height=350,
         scrolling=False,
     )
