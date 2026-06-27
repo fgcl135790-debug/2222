@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 
 
 class MarketFlowEngine:
@@ -8,8 +8,10 @@ class MarketFlowEngine:
     2. 歷史資料 append
     3. price / volume / vwap / time 長度同步
     4. 換股清空
-    5. K線、多週期、Decision 使用同一份資料
+    5. 真實盤休市後不再用現在時間製造假 tick
     """
+
+    FLOW_VERSION = "v2_stable_serial_no_after_close_moving"
 
     HISTORY_KEYS = [
         "price_history",
@@ -55,6 +57,17 @@ class MarketFlowEngine:
                 else:
                     st.session_state[key] = default
 
+        # 部署新資料流版本後，自動清掉舊的錯誤歷史資料
+        if st.session_state.get("market_flow_version") != MarketFlowEngine.FLOW_VERSION:
+            keep_stock = st.session_state.get("last_stock", None)
+
+            MarketFlowEngine.reset_market_state(
+                st=st,
+                keep_stock=keep_stock,
+            )
+
+            st.session_state.market_flow_version = MarketFlowEngine.FLOW_VERSION
+
     @staticmethod
     def reset_market_state(st, keep_stock=None):
         st.session_state.price_history = []
@@ -82,83 +95,21 @@ class MarketFlowEngine:
             )
 
     @staticmethod
-    def normalize_quote(quote, stock_code, now=None):
-        quote = quote or {}
-        now = now or datetime.now()
+    def is_tw_regular_session(now):
+        """
+        台股一般盤：週一到週五 09:00 ~ 13:30。
+        這裡只用來標示狀態，不拿來產生假 tick。
+        """
 
-        name = (
-            quote.get("name")
-            or quote.get("stock_name")
-            or quote.get("symbolName")
-            or stock_code
-        )
+        if now is None:
+            return False
 
-        price = MarketFlowEngine.safe_float(
-            quote.get("price")
-            or quote.get("lastPrice")
-            or quote.get("closePrice")
-            or quote.get("close")
-            or 0
-        )
+        if now.weekday() >= 5:
+            return False
 
-        vwap = MarketFlowEngine.safe_float(
-            quote.get("vwap")
-            or quote.get("avgPrice")
-            or quote.get("averagePrice")
-            or price
-        )
+        current_time = now.time()
 
-        if vwap <= 0:
-            vwap = price
-
-        volume = MarketFlowEngine.safe_float(
-            quote.get("last_size")
-            or quote.get("lastSize")
-            or quote.get("volume")
-            or quote.get("size")
-            or 0
-        )
-
-        high = MarketFlowEngine.safe_float(
-            quote.get("high")
-            or quote.get("highPrice")
-            or price
-        )
-
-        low = MarketFlowEngine.safe_float(
-            quote.get("low")
-            or quote.get("lowPrice")
-            or price
-        )
-
-        bids = quote.get("bids") or []
-        asks = quote.get("asks") or []
-
-        normalized_bids = MarketFlowEngine.normalize_levels(bids)
-        normalized_asks = MarketFlowEngine.normalize_levels(asks)
-
-        serial = (
-            quote.get("serial")
-            or quote.get("tick_id")
-            or quote.get("tradeTime")
-            or quote.get("time")
-            or quote.get("date")
-            or now.strftime("%H:%M:%S")
-        )
-
-        return {
-            "name": name,
-            "stock_code": stock_code,
-            "price": price,
-            "vwap": vwap,
-            "volume": volume,
-            "high": high,
-            "low": low,
-            "bids": normalized_bids,
-            "asks": normalized_asks,
-            "serial": str(serial),
-            "raw": quote,
-        }
+        return time(9, 0) <= current_time <= time(13, 30)
 
     @staticmethod
     def normalize_levels(levels):
@@ -200,10 +151,253 @@ class MarketFlowEngine:
         return result[:5]
 
     @staticmethod
+    def _first_valid(*values):
+        for value in values:
+            if value is None:
+                continue
+
+            if isinstance(value, str) and value.strip() == "":
+                continue
+
+            return value
+
+        return None
+
+    @staticmethod
+    def _get_trade_dict(quote):
+        trade = quote.get("trade", {}) if isinstance(quote, dict) else {}
+
+        if isinstance(trade, dict):
+            return trade
+
+        return {}
+
+    @staticmethod
+    def _build_quote_fingerprint(
+        stock_code,
+        price,
+        volume,
+        vwap,
+        high,
+        low,
+        bids,
+        asks,
+    ):
+        """
+        真實盤沒有 serial 時，用行情本身做指紋。
+        重點：不能用現在時間，否則休市後每次 refresh 都會新增假 tick。
+        """
+
+        bid_1_price = 0
+        bid_1_size = 0
+        ask_1_price = 0
+        ask_1_size = 0
+
+        if bids:
+            bid_1_price = MarketFlowEngine.safe_float(bids[0].get("price", 0))
+            bid_1_size = MarketFlowEngine.safe_float(bids[0].get("size", 0))
+
+        if asks:
+            ask_1_price = MarketFlowEngine.safe_float(asks[0].get("price", 0))
+            ask_1_size = MarketFlowEngine.safe_float(asks[0].get("size", 0))
+
+        return (
+            f"{stock_code}|"
+            f"p={price:.4f}|"
+            f"v={volume:.4f}|"
+            f"vw={vwap:.4f}|"
+            f"h={high:.4f}|"
+            f"l={low:.4f}|"
+            f"bp={bid_1_price:.4f}|"
+            f"bs={bid_1_size:.4f}|"
+            f"ap={ask_1_price:.4f}|"
+            f"as={ask_1_size:.4f}"
+        )
+
+    @staticmethod
+    def _build_serial(
+        quote,
+        stock_code,
+        data_source,
+        now,
+        tick,
+        price,
+        volume,
+        vwap,
+        high,
+        low,
+        bids,
+        asks,
+    ):
+        quote = quote or {}
+        trade = MarketFlowEngine._get_trade_dict(quote)
+
+        raw_serial = MarketFlowEngine._first_valid(
+            quote.get("serial"),
+            quote.get("tick_id"),
+            quote.get("tickId"),
+            quote.get("tradeTime"),
+            quote.get("lastTradeTime"),
+            quote.get("lastUpdated"),
+            quote.get("time"),
+            quote.get("dateTime"),
+            trade.get("serial"),
+            trade.get("time"),
+            trade.get("tradeTime"),
+        )
+
+        fingerprint = MarketFlowEngine._build_quote_fingerprint(
+            stock_code=stock_code,
+            price=price,
+            volume=volume,
+            vwap=vwap,
+            high=high,
+            low=low,
+            bids=bids,
+            asks=asks,
+        )
+
+        # 模擬盤要每次 tick 都可以動
+        if data_source == "模擬盤":
+            if tick is not None:
+                return f"SIM|{stock_code}|tick={tick}|{fingerprint}"
+
+            return f"SIM|{stock_code}|{now.strftime('%H%M%S')}|{fingerprint}"
+
+        # 真實盤：優先用交易所 / API 給的交易時間或序號
+        if raw_serial is not None:
+            return f"REAL|{stock_code}|{raw_serial}|{fingerprint}"
+
+        # 真實盤沒有序號時，只能用 quote 指紋
+        # 不可以用 now，否則休市後走勢圖會一直新增假資料
+        return f"REAL|{fingerprint}"
+
+    @staticmethod
+    def normalize_quote(
+        quote,
+        stock_code,
+        now=None,
+        data_source=None,
+        tick=None,
+    ):
+        quote = quote or {}
+        now = now or datetime.now()
+        trade = MarketFlowEngine._get_trade_dict(quote)
+
+        name = (
+            quote.get("name")
+            or quote.get("stock_name")
+            or quote.get("symbolName")
+            or quote.get("symbol_name")
+            or stock_code
+        )
+
+        price = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("price"),
+                quote.get("lastPrice"),
+                quote.get("closePrice"),
+                quote.get("close"),
+                trade.get("price"),
+                0,
+            )
+        )
+
+        vwap = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("vwap"),
+                quote.get("avgPrice"),
+                quote.get("averagePrice"),
+                price,
+            )
+        )
+
+        if vwap <= 0:
+            vwap = price
+
+        volume = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("last_size"),
+                quote.get("lastSize"),
+                quote.get("last_size_lot"),
+                quote.get("volume"),
+                quote.get("size"),
+                trade.get("size"),
+                trade.get("volume"),
+                0,
+            )
+        )
+
+        high = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("high"),
+                quote.get("highPrice"),
+                price,
+            )
+        )
+
+        low = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("low"),
+                quote.get("lowPrice"),
+                price,
+            )
+        )
+
+        bids = MarketFlowEngine.normalize_levels(
+            quote.get("bids") or []
+        )
+
+        asks = MarketFlowEngine.normalize_levels(
+            quote.get("asks") or []
+        )
+
+        serial = MarketFlowEngine._build_serial(
+            quote=quote,
+            stock_code=stock_code,
+            data_source=data_source,
+            now=now,
+            tick=tick,
+            price=price,
+            volume=volume,
+            vwap=vwap,
+            high=high,
+            low=low,
+            bids=bids,
+            asks=asks,
+        )
+
+        if data_source == "真實盤":
+            market_status = (
+                "盤中"
+                if MarketFlowEngine.is_tw_regular_session(now)
+                else "休市"
+            )
+        elif data_source == "模擬盤":
+            market_status = "模擬"
+        else:
+            market_status = "未知"
+
+        return {
+            "name": name,
+            "stock_code": stock_code,
+            "price": price,
+            "vwap": vwap,
+            "volume": volume,
+            "high": high,
+            "low": low,
+            "bids": bids,
+            "asks": asks,
+            "serial": str(serial),
+            "market_status": market_status,
+            "raw": quote,
+        }
+
+    @staticmethod
     def append_history(st, price, volume, vwap, now, serial, max_len=500):
         """
         只有 serial 改變才新增歷史資料。
-        避免同一筆 quote 因為 Streamlit rerun 被重複 append。
+        真實盤休市後 quote 沒變，serial 就不變，所以 chart 不會動。
         """
 
         if st.session_state.get("last_serial") == serial:
@@ -234,11 +428,6 @@ class MarketFlowEngine:
 
     @staticmethod
     def trim_and_align_history(st, max_len=500):
-        """
-        保證四條歷史資料永遠一樣長。
-        price / volume / vwap / time 只要其中一個短，就全部裁到最短。
-        """
-
         for key in MarketFlowEngine.HISTORY_KEYS:
             if key not in st.session_state:
                 st.session_state[key] = []
@@ -278,14 +467,22 @@ class MarketFlowEngine:
         }
 
     @staticmethod
-    def build_snapshot(st, quote, stock_code, now):
+    def build_snapshot(
+        st,
+        quote,
+        stock_code,
+        now,
+        data_source=None,
+    ):
         q = MarketFlowEngine.normalize_quote(
             quote=quote,
             stock_code=stock_code,
             now=now,
+            data_source=data_source,
+            tick=st.session_state.get("tick", None),
         )
 
-        MarketFlowEngine.append_history(
+        did_append = MarketFlowEngine.append_history(
             st=st,
             price=q["price"],
             volume=q["volume"],
@@ -308,6 +505,8 @@ class MarketFlowEngine:
             "bids": q["bids"],
             "asks": q["asks"],
             "serial": q["serial"],
+            "market_status": q["market_status"],
+            "did_append": did_append,
             "prices": series["prices"],
             "volumes": series["volumes"],
             "vwaps": series["vwaps"],
