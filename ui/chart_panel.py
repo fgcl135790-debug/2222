@@ -5,7 +5,6 @@ from plotly.subplots import make_subplots
 from ui.theme import (
     UP_COLOR,
     DOWN_COLOR,
-    WAIT_COLOR,
     TEXT,
     SUBTEXT,
 )
@@ -146,10 +145,8 @@ def render_chart(prices, volumes, vwap_values=None):
     volume_colors = []
 
     for i, p in enumerate(clean_prices):
-
         if i == 0:
             volume_colors.append(price_color)
-
         else:
             if p >= clean_prices[i - 1]:
                 volume_colors.append(UP_COLOR)
@@ -159,7 +156,6 @@ def render_chart(prices, volumes, vwap_values=None):
     hist_colors = []
 
     for h in hist:
-
         if h >= 0:
             hist_colors.append(UP_COLOR)
         else:
@@ -250,7 +246,6 @@ def render_chart(prices, volumes, vwap_values=None):
     # =========================
 
     if clean_vwap and any(v is not None and v > 0 for v in clean_vwap):
-
         fig.add_trace(
             go.Scatter(
                 x=x,
@@ -489,7 +484,6 @@ def render_chart(prices, volumes, vwap_values=None):
     )
 
     for row in [1, 2, 3]:
-
         fig.update_xaxes(
             showgrid=False,
             zeroline=False,
