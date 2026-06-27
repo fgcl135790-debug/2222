@@ -18,11 +18,11 @@ def render_decision_card(decision):
     # ------------------------
 
     if action == "BUY":
-        color = "#00e676"
+        color = "#ff5252"      # 台股：做多＝紅
         title = "可當沖做多"
 
     elif action == "SELL":
-        color = "#ff5252"
+        color = "#00e676"      # 台股：做空＝綠
         title = "可當沖做空"
 
     else:
