@@ -45,9 +45,16 @@ html, body, [data-testid="stAppViewContainer"] {
     background: #080c13;
 }
 
+/* Streamlit 上方工具列背景 */
+header[data-testid="stHeader"] {
+    background: #080c13;
+    height: 42px;
+}
+
+/* 主內容往下移，避免被上方工具列蓋住 */
 .block-container {
     max-width: 1760px;
-    padding: 0.25rem 0.55rem 0.8rem 0.55rem;
+    padding: 2.55rem 0.55rem 0.8rem 0.55rem !important;
 }
 
 h1, h2, h3 {
