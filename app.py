@@ -14,6 +14,7 @@ from ui.chart_panel import render_chart
 from ui.decision_card import render_decision_card
 from ui.trade_alert_panel import render_trade_alert_panel
 from ui.power_panel import render_power_panel
+from ui.market_info_panel import render_market_info_panel
 from ui.big_order_panel import render_big_order_panel
 from ui.orderbook import render_orderbook
 from ui.radar import render_radar
@@ -474,22 +475,8 @@ with main_right:
 
     render_trade_alert_panel(trade_alert)
 
-    tab_radar, tab_big_order = st.tabs(
-        [
-            "📡 主力雷達",
-            "🐋 主力大單",
-        ]
-    )
-
-    with tab_radar:
-
-        render_radar(
-            bids=bids,
-            asks=asks,
-        )
-
-    with tab_big_order:
-
-        render_big_order_panel(
-            st.session_state.big_order_log
-        )
+render_market_info_panel(
+    bids=bids,
+    asks=asks,
+    big_order_log=st.session_state.big_order_log,
+)
