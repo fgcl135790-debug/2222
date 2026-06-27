@@ -242,15 +242,18 @@ def main():
     # =========================
 
     chart_fullscreen = st.session_state.get("chart_fullscreen", False)
+    backtest_running = st.session_state.get("backtest_status") == "running"
 
-    if not chart_fullscreen:
+    if not chart_fullscreen and not backtest_running:
         st_autorefresh(
             interval=refresh_sec * 1000,
             key="v75_dashboard_refresh",
         )
-    else:
+    elif chart_fullscreen:
         st.info("圖表全屏檢視中，自動刷新已暫停。按圖表工具列的「返回」恢復。")
-
+    elif backtest_running:
+        st.info("回測執行中，自動刷新已暫停。")
+        
     # =========================
     # 取得資料
     # =========================
