@@ -1,12 +1,16 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from ui.theme import (
     UP_COLOR,
     DOWN_COLOR,
+    WAIT_COLOR,
     TEXT,
     SUBTEXT,
+    CARD_BG,
+    CARD_BORDER,
 )
 
 
@@ -79,6 +83,202 @@ def _align_series(values, target_len):
     return result
 
 
+def _render_chart_toolbar(current_price, vwap, ema5, ema20, ema60):
+
+    current_price = _safe_float(current_price)
+    vwap = _safe_float(vwap)
+    ema5 = _safe_float(ema5)
+    ema20 = _safe_float(ema20)
+    ema60 = _safe_float(ema60)
+
+    if current_price >= vwap:
+        price_state = "站上 VWAP"
+        price_color = UP_COLOR
+    else:
+        price_state = "跌破 VWAP"
+        price_color = DOWN_COLOR
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            font-family: Arial, "Microsoft JhengHei", sans-serif;
+            color: {TEXT};
+            overflow: hidden;
+        }}
+
+        .wrap {{
+            background: {CARD_BG};
+            border: 1px solid {CARD_BORDER};
+            border-radius: 13px;
+            padding: 8px 10px;
+            box-sizing: border-box;
+            width: 100%;
+        }}
+
+        .top {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }}
+
+        .tabs {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+
+        .tab {{
+            padding: 5px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 900;
+            color: {SUBTEXT};
+            background: rgba(255,255,255,0.035);
+            border: 1px solid rgba(255,255,255,0.06);
+            white-space: nowrap;
+        }}
+
+        .tab-active {{
+            color: #ffffff;
+            background: rgba(59,130,246,0.20);
+            border: 1px solid rgba(59,130,246,0.50);
+        }}
+
+        .tools {{
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            color: {SUBTEXT};
+            font-size: 11.5px;
+            white-space: nowrap;
+        }}
+
+        .tool {{
+            padding: 4px 7px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.035);
+        }}
+
+        .bottom {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }}
+
+        .periods {{
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }}
+
+        .period {{
+            min-width: 34px;
+            text-align: center;
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 11.5px;
+            font-weight: 900;
+            color: {SUBTEXT};
+            background: rgba(255,255,255,0.025);
+            border: 1px solid rgba(255,255,255,0.05);
+        }}
+
+        .period-active {{
+            color: #ffffff;
+            background: rgba(59,130,246,0.24);
+            border-color: rgba(59,130,246,0.55);
+        }}
+
+        .info {{
+            display: flex;
+            gap: 10px;
+            color: {SUBTEXT};
+            font-size: 11.5px;
+            white-space: nowrap;
+        }}
+
+        .info b {{
+            color: {TEXT};
+        }}
+
+        .state {{
+            color: {price_color};
+            font-weight: 900;
+        }}
+
+        @media (max-width: 900px) {{
+            .top,
+            .bottom {{
+                align-items: flex-start;
+                flex-direction: column;
+            }}
+
+            .tools,
+            .info {{
+                flex-wrap: wrap;
+                white-space: normal;
+            }}
+        }}
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+
+        <div class="top">
+            <div class="tabs">
+                <div class="tab tab-active">分時走勢</div>
+                <div class="tab">K線走勢</div>
+                <div class="tab">多週期分析</div>
+            </div>
+
+            <div class="tools">
+                <div class="tool">技術指標</div>
+                <div class="tool">畫線工具</div>
+                <div class="tool">全螢幕</div>
+            </div>
+        </div>
+
+        <div class="bottom">
+            <div class="periods">
+                <div class="period period-active">1分</div>
+                <div class="period">5分</div>
+                <div class="period">15分</div>
+                <div class="period">30分</div>
+                <div class="period">日</div>
+            </div>
+
+            <div class="info">
+                <span>Price <b>{current_price:.2f}</b></span>
+                <span>VWAP <b>{vwap:.2f}</b></span>
+                <span>EMA5 <b>{ema5:.2f}</b></span>
+                <span>EMA20 <b>{ema20:.2f}</b></span>
+                <span>EMA60 <b>{ema60:.2f}</b></span>
+                <span class="state">{price_state}</span>
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>
+"""
+
+    components.html(
+        html,
+        height=76,
+        scrolling=False,
+    )
+
+
 def render_chart(prices, volumes, vwap_values=None):
 
     st.markdown("### 📈 分時走勢 / VWAP / MACD")
@@ -134,6 +334,25 @@ def render_chart(prices, volumes, vwap_values=None):
     ema5 = _ema(clean_prices, 5)
     ema20 = _ema(clean_prices, 20)
     ema60 = _ema(clean_prices, 60)
+
+    current_vwap = current_price
+
+    valid_vwap = [
+        v
+        for v in clean_vwap
+        if v is not None and _safe_float(v) > 0
+    ]
+
+    if valid_vwap:
+        current_vwap = valid_vwap[-1]
+
+    _render_chart_toolbar(
+        current_price=current_price,
+        vwap=current_vwap,
+        ema5=ema5[-1] if ema5 else current_price,
+        ema20=ema20[-1] if ema20 else current_price,
+        ema60=ema60[-1] if ema60 else current_price,
+    )
 
     macd_line, signal_line, hist = _macd(clean_prices)
 
