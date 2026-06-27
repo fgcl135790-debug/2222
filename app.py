@@ -487,19 +487,23 @@ def main():
         data_source=data_source,
     )
 
+    # =========================
+    # 全屏圖表模式
+    # =========================
+
     if st.session_state.get("chart_fullscreen", False):
-    render_chart(
-        prices=prices,
-        volumes=volumes,
-        vwap_values=vwaps,
-        time_values=times,
-        decision=decision,
-        trade_alert=trade_alert,
-    )
-    return
+        render_chart(
+            prices=prices,
+            volumes=volumes,
+            vwap_values=vwaps,
+            time_values=times,
+            decision=decision,
+            trade_alert=trade_alert,
+        )
+        return
 
     # =========================
-    # V7.5 Dashboard Layout
+    # V7.6 Dashboard Layout
     # =========================
 
     main_left, main_right = st.columns(
