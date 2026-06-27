@@ -1,6 +1,6 @@
 import streamlit as st
 import plotly.graph_objects as go
-
+from ui.theme import *
 
 def render_decision_card(decision):
 
@@ -18,15 +18,15 @@ def render_decision_card(decision):
     # ------------------------
 
     if action == "BUY":
-        color = "#ff5252"      # 台股：做多＝紅
+        color = UP_COLOR
         title = "可當沖做多"
 
     elif action == "SELL":
-        color = "#00e676"      # 台股：做空＝綠
+        color = DOWN_COLOR
         title = "可當沖做空"
 
     else:
-        color = "#ffc107"
+        color = WAIT_COLOR
         title = "等待進場"
 
     st.markdown("### 🎯 交易決策 (V7.5)")
