@@ -161,6 +161,6 @@ def render_alerts(alerts):
 
     components.html(
         html,
-        height=height,
+        height=120,
         scrolling=False,
     )
