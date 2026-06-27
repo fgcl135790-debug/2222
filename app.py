@@ -11,6 +11,7 @@ from ai_predictor import AIPredictor
 from charts import ChartBuilder
 from ui.header import render_header
 from ui.ai_panel import render_ai_panel
+from ui.orderbook import render_orderbook
 
 from streamlit_autorefresh import st_autorefresh
 
@@ -271,83 +272,10 @@ st.plotly_chart(
 # 📋 五檔（V5.7 無價差版）
 # =========================
 
-import streamlit.components.v1 as components
-
-st.subheader("📋 五檔")
-
-# =========================
-# 防呆
-# =========================
-bids = bids[:5]
-asks = asks[:5]
-
-while len(bids) < 5:
-    bids.append({"price": 0, "size": 0})
-
-while len(asks) < 5:
-    asks.append({"price": 0, "size": 0})
-
-buy_prices = [float(x.get("price", 0)) for x in bids]
-buy_sizes  = [int(x.get("size", 0)) for x in bids]
-
-sell_prices = [float(x.get("price", 0)) for x in asks]
-sell_sizes  = [int(x.get("size", 0)) for x in asks]
-
-# =========================
-# HTML
-# =========================
-html = """
-<style>
-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-}
-
-th {
-    color: #aaa;
-    padding: 8px;
-    border-bottom: 1px solid #333;
-    text-align: center;
-}
-
-td {
-    padding: 8px;
-    text-align: center;
-    border-bottom: 1px solid #222;
-}
-
-.buy {
-    color: #00e676;
-    font-weight: 600;
-}
-
-.sell {
-    color: #ff5252;
-    font-weight: 600;
-}
-</style>
-
-<table>
-<tr>
-    <th>買量</th>
-    <th>買價</th>
-    <th>賣價</th>
-    <th>賣量</th>
-</tr>
-"""
-
-for i in range(5):
-    html += f"""
-    <tr>
-        <td class="buy">{buy_sizes[i]}</td>
-        <td class="buy">{buy_prices[i]}</td>
-        <td class="sell">{sell_prices[i]}</td>
-        <td class="sell">{sell_sizes[i]}</td>
-    </tr>
-    """
-
-html += "</table>"
+render_orderbook(
+    bids=bids,
+    asks=asks,
+)
 
 # 🚨 關鍵修正（不是 markdown）
 components.html(html, height=260, scrolling=False)
