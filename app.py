@@ -45,61 +45,87 @@ html, body, [data-testid="stAppViewContainer"] {
     background: #080c13;
 }
 
-/* Streamlit 上方工具列背景 */
+/* Streamlit 上方工具列 */
 header[data-testid="stHeader"] {
     background: #080c13;
-    height: 42px;
+    height: 40px;
 }
 
-/* 主內容往下移，避免被上方工具列蓋住 */
+/* 主內容不要被上方工具列擋住 */
 .block-container {
     max-width: 1760px;
-    padding: 2.55rem 0.55rem 0.8rem 0.55rem !important;
+    padding: 2.25rem 0.55rem 0.6rem 0.55rem !important;
 }
 
+/* 壓縮標題 */
 h1, h2, h3 {
-    font-size: 15px !important;
-    margin-bottom: 0.25rem !important;
+    font-size: 14px !important;
+    margin-top: 0 !important;
+    margin-bottom: 0.18rem !important;
 }
 
+/* 全域字體稍微縮小 */
 p, div, span {
-    font-size: 12.5px;
+    font-size: 12px;
 }
 
+/* 壓縮 Streamlit 元件間距 */
 div[data-testid="stVerticalBlock"] {
-    gap: 0.28rem;
+    gap: 0.22rem;
 }
 
 div[data-testid="stHorizontalBlock"] {
-    gap: 0.55rem;
+    gap: 0.45rem;
 }
 
+/* 分隔線變細 */
 hr {
-    margin: 0.25rem 0 !important;
-    border-color: rgba(255,255,255,0.08) !important;
+    margin: 0.18rem 0 !important;
+    border-color: rgba(255,255,255,0.07) !important;
 }
 
+/* Tabs 壓縮 */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 4px;
+    gap: 3px;
 }
 
 .stTabs [data-baseweb="tab"] {
-    height: 30px;
-    padding: 3px 8px;
-    font-size: 12px;
+    height: 28px;
+    padding: 2px 7px;
+    font-size: 11.5px;
 }
 
+/* 表格壓縮 */
 .stDataFrame {
-    font-size: 12px;
+    font-size: 11.5px;
 }
 
+/* 側邊欄 */
 [data-testid="stSidebar"] {
     background: #0b111c;
 }
 
+/* 按鈕壓縮 */
 button[kind="secondary"] {
-    height: 30px;
+    height: 28px;
     padding: 2px 8px;
+}
+
+/* 讓 Plotly 工具列不要太搶畫面 */
+.modebar {
+    transform: scale(0.8);
+    transform-origin: top right;
+}
+
+/* 手機版：欄位自然往下排 */
+@media (max-width: 900px) {
+    .block-container {
+        padding: 2.2rem 0.45rem 0.6rem 0.45rem !important;
+    }
+
+    h1, h2, h3 {
+        font-size: 13px !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
