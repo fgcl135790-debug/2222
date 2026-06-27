@@ -1,63 +1,60 @@
 import streamlit as st
 
-from ui.cards import metric_card
 
+def render_header(
+    name,
+    stock_code,
+    price,
+    score,
+    risk,
+    state,
+):
 
-def draw_header(price,
-                ai,
-                rebound,
-                master,
-                risk,
-                status):
+    st.title(f"🏦 {name} ({stock_code})")
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    col1, col2, col3, col4 = st.columns(4)
 
-    with c1:
-        metric_card(
-            "現價",
-            f"{price:.1f}",
-            "",
-            "#ff5252"
-        )
+    cards = [
+        ("現價", f"{price:.2f}", "#ffffff"),
+        ("AI信心", f"{score}%", "#29b6f6"),
+        ("風險", f"{risk}%", "#ffca28"),
+        ("狀態", state, "#42a5f5"),
+    ]
 
-    with c2:
-        metric_card(
-            "AI信心",
-            f"{ai}%",
-            "偏多" if ai > 60 else "偏空",
-            "#5eead4",
-            ai / 100
-        )
+    for col, (title, value, color) in zip(
+        [col1, col2, col3, col4],
+        cards,
+    ):
 
-    with c3:
-        metric_card(
-            "反彈率",
-            f"{rebound}%",
-            "",
-            "#34d399",
-            rebound / 100
-        )
+        with col:
 
-    with c4:
-        metric_card(
-            "主力動向",
-            master,
-            "",
-            "#ef4444"
-        )
+            st.markdown(
+                f"""
+<div style="
+background:#111827;
+border-radius:14px;
+padding:16px;
+border:1px solid rgba(255,255,255,.08);
+height:95px;
+">
 
-    with c5:
-        metric_card(
-            "風險",
-            risk,
-            "",
-            "#f59e0b"
-        )
+<div style="
+font-size:12px;
+color:#9ca3af;
+">
+{title}
+</div>
 
-    with c6:
-        metric_card(
-            "狀態",
-            status,
-            "",
-            "#4ade80"
-        )
+<div style="
+margin-top:10px;
+font-size:24px;
+font-weight:700;
+color:{color};
+">
+{value}
+</div>
+
+</div>
+""",
+                unsafe_allow_html=True,
+            )
