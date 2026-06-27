@@ -11,6 +11,7 @@ class DecisionEngine:
         if isinstance(value, list):
             if not value:
                 return default
+
             return DecisionEngine._safe_float(value[-1], default)
 
         return DecisionEngine._safe_float(value, default)
@@ -133,7 +134,11 @@ class DecisionEngine:
         volume_ratio = now_volume / max(avg_volume, 1)
 
         price_slope = DecisionEngine._slope(prices, 10)
-        ema20_slope = DecisionEngine._slope(ema20 if isinstance(ema20, list) else [], 10)
+
+        if isinstance(ema20, list):
+            ema20_slope = DecisionEngine._slope(ema20, 10)
+        else:
+            ema20_slope = 0.0
 
         recent_high = DecisionEngine._recent_high(prices, 30)
         recent_low = DecisionEngine._recent_low(prices, 30)
@@ -182,64 +187,18 @@ class DecisionEngine:
 
         chase_long = (
             distance_to_high < 0.18
-            and rsi_v >= 63
+            and rsi_v >= 66
         )
 
         chase_short = (
             distance_to_low < 0.18
-            and rsi_v <= 38
+            and rsi_v <= 34
         )
 
-        vwap_too_far_long = vwap_gap > 0.85
-        vwap_too_far_short = vwap_gap < -0.85
+        vwap_too_far_long = vwap_gap > 0.95
+        vwap_too_far_short = vwap_gap < -0.95
 
-        weak_volume = volume_ratio < 0.85
-
-        # =========================
-        # BUY 條件：只做「強勢回踩後再上」
-        # =========================
-
-        long_pass = (
-            ai_signal == "BUY"
-            and ai_score >= 78
-            and price > vwap
-            and ema5_v > ema20_v
-            and ema20_v > ema60_v
-            and macd_v > macd_signal_v
-            and macd_gap > 0
-            and 48 <= rsi_v <= 65
-            and price_slope > 0
-            and ema20_slope >= 0
-            and volume_ratio >= 0.85
-            and bid_ratio >= 1.03
-            and not chase_long
-            and not vwap_too_far_long
-        )
-
-        # =========================
-        # SELL 條件：只做「弱勢反彈失敗」
-        # =========================
-
-        short_pass = (
-            ai_signal == "SELL"
-            and ai_score >= 78
-            and price < vwap
-            and ema5_v < ema20_v
-            and ema20_v < ema60_v
-            and macd_v < macd_signal_v
-            and macd_gap < 0
-            and 35 <= rsi_v <= 55
-            and price_slope < 0
-            and ema20_slope <= 0
-            and volume_ratio >= 0.85
-            and bid_ratio <= 0.98
-            and not chase_short
-            and not vwap_too_far_short
-        )
-
-        # =========================
-        # 額外防守：量能不足直接不做
-        # =========================
+        weak_volume = volume_ratio < 0.70
 
         if weak_volume:
             return DecisionEngine._base_decision(
@@ -251,67 +210,147 @@ class DecisionEngine:
             )
 
         # =========================
-        # 輸出決策
+        # 五檔濾網
+        # 歷史回測沒有五檔，bid_ratio 通常會是 1.0
+        # 這種情況不能用五檔擋掉訊號
+        # =========================
+
+        has_orderbook_signal = (
+            bid_ratio >= 1.03
+            or bid_ratio <= 0.98
+        )
+
+        if has_orderbook_signal:
+            long_orderbook_ok = bid_ratio >= 1.03
+            short_orderbook_ok = bid_ratio <= 0.98
+        else:
+            long_orderbook_ok = True
+            short_orderbook_ok = True
+
+        # =========================
+        # BUY 條件
+        # 回測沒有五檔時，也能正常出訊號
+        # =========================
+
+        long_pass = (
+            ai_signal == "BUY"
+            and ai_score >= 65
+            and price > vwap
+            and ema5_v > ema20_v
+            and ema20_v >= ema60_v
+            and macd_v > macd_signal_v
+            and macd_gap > 0
+            and 45 <= rsi_v <= 68
+            and price_slope > 0
+            and ema20_slope >= -0.03
+            and volume_ratio >= 0.70
+            and long_orderbook_ok
+            and not chase_long
+            and not vwap_too_far_long
+        )
+
+        # =========================
+        # SELL 條件
+        # 回測沒有五檔時，也能正常出訊號
+        # =========================
+
+        short_pass = (
+            ai_signal == "SELL"
+            and ai_score >= 65
+            and price < vwap
+            and ema5_v < ema20_v
+            and ema20_v <= ema60_v
+            and macd_v < macd_signal_v
+            and macd_gap < 0
+            and 32 <= rsi_v <= 58
+            and price_slope < 0
+            and ema20_slope <= 0.03
+            and volume_ratio >= 0.70
+            and short_orderbook_ok
+            and not chase_short
+            and not vwap_too_far_short
+        )
+
+        # =========================
+        # 輸出 BUY
         # =========================
 
         if long_pass:
-            stop_loss = price * 0.993
-            take_profit = price * 1.015
+            stop_loss = price * 0.994
+            take_profit = price * 1.010
 
             return {
                 "action": "BUY",
                 "score": min(100, ai_score),
                 "title": "防守型做多",
-                "reason": "多方趨勢成立，且未明顯追高",
+                "reason": "多方條件成立，且未明顯追高",
                 "reasons": [
                     "價格站上 VWAP",
-                    "EMA 多頭排列",
+                    "EMA 多方結構",
                     "MACD 多方",
                     "RSI 未過熱",
                     "非追高區",
                     "量能通過",
+                    "五檔條件通過或回測模式略過五檔",
                 ],
                 "entry_price": price,
                 "stop_loss": round(stop_loss, 2),
                 "take_profit": round(take_profit, 2),
-                "risk_reward": round((take_profit - price) / max(price - stop_loss, 0.01), 2),
+                "risk_reward": round(
+                    (take_profit - price) / max(price - stop_loss, 0.01),
+                    2,
+                ),
                 "rebound": ai.get("rebound_prob", 55),
                 "multi_period_status": "防守多方",
                 "multi_period": {},
             }
 
+        # =========================
+        # 輸出 SELL
+        # =========================
+
         if short_pass:
-            stop_loss = price * 1.007
-            take_profit = price * 0.985
+            stop_loss = price * 1.006
+            take_profit = price * 0.990
 
             return {
                 "action": "SELL",
                 "score": min(100, ai_score),
                 "title": "防守型做空",
-                "reason": "空方趨勢成立，且未明顯追空",
+                "reason": "空方條件成立，且未明顯追空",
                 "reasons": [
                     "價格跌破 VWAP",
-                    "EMA 空頭排列",
+                    "EMA 空方結構",
                     "MACD 空方",
                     "RSI 未過低",
                     "非追空區",
                     "量能通過",
+                    "五檔條件通過或回測模式略過五檔",
                 ],
                 "entry_price": price,
                 "stop_loss": round(stop_loss, 2),
                 "take_profit": round(take_profit, 2),
-                "risk_reward": round((price - take_profit) / max(stop_loss - price, 0.01), 2),
+                "risk_reward": round(
+                    (price - take_profit) / max(stop_loss - price, 0.01),
+                    2,
+                ),
                 "rebound": ai.get("rebound_prob", 45),
                 "multi_period_status": "防守空方",
                 "multi_period": {},
             }
 
+        # =========================
+        # WAIT
+        # =========================
+
         block_reasons = [
             f"AI 訊號：{ai_signal}",
             f"AI 分數：{ai_score}",
             f"VWAP 距離：{round(vwap_gap, 2)}%",
+            f"EMA 差距：{round(ema_gap, 3)}%",
             f"量能倍率：{round(volume_ratio, 2)}",
             f"RSI：{round(rsi_v, 1)}",
+            f"價格斜率：{round(price_slope, 3)}%",
             "未通過防守型進場條件",
         ]
 
@@ -326,6 +365,9 @@ class DecisionEngine:
 
         if vwap_too_far_short:
             block_reasons.append("價格離 VWAP 過遠，不追空")
+
+        if not has_orderbook_signal:
+            block_reasons.append("目前為回測或五檔中性，已略過五檔必要條件")
 
         return {
             "action": "WAIT",
