@@ -551,9 +551,164 @@ def _render_chart_toolbar(
     )
 
 
+def _build_signal_points(x, prices, vwaps, ema5, ema20, macd_line, signal_line, decision=None):
+    buy_x = []
+    buy_y = []
+    buy_text = []
+
+    sell_x = []
+    sell_y = []
+    sell_text = []
+
+    n = len(prices)
+
+    for i in range(1, n):
+        p0 = _safe_float(prices[i - 1])
+        p1 = _safe_float(prices[i])
+
+        v0 = _safe_float(vwaps[i - 1]) if i - 1 < len(vwaps) else p0
+        v1 = _safe_float(vwaps[i]) if i < len(vwaps) else p1
+
+        e5 = _safe_float(ema5[i]) if i < len(ema5) else p1
+        e20 = _safe_float(ema20[i]) if i < len(ema20) else p1
+
+        macd0 = _safe_float(macd_line[i - 1]) if i - 1 < len(macd_line) else 0
+        macd1 = _safe_float(macd_line[i]) if i < len(macd_line) else 0
+
+        sig0 = _safe_float(signal_line[i - 1]) if i - 1 < len(signal_line) else 0
+        sig1 = _safe_float(signal_line[i]) if i < len(signal_line) else 0
+
+        cross_vwap_up = p0 <= v0 and p1 > v1
+        cross_vwap_down = p0 >= v0 and p1 < v1
+
+        macd_cross_up = macd0 <= sig0 and macd1 > sig1
+        macd_cross_down = macd0 >= sig0 and macd1 < sig1
+
+        buy_signal = (
+            cross_vwap_up
+            and e5 >= e20
+        ) or (
+            macd_cross_up
+            and p1 >= v1
+            and e5 >= e20
+        )
+
+        sell_signal = (
+            cross_vwap_down
+            and e5 <= e20
+        ) or (
+            macd_cross_down
+            and p1 <= v1
+            and e5 <= e20
+        )
+
+        if buy_signal:
+            buy_x.append(x[i])
+            buy_y.append(p1)
+            buy_text.append("買進訊號")
+
+        if sell_signal:
+            sell_x.append(x[i])
+            sell_y.append(p1)
+            sell_text.append("賣出訊號")
+
+    decision = decision or {}
+    action = decision.get("action", "WAIT")
+    score = _safe_int(decision.get("score", 0))
+
+    if n >= 1 and score >= 65:
+        if action == "BUY":
+            buy_x.append(x[-1])
+            buy_y.append(prices[-1])
+            buy_text.append("即時買進訊號")
+
+        elif action == "SELL":
+            sell_x.append(x[-1])
+            sell_y.append(prices[-1])
+            sell_text.append("即時賣出訊號")
+
+    return {
+        "buy_x": buy_x,
+        "buy_y": buy_y,
+        "buy_text": buy_text,
+        "sell_x": sell_x,
+        "sell_y": sell_y,
+        "sell_text": sell_text,
+    }
+
+
+def _add_signal_markers(fig, x, prices, vwaps, ema5, ema20, macd_line, signal_line, decision=None):
+    signals = _build_signal_points(
+        x=x,
+        prices=prices,
+        vwaps=vwaps,
+        ema5=ema5,
+        ema20=ema20,
+        macd_line=macd_line,
+        signal_line=signal_line,
+        decision=decision,
+    )
+
+    if signals["buy_x"]:
+        fig.add_trace(
+            go.Scatter(
+                x=signals["buy_x"],
+                y=signals["buy_y"],
+                mode="markers+text",
+                name="買進訊號",
+                text=signals["buy_text"],
+                textposition="bottom center",
+                marker=dict(
+                    symbol="triangle-up",
+                    size=13,
+                    color=UP_COLOR,
+                    line=dict(
+                        color="#ffffff",
+                        width=0.5,
+                    ),
+                ),
+                textfont=dict(
+                    color=UP_COLOR,
+                    size=11,
+                ),
+                hovertemplate="買進訊號<br>%{x}<br>%{y:.2f}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+
+    if signals["sell_x"]:
+        fig.add_trace(
+            go.Scatter(
+                x=signals["sell_x"],
+                y=signals["sell_y"],
+                mode="markers+text",
+                name="賣出訊號",
+                text=signals["sell_text"],
+                textposition="top center",
+                marker=dict(
+                    symbol="triangle-down",
+                    size=13,
+                    color=DOWN_COLOR,
+                    line=dict(
+                        color="#ffffff",
+                        width=0.5,
+                    ),
+                ),
+                textfont=dict(
+                    color=DOWN_COLOR,
+                    size=11,
+                ),
+                hovertemplate="賣出訊號<br>%{x}<br>%{y:.2f}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+
+
 def _add_common_layout(fig, chart_key):
     fig.update_layout(
-        height=390,
+        height=430,
         margin=dict(
             l=12,
             r=12,
@@ -578,13 +733,14 @@ def _add_common_layout(fig, chart_key):
             ),
         ),
         hovermode="x unified",
-        bargap=0.18,
+        bargap=0.12,
         xaxis_rangeslider_visible=False,
     )
 
     for row in [1, 2, 3]:
         fig.update_xaxes(
-            showgrid=False,
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.045)",
             zeroline=False,
             showline=False,
             tickfont=dict(
@@ -596,7 +752,7 @@ def _add_common_layout(fig, chart_key):
         )
 
         fig.update_yaxes(
-            gridcolor="rgba(255,255,255,0.07)",
+            gridcolor="rgba(255,255,255,0.075)",
             zeroline=False,
             showline=False,
             tickfont=dict(
@@ -614,7 +770,7 @@ def _add_common_layout(fig, chart_key):
     )
 
 
-def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period):
+def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period, decision=None):
     n = len(clean_prices)
 
     current_price = clean_prices[-1]
@@ -673,7 +829,7 @@ def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period)
         rows=3,
         cols=1,
         shared_xaxes=True,
-        row_heights=[0.58, 0.22, 0.20],
+        row_heights=[0.60, 0.22, 0.18],
         vertical_spacing=0.025,
     )
 
@@ -681,15 +837,11 @@ def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period)
         go.Scatter(
             x=x,
             y=clean_prices,
-            mode="lines+markers" if n <= 8 else "lines",
+            mode="lines",
             name="Price",
             line=dict(
                 color=price_color,
-                width=2.4,
-            ),
-            marker=dict(
-                size=6,
-                color=price_color,
+                width=2.2,
             ),
         ),
         row=1,
@@ -742,13 +894,25 @@ def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period)
                 connectgaps=True,
                 line=dict(
                     color="#22c55e",
-                    width=1.8,
+                    width=1.7,
                     dash="dot",
                 ),
             ),
             row=1,
             col=1,
         )
+
+    _add_signal_markers(
+        fig=fig,
+        x=x,
+        prices=clean_prices,
+        vwaps=clean_vwap,
+        ema5=ema5,
+        ema20=ema20,
+        macd_line=macd_line,
+        signal_line=signal_line,
+        decision=decision,
+    )
 
     fig.add_hline(
         y=current_price,
@@ -786,7 +950,7 @@ def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period)
             name="Volume",
             marker=dict(
                 color=volume_colors,
-                opacity=0.72,
+                opacity=0.75,
             ),
         ),
         row=2,
@@ -869,51 +1033,11 @@ def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period)
     fig.update_yaxes(
         range=[
             0,
-            max(max_volume * 1.35, 1),
+            max(max_volume * 1.30, 1),
         ],
         row=2,
         col=1,
     )
-
-    if hist:
-        macd_high = max(
-            max(macd_line),
-            max(signal_line),
-            max(hist),
-        )
-        macd_low = min(
-            min(macd_line),
-            min(signal_line),
-            min(hist),
-        )
-
-        macd_padding = max(
-            (macd_high - macd_low) * 0.35,
-            0.01,
-        )
-
-        fig.update_yaxes(
-            range=[
-                macd_low - macd_padding,
-                macd_high + macd_padding,
-            ],
-            row=3,
-            col=1,
-        )
-
-    if n < 8:
-        fig.add_annotation(
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.62,
-            text="資料累積中",
-            showarrow=False,
-            font=dict(
-                color="rgba(255,255,255,0.35)",
-                size=18,
-            ),
-        )
 
     _add_common_layout(
         fig,
@@ -921,7 +1045,7 @@ def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period)
     )
 
 
-def _render_k_chart(ohlc, mode, period):
+def _render_k_chart(ohlc, mode, period, decision=None):
     x = ohlc["x"]
     opens = ohlc["open"]
     highs = ohlc["high"]
@@ -976,7 +1100,7 @@ def _render_k_chart(ohlc, mode, period):
         rows=3,
         cols=1,
         shared_xaxes=True,
-        row_heights=[0.58, 0.22, 0.20],
+        row_heights=[0.60, 0.22, 0.18],
         vertical_spacing=0.025,
     )
 
@@ -989,11 +1113,11 @@ def _render_k_chart(ohlc, mode, period):
             close=closes,
             name="K",
             increasing=dict(
-                line=dict(color=UP_COLOR, width=1.2),
+                line=dict(color=UP_COLOR, width=1.1),
                 fillcolor=UP_COLOR,
             ),
             decreasing=dict(
-                line=dict(color=DOWN_COLOR, width=1.2),
+                line=dict(color=DOWN_COLOR, width=1.1),
                 fillcolor=DOWN_COLOR,
             ),
         ),
@@ -1053,6 +1177,18 @@ def _render_k_chart(ohlc, mode, period):
         col=1,
     )
 
+    _add_signal_markers(
+        fig=fig,
+        x=x,
+        prices=closes,
+        vwaps=vwaps,
+        ema5=ema5,
+        ema20=ema20,
+        macd_line=macd_line,
+        signal_line=signal_line,
+        decision=decision,
+    )
+
     fig.add_hline(
         y=current_price,
         line=dict(
@@ -1089,7 +1225,7 @@ def _render_k_chart(ohlc, mode, period):
             name="Volume",
             marker=dict(
                 color=candle_colors,
-                opacity=0.72,
+                opacity=0.75,
             ),
         ),
         row=2,
@@ -1168,51 +1304,11 @@ def _render_k_chart(ohlc, mode, period):
     fig.update_yaxes(
         range=[
             0,
-            max(max_volume * 1.35, 1),
+            max(max_volume * 1.30, 1),
         ],
         row=2,
         col=1,
     )
-
-    if hist:
-        macd_high = max(
-            max(macd_line),
-            max(signal_line),
-            max(hist),
-        )
-        macd_low = min(
-            min(macd_line),
-            min(signal_line),
-            min(hist),
-        )
-
-        macd_padding = max(
-            (macd_high - macd_low) * 0.35,
-            0.01,
-        )
-
-        fig.update_yaxes(
-            range=[
-                macd_low - macd_padding,
-                macd_high + macd_padding,
-            ],
-            row=3,
-            col=1,
-        )
-
-    if n < 3:
-        fig.add_annotation(
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.62,
-            text="K線資料累積中",
-            showarrow=False,
-            font=dict(
-                color="rgba(255,255,255,0.35)",
-                size=18,
-            ),
-        )
 
     _add_common_layout(
         fig,
@@ -1220,7 +1316,14 @@ def _render_k_chart(ohlc, mode, period):
     )
 
 
-def render_chart(prices, volumes, vwap_values=None, time_values=None):
+def render_chart(
+    prices,
+    volumes,
+    vwap_values=None,
+    time_values=None,
+    decision=None,
+    trade_alert=None,
+):
     st.markdown("### 📈 分時 / K線 / VWAP / MACD")
 
     if not prices:
@@ -1242,6 +1345,7 @@ def render_chart(prices, volumes, vwap_values=None, time_values=None):
             ohlc=ohlc,
             mode=mode,
             period=period,
+            decision=decision,
         )
 
         return
@@ -1267,10 +1371,10 @@ def render_chart(prices, volumes, vwap_values=None, time_values=None):
         st.caption("尚無有效價格資料")
         return
 
-    clean_prices = clean_prices[-160:]
-    clean_volumes = clean_volumes[-160:]
-    clean_vwap = clean_vwap[-160:]
-    x = x[-160:]
+    clean_prices = clean_prices[-240:]
+    clean_volumes = clean_volumes[-240:]
+    clean_vwap = clean_vwap[-240:]
+    x = x[-240:]
 
     clean_volumes = [
         _to_lot(v)
@@ -1284,4 +1388,5 @@ def render_chart(prices, volumes, vwap_values=None, time_values=None):
         x=x,
         mode=mode,
         period=period,
+        decision=decision,
     )
