@@ -476,15 +476,15 @@ class SwingPredictionEngine:
         short_score = int(SwingPredictionEngine._clamp(short_score, 0, 100))
 
         long_valid = (
-            long_score >= 62
-            and predicted_up_pct >= cost_pct * 1.5
-            and long_rr >= 1.15
+            long_score >= 55
+            and predicted_up_pct >= cost_pct * 1.2
+            and long_rr >= 1.00
         )
 
         short_valid = (
-            short_score >= 62
-            and predicted_down_pct >= cost_pct * 1.5
-            and short_rr >= 1.15
+            short_score >= 55
+            and predicted_down_pct >= cost_pct * 1.2
+            and short_rr >= 1.00
         )
 
         long_edge = long_score + predicted_up_pct * 8 + long_rr * 4
