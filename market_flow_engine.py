@@ -2,16 +2,7 @@ from datetime import datetime, time
 
 
 class MarketFlowEngine:
-    """
-    統一管理：
-    1. quote 欄位格式
-    2. 歷史資料 append
-    3. price / volume / vwap / time 長度同步
-    4. 換股清空
-    5. 真實盤休市後不再用現在時間製造假 tick
-    """
-
-    FLOW_VERSION = "v2_stable_serial_no_after_close_moving"
+    FLOW_VERSION = "v3_sim_history_signal_ready"
 
     HISTORY_KEYS = [
         "price_history",
@@ -32,6 +23,7 @@ class MarketFlowEngine:
         "last_stock": None,
         "last_good_quote": None,
         "api_error_message": None,
+        "market_flow_version": None,
     }
 
     @staticmethod
@@ -57,7 +49,6 @@ class MarketFlowEngine:
                 else:
                     st.session_state[key] = default
 
-        # 部署新資料流版本後，自動清掉舊的錯誤歷史資料
         if st.session_state.get("market_flow_version") != MarketFlowEngine.FLOW_VERSION:
             keep_stock = st.session_state.get("last_stock", None)
 
@@ -96,20 +87,13 @@ class MarketFlowEngine:
 
     @staticmethod
     def is_tw_regular_session(now):
-        """
-        台股一般盤：週一到週五 09:00 ~ 13:30。
-        這裡只用來標示狀態，不拿來產生假 tick。
-        """
-
         if now is None:
             return False
 
         if now.weekday() >= 5:
             return False
 
-        current_time = now.time()
-
-        return time(9, 0) <= current_time <= time(13, 30)
+        return time(9, 0) <= now.time() <= time(13, 30)
 
     @staticmethod
     def normalize_levels(levels):
@@ -173,6 +157,19 @@ class MarketFlowEngine:
         return {}
 
     @staticmethod
+    def _to_datetime(value, fallback=None):
+        if isinstance(value, datetime):
+            return value
+
+        if value is None:
+            return fallback
+
+        try:
+            return datetime.fromisoformat(str(value))
+        except Exception:
+            return fallback
+
+    @staticmethod
     def _build_quote_fingerprint(
         stock_code,
         price,
@@ -183,11 +180,6 @@ class MarketFlowEngine:
         bids,
         asks,
     ):
-        """
-        真實盤沒有 serial 時，用行情本身做指紋。
-        重點：不能用現在時間，否則休市後每次 refresh 都會新增假 tick。
-        """
-
         bid_1_price = 0
         bid_1_size = 0
         ask_1_price = 0
@@ -257,19 +249,15 @@ class MarketFlowEngine:
             asks=asks,
         )
 
-        # 模擬盤要每次 tick 都可以動
         if data_source == "模擬盤":
-            if tick is not None:
-                return f"SIM|{stock_code}|tick={tick}|{fingerprint}"
+            if raw_serial is not None:
+                return f"SIM|{stock_code}|{raw_serial}"
 
-            return f"SIM|{stock_code}|{now.strftime('%H%M%S')}|{fingerprint}"
+            return f"SIM|{stock_code}|tick={tick}|{fingerprint}"
 
-        # 真實盤：優先用交易所 / API 給的交易時間或序號
         if raw_serial is not None:
             return f"REAL|{stock_code}|{raw_serial}|{fingerprint}"
 
-        # 真實盤沒有序號時，只能用 quote 指紋
-        # 不可以用 now，否則休市後走勢圖會一直新增假資料
         return f"REAL|{fingerprint}"
 
     @staticmethod
@@ -373,8 +361,10 @@ class MarketFlowEngine:
                 if MarketFlowEngine.is_tw_regular_session(now)
                 else "休市"
             )
+
         elif data_source == "模擬盤":
             market_status = "模擬"
+
         else:
             market_status = "未知"
 
@@ -394,12 +384,69 @@ class MarketFlowEngine:
         }
 
     @staticmethod
-    def append_history(st, price, volume, vwap, now, serial, max_len=500):
-        """
-        只有 serial 改變才新增歷史資料。
-        真實盤休市後 quote 沒變，serial 就不變，所以 chart 不會動。
-        """
+    def load_history_from_quote(st, quote, now, max_len=500):
+        history = quote.get("history", [])
 
+        if not history:
+            return False
+
+        prices = []
+        volumes = []
+        vwaps = []
+        times = []
+
+        for item in history[-max_len:]:
+            if not isinstance(item, dict):
+                continue
+
+            price = MarketFlowEngine.safe_float(
+                item.get("price")
+                or item.get("close")
+                or item.get("lastPrice")
+                or 0
+            )
+
+            if price <= 0:
+                continue
+
+            volume = MarketFlowEngine.safe_float(
+                item.get("volume")
+                or item.get("last_size")
+                or item.get("lastSize")
+                or 0
+            )
+
+            vwap = MarketFlowEngine.safe_float(
+                item.get("vwap")
+                or item.get("avgPrice")
+                or price
+            )
+
+            if vwap <= 0:
+                vwap = price
+
+            item_time = MarketFlowEngine._to_datetime(
+                item.get("time"),
+                fallback=now,
+            )
+
+            prices.append(price)
+            volumes.append(volume)
+            vwaps.append(vwap)
+            times.append(item_time)
+
+        if not prices:
+            return False
+
+        st.session_state.price_history = prices
+        st.session_state.volume_history = volumes
+        st.session_state.vwap_history = vwaps
+        st.session_state.time_history = times
+
+        return True
+
+    @staticmethod
+    def append_history(st, price, volume, vwap, now, serial, max_len=500):
         if st.session_state.get("last_serial") == serial:
             return False
 
@@ -482,14 +529,28 @@ class MarketFlowEngine:
             tick=st.session_state.get("tick", None),
         )
 
-        did_append = MarketFlowEngine.append_history(
-            st=st,
-            price=q["price"],
-            volume=q["volume"],
-            vwap=q["vwap"],
-            now=now,
-            serial=q["serial"],
-        )
+        did_load_history = False
+
+        if data_source == "模擬盤":
+            did_load_history = MarketFlowEngine.load_history_from_quote(
+                st=st,
+                quote=quote,
+                now=now,
+            )
+
+        if did_load_history:
+            st.session_state.last_serial = q["serial"]
+            did_append = True
+
+        else:
+            did_append = MarketFlowEngine.append_history(
+                st=st,
+                price=q["price"],
+                volume=q["volume"],
+                vwap=q["vwap"],
+                now=now,
+                serial=q["serial"],
+            )
 
         series = MarketFlowEngine.get_series(st)
 
