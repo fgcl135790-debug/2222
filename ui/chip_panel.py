@@ -257,6 +257,6 @@ def render_chip_panel(bids, asks, big_order_log, decision):
 
     components.html(
         html,
-        height=235,
+        height=205,
         scrolling=False,
     )
