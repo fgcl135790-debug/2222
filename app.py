@@ -13,6 +13,8 @@ from ui.header import render_header
 from ui.chart_panel import render_chart
 from ui.depth_panel import render_depth_panel
 from ui.decision_card import render_decision_card
+from ui.rebound_panel import render_rebound_panel
+from ui.chip_panel import render_chip_panel
 from ui.trade_alert_panel import render_trade_alert_panel
 from ui.power_panel import render_power_panel
 from ui.market_info_panel import render_market_info_panel
@@ -467,10 +469,14 @@ with main_right:
 
     render_decision_card(decision)
 
-    render_trade_alert_panel(trade_alert)
+    render_rebound_panel(
+        decision=decision,
+        trade_alert=trade_alert,
+    )
 
-    render_market_info_panel(
+    render_chip_panel(
         bids=bids,
         asks=asks,
         big_order_log=st.session_state.big_order_log,
+        decision=decision,
     )
