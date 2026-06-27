@@ -248,7 +248,7 @@ st.plotly_chart(
 )
 
 # =========================
-# 📋 五檔（V5.7 無價差版）
+# 📋 五檔
 # =========================
 
 render_orderbook(
@@ -256,5 +256,3 @@ render_orderbook(
     asks=asks,
 )
 
-# 🚨 關鍵修正（不是 markdown）
-components.html(html, height=260, scrolling=False)
