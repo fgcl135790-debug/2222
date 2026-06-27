@@ -37,11 +37,7 @@ class BacktestEngine:
             return None
 
     @staticmethod
-    def fetch_historical_candles(
-        api_key,
-        symbol,
-        timeframe="1",
-    ):
+    def fetch_historical_candles(api_key, symbol, timeframe="1"):
         url = f"{BacktestEngine.BASE_URL}/historical/candles/{symbol}"
 
         headers = {
@@ -58,14 +54,14 @@ class BacktestEngine:
             url,
             headers=headers,
             params=params,
-            timeout=20,
+            timeout=25,
         )
 
         if response.status_code == 401:
             raise RuntimeError("API KEY 無效或權限不足。")
 
         if response.status_code == 429:
-            raise RuntimeError("API 請求過多，稍後再試。")
+            raise RuntimeError("API 請求過多，請稍後再試。")
 
         if response.status_code >= 400:
             raise RuntimeError(
@@ -73,12 +69,14 @@ class BacktestEngine:
             )
 
         payload = response.json()
+        raw_data = payload.get("data", [])
 
-        data = payload.get("data", [])
+        if not isinstance(raw_data, list):
+            raise RuntimeError("Fugle 回傳格式異常：data 不是 list。")
 
         candles = []
 
-        for item in data:
+        for item in raw_data:
             dt = BacktestEngine._to_datetime(item.get("date"))
 
             if dt is None:
@@ -120,6 +118,33 @@ class BacktestEngine:
             days[candle["date"]].append(candle)
 
         return dict(days)
+
+    @staticmethod
+    def _select_days(days, day_scope):
+        valid_days = []
+
+        for day in sorted(days.keys()):
+            day_candles = days[day]
+
+            # 太少 K 線通常不是完整交易日，先跳過
+            if len(day_candles) >= 60:
+                valid_days.append(
+                    {
+                        "date": day,
+                        "candles": day_candles,
+                    }
+                )
+
+        if not valid_days:
+            return []
+
+        if day_scope == "last_open_day":
+            return [valid_days[-1]]
+
+        if day_scope == "recent_5_days":
+            return valid_days[-5:]
+
+        return valid_days
 
     @staticmethod
     def _build_series(candles):
@@ -165,7 +190,7 @@ class BacktestEngine:
         macd, macd_signal, _ = MarketAnalyzer.calculate_macd(prices)
         momentum = MarketAnalyzer.momentum(prices)
 
-        # 歷史 K 沒有五檔，所以回測先用中性買賣比
+        # 歷史 K 沒有五檔，回測先用中性值
         bid_ratio = 1.0
 
         ai = AIPredictor.predict_trade(
@@ -230,7 +255,6 @@ class BacktestEngine:
             0,
         )
 
-        # 如果 decision 沒給合理停損停利，就用固定比例
         if action == "BUY":
             if stop_loss <= 0 or stop_loss >= entry_price:
                 stop_loss = entry_price * 0.994
@@ -338,11 +362,12 @@ class BacktestEngine:
             )
         )
 
-        profit_factor = (
-            gross_profit / gross_loss
-            if gross_loss > 0
-            else math.inf if gross_profit > 0 else 0
-        )
+        if gross_loss > 0:
+            profit_factor = gross_profit / gross_loss
+        elif gross_profit > 0:
+            profit_factor = 999
+        else:
+            profit_factor = 0
 
         equity = 0
         peak = 0
@@ -411,6 +436,7 @@ class BacktestEngine:
         avoid_open_minutes=15,
         cooldown_bars=5,
         max_hold_bars=45,
+        day_scope="last_open_day",
     ):
         candles = BacktestEngine.fetch_historical_candles(
             api_key=api_key,
@@ -427,18 +453,44 @@ class BacktestEngine:
             }
 
         days = BacktestEngine._group_by_day(candles)
+        selected_days = BacktestEngine._select_days(
+            days=days,
+            day_scope=day_scope,
+        )
+
+        if not selected_days:
+            return {
+                "ok": False,
+                "message": "沒有找到足夠 K 線的開市日。",
+                "summary": {},
+                "trades": [],
+                "candles": len(candles),
+                "days": len(days),
+            }
 
         trades = []
 
-        for day, day_candles in days.items():
+        try:
+            timeframe_int = max(1, int(timeframe))
+        except Exception:
+            timeframe_int = 1
+
+        avoid_bars = max(
+            0,
+            math.ceil(avoid_open_minutes / timeframe_int),
+        )
+
+        for day_item in selected_days:
+            day = day_item["date"]
+            day_candles = day_item["candles"]
+
             if len(day_candles) < 60:
                 continue
 
-            i = max(30, avoid_open_minutes)
+            i = max(30, avoid_bars)
 
             while i < len(day_candles) - 2:
                 current_candles = day_candles[: i + 1]
-
                 decision = BacktestEngine._make_decision(current_candles)
 
                 if not decision:
@@ -511,14 +563,22 @@ class BacktestEngine:
                 i = exit_index + cooldown_bars
 
         summary = BacktestEngine._summarize(trades)
+        selected_day_names = [d["date"] for d in selected_days]
+
+        message = "回測完成"
+
+        if not trades:
+            message = "回測完成，但沒有符合條件的交易。可以降低 Score 或取消多週期共振。"
 
         return {
             "ok": True,
-            "message": "回測完成",
+            "message": message,
             "symbol": symbol,
             "timeframe": timeframe,
             "candles": len(candles),
-            "days": len(days),
+            "all_days": len(days),
+            "days": len(selected_days),
+            "selected_days": selected_day_names,
             "summary": summary,
             "trades": trades,
         }
