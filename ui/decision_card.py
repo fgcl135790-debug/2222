@@ -1,4 +1,5 @@
 import streamlit as st
+import plotly.graph_objects as go
 
 
 def render_decision_card(decision):
@@ -39,42 +40,88 @@ def render_decision_card(decision):
 
     st.subheader("🎯 交易決策")
 
-    st.markdown(
-        f"""
-<div style="
-background:#111827;
-padding:18px;
-border-radius:14px;
-border:1px solid rgba(255,255,255,0.08);
-">
+# ==========================
+# Gauge
+# ==========================
 
-<h2 style="color:{color};margin:0;">
-{text}
-</h2>
+fig = go.Figure(
+    go.Indicator(
+        mode="gauge+number",
+        value=score,
+        number={
+            "suffix": "%",
+            "font": {
+                "size": 34
+            }
+        },
+        title={
+            "text": "AI Decision"
+        },
+        gauge={
 
-<hr>
+            "axis": {
+                "range": [0,100]
+            },
 
-<b>決策分數：</b> {score}<br><br>
+            "bar": {
+                "color": color
+            },
 
-<b>進場：</b> {entry}<br>
+            "steps":[
 
-<b>停損：</b> {stop}<br>
+                {
+                    "range":[0,40],
+                    "color":"#3b0d0d"
+                },
 
-<b>停利：</b> {target}<br>
+                {
+                    "range":[40,60],
+                    "color":"#3f3f3f"
+                },
 
-<b>RR：</b> {rr}
+                {
+                    "range":[60,100],
+                    "color":"#083d17"
+                }
 
-<hr>
-
-<b>判斷依據</b>
-
-<ul>
-"""
-        + "".join([f"<li>{r}</li>" for r in reasons])
-        + """
-</ul>
-
-</div>
-""",
-        unsafe_allow_html=True,
+            ]
+        }
     )
+)
+
+fig.update_layout(
+
+    height=230,
+
+    margin=dict(
+        l=10,
+        r=10,
+        t=20,
+        b=0
+    )
+
+)
+
+st.plotly_chart(
+    fig,
+    use_container_width=True
+)
+
+st.markdown(
+    f"## <span style='color:{color}'>{text}</span>",
+    unsafe_allow_html=True
+)
+
+st.write(f"**進場：** {entry}")
+
+st.write(f"**停損：** {stop}")
+
+st.write(f"**停利：** {target}")
+
+st.write(f"**RR：** {rr}")
+
+st.caption("判斷依據")
+
+for r in reasons:
+
+    st.write("•", r)
