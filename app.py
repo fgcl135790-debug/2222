@@ -12,6 +12,7 @@ from charts import ChartBuilder
 from ui.header import render_header
 from ui.ai_panel import render_ai_panel
 from ui.orderbook import render_orderbook
+from ui.radar import render_radar
 
 from streamlit_autorefresh import st_autorefresh
 
@@ -223,32 +224,10 @@ render_ai_panel(
 # 📡 主力雷達（台股正確顏色版）
 # =========================
 
-st.subheader("📡 主力雷達")
-
-bid_ratio = sum([b["size"] for b in bids]) / max(sum([a["size"] for a in asks]), 1)
-
-# 🟢 偏多 = 紅色（台股漲）
-if bid_ratio > 1.3:
-    st.markdown("""
-    <div style="color:#ff1744;font-weight:700;">
-        🔴 主力吃貨（偏多）
-    </div>
-    """, unsafe_allow_html=True)
-
-# 🔴 偏空 = 綠色（台股跌）
-elif bid_ratio < 0.8:
-    st.markdown("""
-    <div style="color:#00e676;font-weight:700;">
-        🟢 主力出貨（偏空）
-    </div>
-    """, unsafe_allow_html=True)
-
-else:
-    st.markdown("""
-    <div style="color:#ffc107;font-weight:700;">
-        🟡 籌碼平衡
-    </div>
-    """, unsafe_allow_html=True)
+render_radar(
+    bids=bids,
+    asks=asks,
+)
 
 # =========================
 # 📈 走勢圖（安全版）
