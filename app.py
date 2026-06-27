@@ -16,6 +16,7 @@ from ui.radar import render_radar
 from ui.chart_panel import render_chart
 from streamlit_autorefresh import st_autorefresh
 from ui.sidebar import render_sidebar
+from core.data_engine import get_market_data
 
 
 # =========================
@@ -88,19 +89,21 @@ st_autorefresh(interval=refresh_sec * 1000, key="v55")
 # =========================
 # 📡 取得資料
 # =========================
-if data_source == "真實盤":
-    if not api_key:
-        st.warning("請輸入 API KEY")
-        st.stop()
 
-    provider = FugleProvider(api_key)
-    quote = provider.get_quote(stock_code)
+if data_source == "真實盤" and not api_key:
+    st.warning("請輸入 API KEY")
+    st.stop()
 
-else:
-    engine = SimulationEngine(mode="normal", base_price=100)
-    quote = engine.generate(st.session_state.tick, 300)
+quote = get_market_data(
+    data_source=data_source,
+    api_key=api_key,
+    stock_code=stock_code,
+    tick=st.session_state.tick,
+)
+
+# 模擬盤才累加 Tick
+if data_source == "模擬盤":
     st.session_state.tick += 1
-
 
 # =========================
 # 📊 Quote解析
