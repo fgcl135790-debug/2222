@@ -11,6 +11,7 @@ from alert_engine import AlertEngine
 
 from ui.header import render_header
 from ui.chart_panel import render_chart
+from ui.depth_panel import render_depth_panel
 from ui.decision_card import render_decision_card
 from ui.trade_alert_panel import render_trade_alert_panel
 from ui.power_panel import render_power_panel
@@ -449,18 +450,11 @@ with main_left:
         volumes=volumes,
     )
 
-    bottom_left, bottom_right = st.columns([1, 1])
-
-    with bottom_left:
-
-        render_orderbook(
-            bids=bids,
-            asks=asks,
-        )
-
-    with bottom_right:
-
-        render_power_panel(decision)
+render_depth_panel(
+    bids=bids,
+    asks=asks,
+    decision=decision,
+)
 
 
 # =========================
