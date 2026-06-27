@@ -22,70 +22,88 @@ html, body, [data-testid="stAppViewContainer"] {
     background: #080c13;
 }
 
+/* Streamlit 上方列 */
 header[data-testid="stHeader"] {
     background: #080c13;
-    height: 40px;
+    height: 38px;
 }
 
+/* 主內容寬度 */
 .block-container {
-    max-width: 1760px;
-    padding: 2.25rem 0.55rem 0.6rem 0.55rem !important;
+    max-width: 1840px;
+    padding: 2.05rem 0.55rem 0.6rem 0.55rem !important;
 }
 
+/* 壓縮標題 */
 h1, h2, h3 {
     font-size: 14px !important;
     margin-top: 0 !important;
-    margin-bottom: 0.18rem !important;
+    margin-bottom: 0.16rem !important;
 }
 
+/* 全域字體 */
 p, div, span {
     font-size: 12px;
 }
 
+/* 壓縮垂直間距 */
 div[data-testid="stVerticalBlock"] {
-    gap: 0.22rem;
+    gap: 0.20rem;
 }
 
+/* 壓縮左右欄位間距 */
 div[data-testid="stHorizontalBlock"] {
-    gap: 0.45rem;
+    gap: 0.40rem;
 }
 
+/* 分隔線 */
 hr {
-    margin: 0.18rem 0 !important;
+    margin: 0.16rem 0 !important;
     border-color: rgba(255,255,255,0.07) !important;
 }
 
-.stTabs [data-baseweb="tab-list"] {
-    gap: 3px;
-}
-
-.stTabs [data-baseweb="tab"] {
-    height: 28px;
-    padding: 2px 7px;
-    font-size: 11.5px;
-}
-
-.stDataFrame {
-    font-size: 11.5px;
-}
-
+/* 側邊欄 */
 [data-testid="stSidebar"] {
     background: #0b111c;
 }
 
+/* 按鈕 */
 button[kind="secondary"] {
     height: 28px;
     padding: 2px 8px;
 }
 
+/* Plotly 工具列縮小 */
 .modebar {
-    transform: scale(0.8);
+    transform: scale(0.78);
     transform-origin: top right;
 }
 
+/* 表格 */
+.stDataFrame {
+    font-size: 11.5px;
+}
+
+/* Expander 壓縮 */
+[data-testid="stExpander"] {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.025);
+}
+
+[data-testid="stExpander"] details {
+    padding: 0;
+}
+
+/* 隱藏 footer */
+footer {
+    visibility: hidden;
+}
+
+/* 手機版 */
 @media (max-width: 900px) {
     .block-container {
-        padding: 2.2rem 0.45rem 0.6rem 0.45rem !important;
+        padding: 2.0rem 0.45rem 0.6rem 0.45rem !important;
     }
 
     h1, h2, h3 {
@@ -439,7 +457,10 @@ def main():
     # V7.5 Dashboard Layout
     # =========================
 
-    main_left, main_right = st.columns([1.72, 1])
+    main_left, main_right = st.columns(
+        [1.92, 0.92],
+        gap="small",
+    )
 
     # =========================
     # 左側：主圖 + 唯一五檔 / 多空區
