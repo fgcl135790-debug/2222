@@ -1,4 +1,3 @@
-import streamlit as st
 import streamlit.components.v1 as components
 from html import escape
 
@@ -118,190 +117,195 @@ def render_header(
     force_color, force_title, force_sub = _force_style(bid_ratio)
     status_color, status_title, status_sub = _status_style(signal, state)
 
-    # =========================
-    # 原生 Topbar：避免 components iframe 吃掉
-    # =========================
-
-    st.markdown(
-        f"""
-        <div style="
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            margin:0 0 8px 0;
-            padding:0 2px;
-        ">
-            <div style="
-                display:flex;
-                align-items:center;
-                gap:8px;
-                font-size:17px;
-                font-weight:900;
-                color:{TEXT};
-            ">
-                🏦 {name} ({stock_code})
-                <span style="color:#facc15;">★</span>
-            </div>
-
-            <div style="
-                display:flex;
-                align-items:center;
-                gap:14px;
-                color:{SUBTEXT};
-                font-size:12px;
-                white-space:nowrap;
-            ">
-                <span>◎ {source_text} {time_text}</span>
-                <span>
-                    <span style="
-                        display:inline-block;
-                        width:8px;
-                        height:8px;
-                        border-radius:99px;
-                        background:{conn_color};
-                        box-shadow:0 0 8px {conn_color};
-                        margin-right:5px;
-                    "></span>
-                    {connection_status}
-                </span>
-                <span>⚙ 設定</span>
-                <span>🔔 聲音警示</span>
-                <span>自訂布局</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # =========================
-    # 狀態卡片
-    # =========================
-
     html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            body {{
-                margin: 0;
-                padding: 0;
-                background: transparent;
-                font-family: Arial, "Microsoft JhengHei", sans-serif;
-                color: {TEXT};
-            }}
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            font-family: Arial, "Microsoft JhengHei", sans-serif;
+            color: {TEXT};
+            overflow: hidden;
+        }}
 
+        .topbar {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 9px;
+            height: 24px;
+        }}
+
+        .title {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 17px;
+            font-weight: 900;
+            color: {TEXT};
+            white-space: nowrap;
+        }}
+
+        .star {{
+            color: #facc15;
+            font-size: 16px;
+        }}
+
+        .meta {{
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            color: {SUBTEXT};
+            font-size: 12px;
+            white-space: nowrap;
+        }}
+
+        .dot {{
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 99px;
+            background: {conn_color};
+            box-shadow: 0 0 8px {conn_color};
+            margin-right: 5px;
+        }}
+
+        .grid {{
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 10px;
+            width: 100%;
+        }}
+
+        .card {{
+            background: {CARD_BG};
+            border: 1px solid {CARD_BORDER};
+            border-radius: 12px;
+            padding: 11px 13px;
+            min-height: 78px;
+            box-sizing: border-box;
+        }}
+
+        .label {{
+            color: {SUBTEXT};
+            font-size: 12px;
+            margin-bottom: 6px;
+        }}
+
+        .value {{
+            font-size: 25px;
+            line-height: 1.05;
+            font-weight: 900;
+            margin-bottom: 6px;
+        }}
+
+        .midvalue {{
+            font-size: 20px;
+            line-height: 1.1;
+            font-weight: 900;
+            margin-bottom: 6px;
+        }}
+
+        .sub {{
+            color: {SUBTEXT};
+            font-size: 11px;
+            font-weight: 600;
+        }}
+
+        .bar {{
+            width: 100%;
+            height: 7px;
+            background: rgba(255,255,255,0.12);
+            border-radius: 999px;
+            overflow: hidden;
+            margin-top: 8px;
+        }}
+
+        .bar-fill {{
+            height: 100%;
+            border-radius: 999px;
+        }}
+
+        @media (max-width: 900px) {{
             .grid {{
-                display: grid;
-                grid-template-columns: repeat(6, 1fr);
-                gap: 10px;
-                width: 100%;
+                grid-template-columns: repeat(2, 1fr);
             }}
 
-            .card {{
-                background: {CARD_BG};
-                border: 1px solid {CARD_BORDER};
-                border-radius: 12px;
-                padding: 11px 13px;
-                min-height: 76px;
-                box-sizing: border-box;
+            .meta .hide-mobile {{
+                display: none;
             }}
+        }}
+    </style>
+</head>
 
-            .label {{
-                color: {SUBTEXT};
-                font-size: 12px;
-                margin-bottom: 6px;
-            }}
+<body>
 
-            .value {{
-                font-size: 25px;
-                line-height: 1.05;
-                font-weight: 900;
-                margin-bottom: 6px;
-            }}
-
-            .midvalue {{
-                font-size: 20px;
-                line-height: 1.1;
-                font-weight: 900;
-                margin-bottom: 6px;
-            }}
-
-            .sub {{
-                color: {SUBTEXT};
-                font-size: 11px;
-                font-weight: 600;
-            }}
-
-            .bar {{
-                width: 100%;
-                height: 7px;
-                background: rgba(255,255,255,0.12);
-                border-radius: 999px;
-                overflow: hidden;
-                margin-top: 8px;
-            }}
-
-            .bar-fill {{
-                height: 100%;
-                border-radius: 999px;
-            }}
-
-            @media (max-width: 900px) {{
-                .grid {{
-                    grid-template-columns: repeat(2, 1fr);
-                }}
-            }}
-        </style>
-    </head>
-
-    <body>
-        <div class="grid">
-
-            <div class="card">
-                <div class="label">現價</div>
-                <div class="value" style="color:{UP_COLOR};">{price:.2f}</div>
-                <div class="sub">即時價</div>
-            </div>
-
-            <div class="card">
-                <div class="label">AI信心</div>
-                <div class="value" style="color:#38bdf8;">{score}%</div>
-                <div class="bar">
-                    <div class="bar-fill" style="width:{score}%; background:#22c55e;"></div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="label">反彈機率</div>
-                <div class="value" style="color:{rebound_color};">{rebound}%</div>
-                <div class="sub">偏多反彈</div>
-            </div>
-
-            <div class="card">
-                <div class="label">主力動向</div>
-                <div class="midvalue" style="color:{force_color};">{force_title}</div>
-                <div class="sub">{force_sub}</div>
-            </div>
-
-            <div class="card">
-                <div class="label">風險等級</div>
-                <div class="midvalue" style="color:{risk_color};">{risk_title}</div>
-                <div class="sub">{risk_sub}</div>
-            </div>
-
-            <div class="card">
-                <div class="label">狀態</div>
-                <div class="midvalue" style="color:{status_color};">{status_title}</div>
-                <div class="sub">{status_sub}</div>
-            </div>
-
+    <div class="topbar">
+        <div class="title">
+            🏦 {name} ({stock_code})
+            <span class="star">★</span>
         </div>
-    </body>
-    </html>
-    """
+
+        <div class="meta">
+            <span>◎ {source_text} {time_text}</span>
+            <span><span class="dot"></span>{connection_status}</span>
+            <span class="hide-mobile">⚙ 設定</span>
+            <span class="hide-mobile">🔔 聲音警示</span>
+            <span class="hide-mobile">自訂布局</span>
+        </div>
+    </div>
+
+    <div class="grid">
+
+        <div class="card">
+            <div class="label">現價</div>
+            <div class="value" style="color:{UP_COLOR};">{price:.2f}</div>
+            <div class="sub">即時價</div>
+        </div>
+
+        <div class="card">
+            <div class="label">AI信心</div>
+            <div class="value" style="color:#38bdf8;">{score}%</div>
+            <div class="bar">
+                <div class="bar-fill" style="width:{score}%; background:#22c55e;"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="label">反彈機率</div>
+            <div class="value" style="color:{rebound_color};">{rebound}%</div>
+            <div class="sub">偏多反彈</div>
+        </div>
+
+        <div class="card">
+            <div class="label">主力動向</div>
+            <div class="midvalue" style="color:{force_color};">{force_title}</div>
+            <div class="sub">{force_sub}</div>
+        </div>
+
+        <div class="card">
+            <div class="label">風險等級</div>
+            <div class="midvalue" style="color:{risk_color};">{risk_title}</div>
+            <div class="sub">{risk_sub}</div>
+        </div>
+
+        <div class="card">
+            <div class="label">狀態</div>
+            <div class="midvalue" style="color:{status_color};">{status_title}</div>
+            <div class="sub">{status_sub}</div>
+        </div>
+
+    </div>
+
+</body>
+</html>
+"""
 
     components.html(
         html,
-        height=92,
+        height=118,
         scrolling=False,
     )
