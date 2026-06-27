@@ -129,6 +129,7 @@ def render_decision_card(decision):
         st.plotly_chart(
             fig,
             use_container_width=True
+            key=f"decision_gauge_{action}_{score}_{entry}_{stop}_{target}"
         )
 
     st.divider()
