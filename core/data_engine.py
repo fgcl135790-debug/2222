@@ -1,30 +1,33 @@
-from fugle_provider import FugleProvider
 from simulation_engine import SimulationEngine
+from fugle_provider import FugleProvider
 
 
 def get_market_data(
     data_source,
-    api_key,
-    stock_code,
-    tick,
+    api_key=None,
+    stock_code="2330",
+    tick=0,
+    mode="一般波動",
 ):
+    """
+    統一資料入口：
+    - 真實盤：Fugle REST
+    - 模擬盤：SimulationEngine
+    """
+
+    if data_source == "模擬盤":
+        return SimulationEngine.get_quote(
+            stock_code=stock_code,
+            tick=tick,
+            scenario=mode or "一般波動",
+        )
 
     if data_source == "真實盤":
+        if not api_key:
+            raise ValueError("missing api_key")
 
         provider = FugleProvider(api_key)
 
-        quote = provider.get_quote(stock_code)
+        return provider.get_quote(stock_code)
 
-    else:
-
-        engine = SimulationEngine(
-            mode="normal",
-            base_price=100,
-        )
-
-        quote = engine.generate(
-            tick,
-            300,
-        )
-
-    return quote
+    raise ValueError(f"unknown data_source: {data_source}")
