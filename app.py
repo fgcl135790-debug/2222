@@ -6,6 +6,7 @@ from market_analyzer import MarketAnalyzer
 from ai_predictor import AIPredictor
 from decision_engine import DecisionEngine
 from big_order_engine import BigOrderEngine
+from trade_alert_engine import TradeAlertEngine
 
 from ui.header import render_header
 from ui.ai_panel import render_ai_panel
@@ -13,6 +14,7 @@ from ui.orderbook import render_orderbook
 from ui.radar import render_radar
 from ui.chart_panel import render_chart
 from ui.decision_card import render_decision_card
+from ui.trade_alert_panel import render_trade_alert_panel
 from ui.power_panel import render_power_panel
 from ui.sidebar import render_sidebar
 from ui.big_order_panel import render_big_order_panel
@@ -264,6 +266,11 @@ decision = DecisionEngine.generate(
     volumes=volumes,
 )
 
+trade_alert = TradeAlertEngine.track(
+    decision=decision,
+    price=price,
+)
+
 # =========================
 # Header
 # =========================
@@ -310,6 +317,10 @@ with left:
 with right:
 
     render_decision_card(decision)
+
+    st.divider()
+
+    render_trade_alert_panel(trade_alert)
 
     st.divider()
 
