@@ -165,6 +165,7 @@ def reset_state():
     st.session_state.price_history = []
     st.session_state.volume_history = []
     st.session_state.vwap_history = []
+    st.session_state.time_history = []
     st.session_state.big_order_log = []
     st.session_state.tick = 0
     st.session_state.last_serial = None
@@ -174,7 +175,7 @@ def reset_state():
 
 
 def init_session_state():
-    for k in ["price_history", "volume_history", "vwap_history"]:
+    for k in ["price_history", "volume_history", "vwap_history", "time_history"]:
         if k not in st.session_state:
             st.session_state[k] = []
 
@@ -311,16 +312,18 @@ def main():
         st.session_state.price_history.append(price)
         st.session_state.volume_history.append(volume)
         st.session_state.vwap_history.append(vwap)
-
+        st.session_state.time_history.append(now)
+        
         if len(st.session_state.price_history) > 500:
             st.session_state.price_history = st.session_state.price_history[-500:]
             st.session_state.volume_history = st.session_state.volume_history[-500:]
             st.session_state.vwap_history = st.session_state.vwap_history[-500:]
-
+            st.session_state.time_history = st.session_state.time_history[-500:]
+            
     prices = st.session_state.price_history
     volumes = st.session_state.volume_history
     vwaps = st.session_state.vwap_history
-    times = st.session_state.time_history
+    times = st.session_state.get("time_history", [])
     
     # =========================
     # 主力大單偵測
