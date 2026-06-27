@@ -327,18 +327,22 @@ def _aggregate_ohlc(prices, volumes, vwaps, times, period):
 
 def _select_control(label, options, default, key):
     if hasattr(st, "segmented_control"):
-        value = st.segmented_control(
-            label,
-            options,
-            default=default,
-            key=key,
-            label_visibility="collapsed",
-        )
+        try:
+            value = st.segmented_control(
+                label,
+                options,
+                default=default,
+                key=key,
+                label_visibility="collapsed",
+            )
 
-        if value is None:
-            return default
+            if value is None:
+                return default
 
-        return value
+            return value
+
+        except TypeError:
+            pass
 
     return st.radio(
         label,
@@ -551,7 +555,16 @@ def _render_chart_toolbar(
     )
 
 
-def _build_signal_points(x, prices, vwaps, ema5, ema20, macd_line, signal_line, decision=None):
+def _build_signal_points(
+    x,
+    prices,
+    vwaps,
+    ema5,
+    ema20,
+    macd_line,
+    signal_line,
+    decision=None,
+):
     buy_x = []
     buy_y = []
     buy_text = []
@@ -585,21 +598,15 @@ def _build_signal_points(x, prices, vwaps, ema5, ema20, macd_line, signal_line, 
         macd_cross_down = macd0 >= sig0 and macd1 < sig1
 
         buy_signal = (
-            cross_vwap_up
-            and e5 >= e20
+            cross_vwap_up and e5 >= e20
         ) or (
-            macd_cross_up
-            and p1 >= v1
-            and e5 >= e20
+            macd_cross_up and p1 >= v1 and e5 >= e20
         )
 
         sell_signal = (
-            cross_vwap_down
-            and e5 <= e20
+            cross_vwap_down and e5 <= e20
         ) or (
-            macd_cross_down
-            and p1 <= v1
-            and e5 <= e20
+            macd_cross_down and p1 <= v1 and e5 <= e20
         )
 
         if buy_signal:
@@ -627,17 +634,29 @@ def _build_signal_points(x, prices, vwaps, ema5, ema20, macd_line, signal_line, 
             sell_y.append(prices[-1])
             sell_text.append("即時賣出訊號")
 
+    max_marks = 8
+
     return {
-        "buy_x": buy_x,
-        "buy_y": buy_y,
-        "buy_text": buy_text,
-        "sell_x": sell_x,
-        "sell_y": sell_y,
-        "sell_text": sell_text,
+        "buy_x": buy_x[-max_marks:],
+        "buy_y": buy_y[-max_marks:],
+        "buy_text": buy_text[-max_marks:],
+        "sell_x": sell_x[-max_marks:],
+        "sell_y": sell_y[-max_marks:],
+        "sell_text": sell_text[-max_marks:],
     }
 
 
-def _add_signal_markers(fig, x, prices, vwaps, ema5, ema20, macd_line, signal_line, decision=None):
+def _add_signal_markers(
+    fig,
+    x,
+    prices,
+    vwaps,
+    ema5,
+    ema20,
+    macd_line,
+    signal_line,
+    decision=None,
+):
     signals = _build_signal_points(
         x=x,
         prices=prices,
@@ -706,12 +725,44 @@ def _add_signal_markers(fig, x, prices, vwaps, ema5, ema20, macd_line, signal_li
         )
 
 
+def _add_right_price_label(fig, current_price, color):
+    fig.add_hline(
+        y=current_price,
+        line=dict(
+            color="#00e5ff",
+            width=1.1,
+            dash="dot",
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_annotation(
+        x=1.01,
+        y=current_price,
+        xref="paper",
+        yref="y",
+        text=f"{current_price:.2f}",
+        showarrow=False,
+        bgcolor=color,
+        bordercolor=color,
+        borderwidth=1,
+        borderpad=4,
+        xanchor="left",
+        yanchor="middle",
+        font=dict(
+            color="#ffffff",
+            size=10,
+        ),
+    )
+
+
 def _add_common_layout(fig, chart_key):
     fig.update_layout(
         height=430,
         margin=dict(
             l=12,
-            r=12,
+            r=62,
             t=18,
             b=8,
         ),
@@ -752,6 +803,7 @@ def _add_common_layout(fig, chart_key):
         )
 
         fig.update_yaxes(
+            side="right",
             gridcolor="rgba(255,255,255,0.075)",
             zeroline=False,
             showline=False,
@@ -770,7 +822,15 @@ def _add_common_layout(fig, chart_key):
     )
 
 
-def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period, decision=None):
+def _render_line_chart(
+    clean_prices,
+    clean_volumes,
+    clean_vwap,
+    x,
+    mode,
+    period,
+    decision=None,
+):
     n = len(clean_prices)
 
     current_price = clean_prices[-1]
@@ -914,35 +974,6 @@ def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period,
         decision=decision,
     )
 
-    fig.add_hline(
-        y=current_price,
-        line=dict(
-            color="#00e5ff",
-            width=1.1,
-            dash="dot",
-        ),
-        row=1,
-        col=1,
-    )
-
-    fig.add_annotation(
-        x=x[-1],
-        y=current_price,
-        text=f"{current_price:.2f}",
-        showarrow=True,
-        arrowhead=2,
-        ax=0,
-        ay=-30,
-        bgcolor=price_color,
-        bordercolor=price_color,
-        font=dict(
-            color="#ffffff",
-            size=10,
-        ),
-        row=1,
-        col=1,
-    )
-
     fig.add_trace(
         go.Bar(
             x=x,
@@ -1037,6 +1068,12 @@ def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period,
         ],
         row=2,
         col=1,
+    )
+
+    _add_right_price_label(
+        fig=fig,
+        current_price=current_price,
+        color=price_color,
     )
 
     _add_common_layout(
@@ -1189,35 +1226,6 @@ def _render_k_chart(ohlc, mode, period, decision=None):
         decision=decision,
     )
 
-    fig.add_hline(
-        y=current_price,
-        line=dict(
-            color="#00e5ff",
-            width=1.1,
-            dash="dot",
-        ),
-        row=1,
-        col=1,
-    )
-
-    fig.add_annotation(
-        x=x[-1],
-        y=current_price,
-        text=f"{current_price:.2f}",
-        showarrow=True,
-        arrowhead=2,
-        ax=0,
-        ay=-30,
-        bgcolor=UP_COLOR if closes[-1] >= opens[-1] else DOWN_COLOR,
-        bordercolor=UP_COLOR if closes[-1] >= opens[-1] else DOWN_COLOR,
-        font=dict(
-            color="#ffffff",
-            size=10,
-        ),
-        row=1,
-        col=1,
-    )
-
     fig.add_trace(
         go.Bar(
             x=x,
@@ -1308,6 +1316,12 @@ def _render_k_chart(ohlc, mode, period, decision=None):
         ],
         row=2,
         col=1,
+    )
+
+    _add_right_price_label(
+        fig=fig,
+        current_price=current_price,
+        color=UP_COLOR if closes[-1] >= opens[-1] else DOWN_COLOR,
     )
 
     _add_common_layout(
