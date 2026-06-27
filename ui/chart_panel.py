@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from datetime import datetime
 
 from ui.theme import (
     UP_COLOR,
@@ -19,6 +20,17 @@ def _safe_float(value, default=0.0):
         return float(value)
     except Exception:
         return default
+
+
+def _safe_int(value, default=0):
+    try:
+        return int(round(float(value)))
+    except Exception:
+        return default
+
+
+def _clamp(value, low=0, high=100):
+    return max(low, min(high, value))
 
 
 def _ema(values, span):
@@ -69,21 +81,269 @@ def _to_lot(volume):
     return round(volume, 2)
 
 
-def _align_series(values, target_len):
-    result = []
+def _to_datetime(value):
+    if isinstance(value, datetime):
+        return value
 
-    for v in values or []:
-        result.append(_safe_float(v))
-
-    result = result[-target_len:]
-
-    while len(result) < target_len:
-        result.insert(0, None)
-
-    return result
+    try:
+        return datetime.fromisoformat(str(value))
+    except Exception:
+        return None
 
 
-def _render_chart_toolbar(current_price, vwap, ema5, ema20, ema60):
+def _period_minutes(period):
+    mapping = {
+        "1分": 1,
+        "5分": 5,
+        "15分": 15,
+        "30分": 30,
+        "日": 390,
+    }
+
+    return mapping.get(period, 1)
+
+
+def _bucket_time(dt, minutes):
+    if dt is None:
+        return None
+
+    if minutes >= 390:
+        return dt.replace(
+            hour=9,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+    minute = (dt.minute // minutes) * minutes
+
+    return dt.replace(
+        minute=minute,
+        second=0,
+        microsecond=0,
+    )
+
+
+def _prepare_ticks(prices, volumes, vwaps, times):
+    clean = []
+
+    for i, price in enumerate(prices or []):
+        p = _safe_float(price)
+
+        if p <= 0:
+            continue
+
+        v = _safe_float(volumes[i]) if i < len(volumes or []) else 0
+        w = _safe_float(vwaps[i]) if i < len(vwaps or []) else p
+        t = _to_datetime(times[i]) if i < len(times or []) else None
+
+        clean.append(
+            {
+                "price": p,
+                "volume": v,
+                "vwap": w if w > 0 else p,
+                "time": t,
+            }
+        )
+
+    return clean
+
+
+def _aggregate_line(prices, volumes, vwaps, times, period):
+    """
+    分時線圖資料。
+    1分：原始即時點
+    5/15/30分：用區間最後價
+    日：日內全部資料線圖
+    """
+
+    clean = _prepare_ticks(prices, volumes, vwaps, times)
+
+    if not clean:
+        return [], [], [], []
+
+    if period in ["1分", "日"]:
+        agg_prices = [item["price"] for item in clean]
+        agg_volumes = [item["volume"] for item in clean]
+        agg_vwaps = [item["vwap"] for item in clean]
+        labels = []
+
+        for idx, item in enumerate(clean):
+            if item["time"] is not None:
+                if period == "日":
+                    labels.append(item["time"].strftime("%H:%M"))
+                else:
+                    labels.append(item["time"].strftime("%H:%M:%S"))
+            else:
+                labels.append(
+                    f"T-{len(clean) - idx - 1}"
+                    if idx < len(clean) - 1
+                    else "最新"
+                )
+
+        return agg_prices, agg_volumes, agg_vwaps, labels
+
+    minutes = _period_minutes(period)
+    buckets = {}
+    fallback_index = 0
+
+    for item in clean:
+        key = _bucket_time(item["time"], minutes)
+
+        if key is None:
+            key = f"bucket_{fallback_index // minutes}"
+            fallback_index += 1
+
+        if key not in buckets:
+            buckets[key] = {
+                "prices": [],
+                "volumes": [],
+                "vwaps": [],
+                "label": key,
+            }
+
+        buckets[key]["prices"].append(item["price"])
+        buckets[key]["volumes"].append(item["volume"])
+        buckets[key]["vwaps"].append(item["vwap"])
+
+    agg_prices = []
+    agg_volumes = []
+    agg_vwaps = []
+    labels = []
+
+    for key in sorted(buckets.keys(), key=lambda x: str(x)):
+        group = buckets[key]
+
+        agg_prices.append(group["prices"][-1])
+        agg_volumes.append(sum(group["volumes"]))
+
+        valid_vwaps = [
+            _safe_float(v)
+            for v in group["vwaps"]
+            if _safe_float(v) > 0
+        ]
+
+        if valid_vwaps:
+            agg_vwaps.append(sum(valid_vwaps) / len(valid_vwaps))
+        else:
+            agg_vwaps.append(group["prices"][-1])
+
+        if isinstance(group["label"], datetime):
+            labels.append(group["label"].strftime("%H:%M"))
+        else:
+            labels.append(str(group["label"]))
+
+    return agg_prices, agg_volumes, agg_vwaps, labels
+
+
+def _aggregate_ohlc(prices, volumes, vwaps, times, period):
+    """
+    K線資料。
+    open = 區間第一筆
+    high = 區間最高
+    low = 區間最低
+    close = 區間最後一筆
+    volume = 區間量加總
+    vwap = 區間 vwap 平均
+    """
+
+    clean = _prepare_ticks(prices, volumes, vwaps, times)
+
+    if not clean:
+        return {
+            "x": [],
+            "open": [],
+            "high": [],
+            "low": [],
+            "close": [],
+            "volume": [],
+            "vwap": [],
+        }
+
+    minutes = _period_minutes(period)
+    buckets = {}
+    fallback_index = 0
+
+    for item in clean:
+        key = _bucket_time(item["time"], minutes)
+
+        if key is None:
+            key = f"bucket_{fallback_index // max(minutes, 1)}"
+            fallback_index += 1
+
+        if key not in buckets:
+            buckets[key] = {
+                "prices": [],
+                "volumes": [],
+                "vwaps": [],
+                "label": key,
+            }
+
+        buckets[key]["prices"].append(item["price"])
+        buckets[key]["volumes"].append(item["volume"])
+        buckets[key]["vwaps"].append(item["vwap"])
+
+    x = []
+    opens = []
+    highs = []
+    lows = []
+    closes = []
+    vols = []
+    k_vwaps = []
+
+    for key in sorted(buckets.keys(), key=lambda x: str(x)):
+        group = buckets[key]
+        ps = group["prices"]
+
+        if not ps:
+            continue
+
+        opens.append(ps[0])
+        highs.append(max(ps))
+        lows.append(min(ps))
+        closes.append(ps[-1])
+        vols.append(sum(group["volumes"]))
+
+        valid_vwaps = [
+            _safe_float(v)
+            for v in group["vwaps"]
+            if _safe_float(v) > 0
+        ]
+
+        if valid_vwaps:
+            k_vwaps.append(sum(valid_vwaps) / len(valid_vwaps))
+        else:
+            k_vwaps.append(ps[-1])
+
+        if isinstance(group["label"], datetime):
+            if period == "日":
+                x.append(group["label"].strftime("%m/%d"))
+            else:
+                x.append(group["label"].strftime("%H:%M"))
+        else:
+            x.append(str(group["label"]))
+
+    return {
+        "x": x,
+        "open": opens,
+        "high": highs,
+        "low": lows,
+        "close": closes,
+        "volume": vols,
+        "vwap": k_vwaps,
+    }
+
+
+def _render_chart_toolbar(
+    mode,
+    period,
+    current_price,
+    vwap,
+    ema5,
+    ema20,
+    ema60,
+    data_points,
+):
 
     current_price = _safe_float(current_price)
     vwap = _safe_float(vwap)
@@ -97,6 +357,12 @@ def _render_chart_toolbar(current_price, vwap, ema5, ema20, ema60):
     else:
         price_state = "跌破 VWAP"
         price_color = DOWN_COLOR
+
+    def tab_class(name):
+        return "tab tab-active" if name == mode else "tab"
+
+    def period_class(name):
+        return "period period-active" if name == period else "period"
 
     html = f"""
 <!DOCTYPE html>
@@ -236,9 +502,9 @@ def _render_chart_toolbar(current_price, vwap, ema5, ema20, ema60):
 
         <div class="top">
             <div class="tabs">
-                <div class="tab tab-active">分時走勢</div>
-                <div class="tab">K線走勢</div>
-                <div class="tab">多週期分析</div>
+                <div class="{tab_class("分時走勢")}">分時走勢</div>
+                <div class="{tab_class("K線走勢")}">K線走勢</div>
+                <div class="{tab_class("多週期分析")}">多週期分析</div>
             </div>
 
             <div class="tools">
@@ -250,14 +516,16 @@ def _render_chart_toolbar(current_price, vwap, ema5, ema20, ema60):
 
         <div class="bottom">
             <div class="periods">
-                <div class="period period-active">1分</div>
-                <div class="period">5分</div>
-                <div class="period">15分</div>
-                <div class="period">30分</div>
-                <div class="period">日</div>
+                <div class="{period_class("1分")}">1分</div>
+                <div class="{period_class("5分")}">5分</div>
+                <div class="{period_class("15分")}">15分</div>
+                <div class="{period_class("30分")}">30分</div>
+                <div class="{period_class("日")}">日</div>
             </div>
 
             <div class="info">
+                <span>{period}</span>
+                <span>資料 <b>{data_points}</b></span>
                 <span>Price <b>{current_price:.2f}</b></span>
                 <span>VWAP <b>{vwap:.2f}</b></span>
                 <span>EMA5 <b>{ema5:.2f}</b></span>
@@ -279,52 +547,96 @@ def _render_chart_toolbar(current_price, vwap, ema5, ema20, ema60):
     )
 
 
-def render_chart(prices, volumes, vwap_values=None):
+def _render_period_selector():
 
-    st.markdown("### 📈 分時走勢 / VWAP / MACD")
+    col1, col2 = st.columns([0.92, 1.08])
 
-    if not prices:
-        st.caption("等待行情資料中...")
-        return
+    with col1:
+        mode = st.radio(
+            "圖表模式",
+            ["分時走勢", "K線走勢", "多週期分析"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="chart_mode_selector",
+        )
 
-    # =========================
-    # 資料整理
-    # =========================
+    with col2:
+        period = st.radio(
+            "週期",
+            ["1分", "5分", "15分", "30分", "日"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="chart_period_selector",
+        )
 
-    clean_prices = [
-        _safe_float(p)
-        for p in prices
-        if _safe_float(p) > 0
-    ]
+    return mode, period
 
-    if not clean_prices:
-        st.caption("尚無有效價格資料")
-        return
 
-    clean_prices = clean_prices[-160:]
-
-    clean_volumes = [
-        _to_lot(v)
-        for v in volumes[-len(clean_prices):]
-    ]
-
-    while len(clean_volumes) < len(clean_prices):
-        clean_volumes.insert(0, 0)
-
-    n = len(clean_prices)
-
-    clean_vwap = _align_series(
-        vwap_values,
-        n,
+def _add_common_layout(fig, chart_key):
+    fig.update_layout(
+        height=390,
+        margin=dict(
+            l=12,
+            r=12,
+            t=18,
+            b=8,
+        ),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0b0f16",
+        font=dict(
+            color=TEXT,
+            size=10,
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            font=dict(
+                size=10,
+                color=TEXT,
+            ),
+        ),
+        hovermode="x unified",
+        bargap=0.18,
+        xaxis_rangeslider_visible=False,
     )
 
-    x = []
+    for row in [1, 2, 3]:
+        fig.update_xaxes(
+            showgrid=False,
+            zeroline=False,
+            showline=False,
+            tickfont=dict(
+                color=SUBTEXT,
+                size=9,
+            ),
+            row=row,
+            col=1,
+        )
 
-    for i in range(n):
-        if n <= 1:
-            x.append("最新")
-        else:
-            x.append(f"T-{n - i - 1}" if i < n - 1 else "最新")
+        fig.update_yaxes(
+            gridcolor="rgba(255,255,255,0.07)",
+            zeroline=False,
+            showline=False,
+            tickfont=dict(
+                color=TEXT,
+                size=9,
+            ),
+            row=row,
+            col=1,
+        )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key=chart_key,
+    )
+
+
+def _render_line_chart(clean_prices, clean_volumes, clean_vwap, x, mode, period):
+    n = len(clean_prices)
 
     current_price = clean_prices[-1]
     prev_price = clean_prices[-2] if len(clean_prices) >= 2 else current_price
@@ -347,19 +659,17 @@ def render_chart(prices, volumes, vwap_values=None):
         current_vwap = valid_vwap[-1]
 
     _render_chart_toolbar(
+        mode=mode,
+        period=period,
         current_price=current_price,
         vwap=current_vwap,
         ema5=ema5[-1] if ema5 else current_price,
         ema20=ema20[-1] if ema20 else current_price,
         ema60=ema60[-1] if ema60 else current_price,
+        data_points=n,
     )
 
     macd_line, signal_line, hist = _macd(clean_prices)
-
-    # =========================
-    # 顏色
-    # 台股：上漲紅，下跌綠
-    # =========================
 
     volume_colors = []
 
@@ -380,10 +690,6 @@ def render_chart(prices, volumes, vwap_values=None):
         else:
             hist_colors.append(DOWN_COLOR)
 
-    # =========================
-    # 建立三層圖表
-    # =========================
-
     fig = make_subplots(
         rows=3,
         cols=1,
@@ -391,10 +697,6 @@ def render_chart(prices, volumes, vwap_values=None):
         row_heights=[0.58, 0.22, 0.20],
         vertical_spacing=0.025,
     )
-
-    # =========================
-    # 價格線
-    # =========================
 
     fig.add_trace(
         go.Scatter(
@@ -421,10 +723,7 @@ def render_chart(prices, volumes, vwap_values=None):
             y=ema5,
             mode="lines",
             name="EMA5",
-            line=dict(
-                color="#facc15",
-                width=1.3,
-            ),
+            line=dict(color="#facc15", width=1.3),
         ),
         row=1,
         col=1,
@@ -436,10 +735,7 @@ def render_chart(prices, volumes, vwap_values=None):
             y=ema20,
             mode="lines",
             name="EMA20",
-            line=dict(
-                color="#fb7185",
-                width=1.3,
-            ),
+            line=dict(color="#fb7185", width=1.3),
         ),
         row=1,
         col=1,
@@ -451,18 +747,11 @@ def render_chart(prices, volumes, vwap_values=None):
             y=ema60,
             mode="lines",
             name="EMA60",
-            line=dict(
-                color="#a855f7",
-                width=1.3,
-            ),
+            line=dict(color="#a855f7", width=1.3),
         ),
         row=1,
         col=1,
     )
-
-    # =========================
-    # VWAP 線
-    # =========================
 
     if clean_vwap and any(v is not None and v > 0 for v in clean_vwap):
         fig.add_trace(
@@ -511,10 +800,6 @@ def render_chart(prices, volumes, vwap_values=None):
         col=1,
     )
 
-    # =========================
-    # 成交量
-    # =========================
-
     fig.add_trace(
         go.Bar(
             x=x,
@@ -528,10 +813,6 @@ def render_chart(prices, volumes, vwap_values=None):
         row=2,
         col=1,
     )
-
-    # =========================
-    # MACD
-    # =========================
 
     fig.add_trace(
         go.Bar(
@@ -553,10 +834,7 @@ def render_chart(prices, volumes, vwap_values=None):
             y=macd_line,
             mode="lines",
             name="MACD",
-            line=dict(
-                color="#38bdf8",
-                width=1.4,
-            ),
+            line=dict(color="#38bdf8", width=1.4),
         ),
         row=3,
         col=1,
@@ -568,10 +846,7 @@ def render_chart(prices, volumes, vwap_values=None):
             y=signal_line,
             mode="lines",
             name="Signal",
-            line=dict(
-                color="#f97316",
-                width=1.2,
-            ),
+            line=dict(color="#f97316", width=1.2),
         ),
         row=3,
         col=1,
@@ -586,10 +861,6 @@ def render_chart(prices, volumes, vwap_values=None):
         row=3,
         col=1,
     )
-
-    # =========================
-    # Y 軸範圍
-    # =========================
 
     price_candidates = clean_prices[:]
 
@@ -651,10 +922,6 @@ def render_chart(prices, volumes, vwap_values=None):
             col=1,
         )
 
-    # =========================
-    # 資料不足提示
-    # =========================
-
     if n < 8:
         fig.add_annotation(
             xref="paper",
@@ -669,66 +936,368 @@ def render_chart(prices, volumes, vwap_values=None):
             ),
         )
 
-    # =========================
-    # Layout
-    # =========================
-
-    fig.update_layout(
-        height=390,
-        margin=dict(
-            l=12,
-            r=12,
-            t=18,
-            b=8,
-        ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#0b0f16",
-        font=dict(
-            color=TEXT,
-            size=10,
-        ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="left",
-            x=0,
-            font=dict(
-                size=10,
-                color=TEXT,
-            ),
-        ),
-        hovermode="x unified",
-        bargap=0.18,
+    _add_common_layout(
+        fig,
+        chart_key=f"line_chart_{mode}_{period}",
     )
 
-    for row in [1, 2, 3]:
-        fig.update_xaxes(
-            showgrid=False,
-            zeroline=False,
-            showline=False,
-            tickfont=dict(
-                color=SUBTEXT,
-                size=9,
+
+def _render_k_chart(ohlc, mode, period):
+    x = ohlc["x"]
+    opens = ohlc["open"]
+    highs = ohlc["high"]
+    lows = ohlc["low"]
+    closes = ohlc["close"]
+    volumes = [_to_lot(v) for v in ohlc["volume"]]
+    vwaps = ohlc["vwap"]
+
+    if not closes:
+        st.caption("尚無 K 線資料")
+        return
+
+    n = len(closes)
+
+    current_price = closes[-1]
+    current_vwap = vwaps[-1] if vwaps else current_price
+
+    ema5 = _ema(closes, 5)
+    ema20 = _ema(closes, 20)
+    ema60 = _ema(closes, 60)
+
+    _render_chart_toolbar(
+        mode=mode,
+        period=period,
+        current_price=current_price,
+        vwap=current_vwap,
+        ema5=ema5[-1] if ema5 else current_price,
+        ema20=ema20[-1] if ema20 else current_price,
+        ema60=ema60[-1] if ema60 else current_price,
+        data_points=n,
+    )
+
+    macd_line, signal_line, hist = _macd(closes)
+
+    candle_colors = []
+
+    for i in range(n):
+        if closes[i] >= opens[i]:
+            candle_colors.append(UP_COLOR)
+        else:
+            candle_colors.append(DOWN_COLOR)
+
+    hist_colors = []
+
+    for h in hist:
+        if h >= 0:
+            hist_colors.append(UP_COLOR)
+        else:
+            hist_colors.append(DOWN_COLOR)
+
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.58, 0.22, 0.20],
+        vertical_spacing=0.025,
+    )
+
+    fig.add_trace(
+        go.Candlestick(
+            x=x,
+            open=opens,
+            high=highs,
+            low=lows,
+            close=closes,
+            name="K",
+            increasing=dict(
+                line=dict(color=UP_COLOR, width=1.2),
+                fillcolor=UP_COLOR,
             ),
-            row=row,
-            col=1,
+            decreasing=dict(
+                line=dict(color=DOWN_COLOR, width=1.2),
+                fillcolor=DOWN_COLOR,
+            ),
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=ema5,
+            mode="lines",
+            name="EMA5",
+            line=dict(color="#facc15", width=1.2),
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=ema20,
+            mode="lines",
+            name="EMA20",
+            line=dict(color="#fb7185", width=1.2),
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=ema60,
+            mode="lines",
+            name="EMA60",
+            line=dict(color="#a855f7", width=1.2),
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=vwaps,
+            mode="lines",
+            name="VWAP",
+            line=dict(
+                color="#22c55e",
+                width=1.7,
+                dash="dot",
+            ),
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_hline(
+        y=current_price,
+        line=dict(
+            color="#00e5ff",
+            width=1.1,
+            dash="dot",
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_annotation(
+        x=x[-1],
+        y=current_price,
+        text=f"{current_price:.2f}",
+        showarrow=True,
+        arrowhead=2,
+        ax=0,
+        ay=-30,
+        bgcolor=UP_COLOR if closes[-1] >= opens[-1] else DOWN_COLOR,
+        bordercolor=UP_COLOR if closes[-1] >= opens[-1] else DOWN_COLOR,
+        font=dict(
+            color="#ffffff",
+            size=10,
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Bar(
+            x=x,
+            y=volumes,
+            name="Volume",
+            marker=dict(
+                color=candle_colors,
+                opacity=0.72,
+            ),
+        ),
+        row=2,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Bar(
+            x=x,
+            y=hist,
+            name="MACD Hist",
+            marker=dict(
+                color=hist_colors,
+                opacity=0.75,
+            ),
+        ),
+        row=3,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=macd_line,
+            mode="lines",
+            name="MACD",
+            line=dict(color="#38bdf8", width=1.4),
+        ),
+        row=3,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=signal_line,
+            mode="lines",
+            name="Signal",
+            line=dict(color="#f97316", width=1.2),
+        ),
+        row=3,
+        col=1,
+    )
+
+    fig.add_hline(
+        y=0,
+        line=dict(
+            color="rgba(255,255,255,0.18)",
+            width=1,
+        ),
+        row=3,
+        col=1,
+    )
+
+    price_candidates = highs + lows + vwaps
+
+    high = max(price_candidates)
+    low = min(price_candidates)
+
+    price_padding = max(
+        (high - low) * 0.35,
+        current_price * 0.001,
+    )
+
+    fig.update_yaxes(
+        range=[
+            low - price_padding,
+            high + price_padding,
+        ],
+        row=1,
+        col=1,
+    )
+
+    max_volume = max(volumes) if volumes else 1
+
+    fig.update_yaxes(
+        range=[
+            0,
+            max(max_volume * 1.35, 1),
+        ],
+        row=2,
+        col=1,
+    )
+
+    if hist:
+        macd_high = max(
+            max(macd_line),
+            max(signal_line),
+            max(hist),
+        )
+        macd_low = min(
+            min(macd_line),
+            min(signal_line),
+            min(hist),
+        )
+
+        macd_padding = max(
+            (macd_high - macd_low) * 0.35,
+            0.01,
         )
 
         fig.update_yaxes(
-            gridcolor="rgba(255,255,255,0.07)",
-            zeroline=False,
-            showline=False,
-            tickfont=dict(
-                color=TEXT,
-                size=9,
-            ),
-            row=row,
+            range=[
+                macd_low - macd_padding,
+                macd_high + macd_padding,
+            ],
+            row=3,
             col=1,
         )
 
-    st.plotly_chart(
+    if n < 3:
+        fig.add_annotation(
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.62,
+            text="K線資料累積中",
+            showarrow=False,
+            font=dict(
+                color="rgba(255,255,255,0.35)",
+                size=18,
+            ),
+        )
+
+    _add_common_layout(
         fig,
-        use_container_width=True,
-        key="main_price_volume_vwap_macd_chart",
+        chart_key=f"k_chart_{mode}_{period}",
+    )
+
+
+def render_chart(prices, volumes, vwap_values=None, time_values=None):
+
+    st.markdown("### 📈 分時 / K線 / VWAP / MACD")
+
+    if not prices:
+        st.caption("等待行情資料中...")
+        return
+
+    mode, period = _render_period_selector()
+
+    if mode == "K線走勢":
+        ohlc = _aggregate_ohlc(
+            prices=prices,
+            volumes=volumes,
+            vwaps=vwap_values or [],
+            times=time_values or [],
+            period=period,
+        )
+
+        _render_k_chart(
+            ohlc=ohlc,
+            mode=mode,
+            period=period,
+        )
+
+        return
+
+    if mode == "多週期分析":
+        st.info("多週期分析下一步會做成 1分 / 5分 / 15分 三週期趨勢共振。")
+
+    clean_prices, clean_volumes, clean_vwap, x = _aggregate_line(
+        prices=prices,
+        volumes=volumes,
+        vwaps=vwap_values or [],
+        times=time_values or [],
+        period=period,
+    )
+
+    if not clean_prices:
+        st.caption("尚無有效價格資料")
+        return
+
+    clean_prices = clean_prices[-160:]
+    clean_volumes = clean_volumes[-160:]
+    clean_vwap = clean_vwap[-160:]
+    x = x[-160:]
+
+    clean_volumes = [
+        _to_lot(v)
+        for v in clean_volumes
+    ]
+
+    _render_line_chart(
+        clean_prices=clean_prices,
+        clean_volumes=clean_volumes,
+        clean_vwap=clean_vwap,
+        x=x,
+        mode=mode,
+        period=period,
     )
