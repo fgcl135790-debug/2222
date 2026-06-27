@@ -426,9 +426,40 @@ def main():
         multi_period=multi_period,
     )
 
-    score = decision.get("score", score)
-    signal = decision.get("action", signal)
-    rebound = decision.get("rebound", rebound)
+    # =========================
+    # Header 同步最終決策結果
+    # =========================
+
+    final_action = decision.get("action", "WAIT")
+    final_score = decision.get("score", score)
+    final_rebound = decision.get("rebound", rebound)
+    final_state = decision.get("multi_period_status", state)
+
+    score = final_score
+    signal = final_action
+    rebound = final_rebound
+
+    if final_action == "BUY":
+        state = f"多方監控｜{final_state}"
+
+    elif final_action == "SELL":
+        state = f"空方監控｜{final_state}"
+
+    else:
+        state = f"等待確認｜{final_state}"
+
+
+    if score >= 80:
+        risk = "方向明確"
+
+    elif score >= 65:
+        risk = "可觀察"
+
+    elif score <= 40:
+        risk = "高風險"
+
+    else:
+        risk = "等待確認"
     
     # =========================
     # Trade Alert
