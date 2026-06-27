@@ -14,6 +14,7 @@ from ui.ai_panel import render_ai_panel
 from ui.orderbook import render_orderbook
 from ui.radar import render_radar
 from ui.chart_panel import render_chart
+from ui.decision_card import render_decision_card
 from streamlit_autorefresh import st_autorefresh
 from ui.sidebar import render_sidebar
 from core.data_engine import get_market_data
@@ -240,6 +241,8 @@ render_ai_panel(
     score=score,
     rebound=rebound,
 )
+
+render_decision_card(decision)
 
 # =========================
 # 📡 主力雷達（台股正確顏色版）
