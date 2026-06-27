@@ -73,10 +73,11 @@ def fetch_kline_data(
         ["open", "high", "low", "close", "volume"],
     )
 
-    df = df[
-        (df["trade_date"] >= start_date)
-        & (df["trade_date"] <= end_date)
-    ].copy()
+    if start_date and end_date:
+        df = df[
+            (df["trade_date"] >= start_date)
+            & (df["trade_date"] <= end_date)
+        ].copy()
 
     df = df.sort_values("date").reset_index(drop=True)
 
@@ -277,20 +278,10 @@ def render_kline_export_sidebar_panel(api_key, stock_code):
             key="kline_export_timeframe",
         )
 
-        start_date = st.date_input(
-            "開始日期",
-            value=pd.to_datetime("2026-06-22").date(),
-            key="kline_export_start_date",
-        )
+        start_date_str = None
+        end_date_str = None
 
-        end_date = st.date_input(
-            "結束日期",
-            value=pd.to_datetime("2026-06-26").date(),
-            key="kline_export_end_date",
-        )
-
-        start_date_str = start_date.strftime("%Y-%m-%d")
-        end_date_str = end_date.strftime("%Y-%m-%d")
+        st.caption("Fugle 分K會回傳近 30 日資料，本功能直接匯出全部回傳資料。")
 
         run_clicked = st.button(
             "抓取並產生K線檔",
@@ -311,12 +302,15 @@ def render_kline_export_sidebar_panel(api_key, stock_code):
 
                     df = add_indicators(df)
 
+                    actual_start = df["trade_date"].min()
+                    actual_end = df["trade_date"].max()
+
                     html = build_kline_html(
                         df=df,
                         symbol=symbol,
                         timeframe=timeframe,
-                        start_date=start_date_str,
-                        end_date=end_date_str,
+                        start_date=actual_start,
+                        end_date=actual_end,
                     )
 
                     csv = df.to_csv(
@@ -327,8 +321,8 @@ def render_kline_export_sidebar_panel(api_key, stock_code):
                     st.session_state.kline_export_result = {
                         "symbol": symbol,
                         "timeframe": timeframe,
-                        "start_date": start_date_str,
-                        "end_date": end_date_str,
+                        "start_date": actual_start,
+                        "end_date": actual_end,
                         "rows": len(df),
                         "csv": csv,
                         "html": html,
