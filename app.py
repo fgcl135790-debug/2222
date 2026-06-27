@@ -500,6 +500,8 @@ def main():
             volumes=volumes,
             vwap_values=vwaps,
             time_values=times,
+            decision=decision,
+            trade_alert=trade_alert,
         )
 
         render_lower_market_grid(
