@@ -114,10 +114,43 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             key="bt_default_take_pct",
         )
 
+        commission_discount = st.slider(
+            "手續費折扣",
+            min_value=0.1,
+            max_value=1.0,
+            value=1.0,
+            step=0.1,
+            key="bt_commission_discount",
+        )
+
+        tax_rate_pct = st.slider(
+            "證交稅 %",
+            min_value=0.0,
+            max_value=0.3,
+            value=0.15,
+            step=0.01,
+            key="bt_tax_rate_pct",
+        )
+
+        commission_rate_pct = 0.1425
+        effective_commission_pct = commission_rate_pct * commission_discount
+
+        estimated_round_trip_cost = (
+            effective_commission_pct
+            + effective_commission_pct
+            + tax_rate_pct
+        )
+        
         st.caption(
-            f"本次回測設定：停損 {default_stop_pct:.1f}%｜"
+            f"本次設定：停損 {default_stop_pct:.1f}%｜"
             f"停利 {default_take_pct:.1f}%｜"
             f"最多持有 {max_hold_bars} 根K"
+        )
+
+        st.caption(
+            f"成本估算：手續費 {effective_commission_pct:.4f}% × 2｜"
+            f"證交稅 {tax_rate_pct:.2f}%｜"
+            f"單趟來回約 {estimated_round_trip_cost:.3f}%"
         )
 
         run_clicked = st.button(
@@ -146,6 +179,9 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                         day_scope=day_scope,
                         default_stop_pct=default_stop_pct,
                         default_take_pct=default_take_pct,
+                        commission_rate_pct=commission_rate_pct,
+                        commission_discount=commission_discount,
+                        tax_rate_pct=tax_rate_pct,
                     )
 
                 st.session_state.backtest_result = result
@@ -252,6 +288,8 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             "exit_price",
             "exit_reason",
             "hold_bars",
+            "gross_pnl_pct",
+            "cost_pct",
             "pnl_pct",
             "result",
         ]
