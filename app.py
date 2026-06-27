@@ -13,7 +13,7 @@ from ui.header import render_header
 from ui.ai_panel import render_ai_panel
 from ui.orderbook import render_orderbook
 from ui.radar import render_radar
-
+from ui.chart_panel import render_chart
 from streamlit_autorefresh import st_autorefresh
 
 
@@ -230,21 +230,12 @@ render_radar(
 )
 
 # =========================
-# 📈 走勢圖（安全版）
+# 📈 走勢圖
 # =========================
 
-st.subheader("📈 分時趨勢")
-fig = ChartBuilder.build_price_chart(prices, volumes)
-
-# ⭐ 如果要改 layout，一定要在 fig 之後
-fig.update_layout(
-    height=320,
-    margin=dict(l=10, r=10, t=20, b=10)
-)
-
-st.plotly_chart(
-    fig,
-    use_container_width=True
+render_chart(
+    prices=prices,
+    volumes=volumes,
 )
 
 # =========================
