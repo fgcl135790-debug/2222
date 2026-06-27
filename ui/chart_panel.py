@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 
+from ui.multi_period_panel import render_multi_period_analysis
 from ui.theme import (
     UP_COLOR,
     DOWN_COLOR,
@@ -1269,7 +1270,13 @@ def render_chart(prices, volumes, vwap_values=None, time_values=None):
         return
 
     if mode == "多週期分析":
-        st.info("多週期分析下一步會做成 1分 / 5分 / 15分 三週期趨勢共振。")
+        render_multi_period_analysis(
+            prices=prices,
+            volumes=volumes,
+            vwap_values=vwap_values or [],
+            time_values=time_values or [],
+        )
+        return
 
     clean_prices, clean_volumes, clean_vwap, x = _aggregate_line(
         prices=prices,
