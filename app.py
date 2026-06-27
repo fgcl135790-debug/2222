@@ -206,10 +206,15 @@ def main():
     # Auto Refresh
     # =========================
 
-    st_autorefresh(
-        interval=refresh_sec * 1000,
-        key="v75_dashboard_refresh",
-    )
+    chart_fullscreen = st.session_state.get("chart_fullscreen", False)
+
+    if not chart_fullscreen:
+        st_autorefresh(
+            interval=refresh_sec * 1000,
+            key="v75_dashboard_refresh",
+        )
+    else:
+        st.info("圖表全屏檢視中，自動刷新已暫停。按圖表工具列的「返回」恢復。")
 
     # =========================
     # 取得資料
@@ -481,6 +486,17 @@ def main():
         connection_status=connection_status,
         data_source=data_source,
     )
+
+    if st.session_state.get("chart_fullscreen", False):
+    render_chart(
+        prices=prices,
+        volumes=volumes,
+        vwap_values=vwaps,
+        time_values=times,
+        decision=decision,
+        trade_alert=trade_alert,
+    )
+    return
 
     # =========================
     # V7.5 Dashboard Layout
