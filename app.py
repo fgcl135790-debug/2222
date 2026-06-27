@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from market_analyzer import MarketAnalyzer
 from ai_predictor import AIPredictor
 from decision_engine import DecisionEngine
+from big_order_engine import BigOrderEngine
 
 from ui.header import render_header
 from ui.ai_panel import render_ai_panel
@@ -14,6 +15,7 @@ from ui.chart_panel import render_chart
 from ui.decision_card import render_decision_card
 from ui.power_panel import render_power_panel
 from ui.sidebar import render_sidebar
+from ui.big_order_panel import render_big_order_panel
 
 from core.data_engine import get_market_data
 from streamlit_autorefresh import st_autorefresh
@@ -61,13 +63,27 @@ now = datetime.now(ZoneInfo("Asia/Taipei"))
 def reset_state():
     st.session_state.price_history = []
     st.session_state.volume_history = []
+    st.session_state.big_order_log = []
     st.session_state.tick = 0
     st.session_state.last_serial = None
+    st.session_state.big_order_last_serial = None
 
 
-for k in ["price_history", "volume_history", "tick", "last_serial"]:
+for k in ["price_history", "volume_history"]:
     if k not in st.session_state:
-        st.session_state[k] = [] if "history" in k else 0
+        st.session_state[k] = []
+
+if "big_order_log" not in st.session_state:
+    st.session_state.big_order_log = []
+
+if "tick" not in st.session_state:
+    st.session_state.tick = 0
+
+if "last_serial" not in st.session_state:
+    st.session_state.last_serial = None
+
+if "big_order_last_serial" not in st.session_state:
+    st.session_state.big_order_last_serial = None
 
 
 # =========================
@@ -125,7 +141,12 @@ bids = quote.get("bids", [])
 asks = quote.get("asks", [])
 
 trade = quote.get("trade", {})
-serial = trade.get("serial", 0)
+raw_serial = trade.get("serial", None)
+
+if raw_serial:
+    serial = raw_serial
+else:
+    serial = f"{stock_code}_{st.session_state.tick}_{price}_{volume}"
 
 
 # =========================
@@ -149,6 +170,31 @@ if st.session_state.last_serial != serial:
 prices = st.session_state.price_history
 volumes = st.session_state.volume_history
 
+# =========================
+# 主力大單偵測
+# =========================
+
+if st.session_state.big_order_last_serial != serial:
+
+    st.session_state.big_order_last_serial = serial
+
+    big_order = BigOrderEngine.detect(
+        stock_code=stock_code,
+        name=name,
+        price=price,
+        volume=volume,
+        bids=bids,
+        asks=asks,
+        prices=prices,
+        volumes=volumes,
+    )
+
+    if big_order is not None:
+
+        st.session_state.big_order_log.append(big_order)
+
+        if len(st.session_state.big_order_log) > 100:
+            st.session_state.big_order_log = st.session_state.big_order_log[-100:]
 
 # =========================
 # 技術指標
@@ -266,6 +312,12 @@ with right:
     st.divider()
 
     render_power_panel(decision)
+
+    st.divider()
+
+    render_big_order_panel(
+        st.session_state.big_order_log
+    )
 
     st.divider()
 
