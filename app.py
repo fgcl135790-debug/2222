@@ -15,12 +15,6 @@ from ui.depth_panel import render_depth_panel
 from ui.decision_card import render_decision_card
 from ui.rebound_panel import render_rebound_panel
 from ui.chip_panel import render_chip_panel
-from ui.trade_alert_panel import render_trade_alert_panel
-from ui.power_panel import render_power_panel
-from ui.market_info_panel import render_market_info_panel
-from ui.big_order_panel import render_big_order_panel
-from ui.orderbook import render_orderbook
-from ui.radar import render_radar
 from ui.alerts import render_alerts
 from ui.sidebar import render_sidebar
 
@@ -442,7 +436,7 @@ main_left, main_right = st.columns([1.72, 1])
 
 
 # =========================
-# 左側：主圖 + 下方資訊
+# 左側：主圖 + 唯一五檔 / 多空區
 # =========================
 
 with main_left:
@@ -460,7 +454,7 @@ with main_left:
 
 
 # =========================
-# 右側：警示 + 決策 + 監控 + 主力資訊
+# 右側：警示 + 決策 + 反彈 + 籌碼結論
 # =========================
 
 with main_right:
