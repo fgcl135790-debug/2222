@@ -31,6 +31,8 @@ class SimulationEngine:
         },
     }
 
+    TOTAL_MINUTES = 271  # 09:00 ~ 13:30
+
     @staticmethod
     def _safe_int(value, default=0):
         try:
@@ -60,47 +62,56 @@ class SimulationEngine:
         }
 
     @staticmethod
-    def _scenario_step(scenario, i, n):
-        x = i / max(n - 1, 1)
+    def _scenario_force(scenario, x):
+        """
+        x = 0 ~ 1，代表 09:00 到 13:30 的進度。
+        """
 
-        if scenario in ["漲停鎖死"]:
-            return 0.22 + max(0, 0.35 - x) * 0.18
+        if scenario == "漲停鎖死":
+            if x < 0.18:
+                return 0.55
+            return 0.07
 
-        if scenario in ["跌停鎖死"]:
-            return -0.22 - max(0, 0.35 - x) * 0.18
+        if scenario == "跌停鎖死":
+            if x < 0.18:
+                return -0.55
+            return -0.07
 
-        if scenario in ["跳空急跌"]:
-            if x < 0.16:
-                return -0.62
-            if x < 0.48:
-                return -0.14
-            return 0.05
+        if scenario == "跳空急跌":
+            if x < 0.15:
+                return -0.55
+            if x < 0.42:
+                return -0.18
+            if x < 0.70:
+                return 0.06
+            return -0.03
 
         if scenario in ["軋空行情", "誘空嘎空"]:
             if x < 0.22:
-                return -0.08
+                return -0.11
             if x < 0.58:
-                return 0.27
-            return 0.11
+                return 0.25
+            return 0.10
 
         if scenario in ["誘多出貨", "拉高出貨"]:
             if x < 0.35:
                 return 0.22
             if x < 0.58:
-                return 0.02
-            return -0.18
+                return 0.03
+            return -0.20
 
-        if scenario in ["主力吸籌"]:
-            if x < 0.45:
+        if scenario == "主力吸籌":
+            if x < 0.40:
                 return 0.00
             if x < 0.72:
-                return 0.07
-            return 0.15
+                return 0.06
+            return 0.16
 
-        return 0.035 * math.sin(x * math.pi * 6)
+        # 一般波動
+        return 0.025 * math.sin(x * math.pi * 5)
 
     @staticmethod
-    def _make_intraday_history(stock_code, tick=0, scenario="一般波動"):
+    def _make_full_day_path(stock_code, scenario):
         profile = SimulationEngine._stock_profile(stock_code)
 
         name = profile["name"]
@@ -108,21 +119,12 @@ class SimulationEngine:
         tick_size = float(profile["tick"])
         base_volume = float(profile["base_volume"])
 
-        tick = SimulationEngine._safe_int(tick, 0)
-
-        # 重要：seed 不要包含 tick，這樣每次刷新前面的歷史不會亂跳
         seed = (
             sum(ord(c) for c in str(stock_code))
-            + sum(ord(c) for c in str(scenario)) * 7
+            + sum(ord(c) for c in str(scenario)) * 13
         )
 
         rng = random.Random(seed)
-
-        # 模擬盤一開始就給足日內資料，之後每次刷新逐步增加
-        point_count = min(
-            240,
-            max(90, 90 + tick * 3),
-        )
 
         start = datetime.now().replace(
             hour=9,
@@ -131,20 +133,18 @@ class SimulationEngine:
             microsecond=0,
         )
 
-        history = []
-
         open_gap = rng.uniform(-0.006, 0.006)
 
-        if scenario in ["跳空急跌"]:
+        if scenario == "跳空急跌":
             open_gap = rng.uniform(-0.025, -0.012)
 
         elif scenario in ["軋空行情", "誘空嘎空"]:
             open_gap = rng.uniform(-0.012, 0.002)
 
-        elif scenario in ["漲停鎖死"]:
+        elif scenario == "漲停鎖死":
             open_gap = rng.uniform(0.018, 0.035)
 
-        elif scenario in ["跌停鎖死"]:
+        elif scenario == "跌停鎖死":
             open_gap = rng.uniform(-0.035, -0.018)
 
         last_price = base_price * (1 + open_gap)
@@ -155,24 +155,28 @@ class SimulationEngine:
         cum_amount = 0.0
         cum_volume = 0.0
 
-        for i in range(point_count):
-            x = i / max(point_count - 1, 1)
+        history = []
 
-            trend_force = SimulationEngine._scenario_step(
+        for i in range(SimulationEngine.TOTAL_MINUTES):
+            x = i / max(SimulationEngine.TOTAL_MINUTES - 1, 1)
+
+            scenario_force = SimulationEngine._scenario_force(
                 scenario=scenario,
-                i=i,
-                n=point_count,
+                x=x,
             )
 
-            wave = math.sin(x * math.pi * 7) * 0.09
-            micro_wave = math.sin(x * math.pi * 31) * 0.026
-            noise = rng.uniform(-0.075, 0.075)
+            # 模擬真實盤中走勢：主趨勢 + 盤中波 + 小雜訊
+            morning_wave = math.sin(x * math.pi * 2.8) * 0.055
+            intraday_wave = math.sin(x * math.pi * 11.0) * 0.035
+            micro_wave = math.sin(x * math.pi * 37.0) * 0.014
+            noise = rng.uniform(-0.045, 0.045)
 
-            price_scale = max(base_price * 0.0012, tick_size)
+            price_scale = max(base_price * 0.00115, tick_size)
 
             change = (
-                trend_force
-                + wave
+                scenario_force
+                + morning_wave
+                + intraday_wave
                 + micro_wave
                 + noise
             ) * price_scale
@@ -195,25 +199,27 @@ class SimulationEngine:
             day_high = max(day_high, price)
             day_low = min(day_low, price)
 
-            open_factor = 1.9 if i < 12 else 1.0
-            volatility_factor = 1 + abs(change) / max(tick_size, 0.01) * 0.32
-            wave_volume = 1 + max(0, math.sin(x * math.pi * 5)) * 0.8
+            # 成交量：開盤大、中段收斂、轉折放量、尾盤再放量
+            open_factor = 2.2 if i < 18 else 1.0
+            close_factor = 1.5 if i > 235 else 1.0
+            wave_volume = 1 + max(0, math.sin(x * math.pi * 5.5)) * 0.75
+            volatility_factor = 1 + abs(change) / max(tick_size, 0.01) * 0.26
 
             spike = 1.0
-
-            if i in [18, 45, 72, 108, 145, 185]:
-                spike = rng.uniform(2.1, 4.0)
+            if i in [25, 55, 88, 126, 162, 205, 240]:
+                spike = rng.uniform(2.0, 4.0)
 
             volume = (
                 base_volume
                 * open_factor
-                * volatility_factor
+                * close_factor
                 * wave_volume
+                * volatility_factor
                 * spike
                 * rng.uniform(0.65, 1.35)
             )
 
-            volume = max(10, round(volume, 0))
+            volume = max(8, round(volume, 0))
 
             cum_amount += price * volume
             cum_volume += volume
@@ -243,7 +249,46 @@ class SimulationEngine:
                 }
             )
 
+        return {
+            "name": name,
+            "base_price": base_price,
+            "tick_size": tick_size,
+            "base_volume": base_volume,
+            "history": history,
+        }
+
+    @staticmethod
+    def _make_intraday_replay(stock_code, tick=0, scenario="一般波動"):
+        profile = SimulationEngine._make_full_day_path(
+            stock_code=stock_code,
+            scenario=scenario,
+        )
+
+        full_history = profile["history"]
+
+        tick = SimulationEngine._safe_int(tick, 0)
+
+        # 每次 refresh 推進 3 分鐘。
+        # 1 秒刷新時，大約 90 秒跑完整個 09:00~13:30。
+        replay_step = 3
+        reveal_count = min(
+            len(full_history),
+            max(25, 25 + tick * replay_step),
+        )
+
+        history = full_history[:reveal_count]
         latest = history[-1]
+
+        tick_size = profile["tick_size"]
+        base_volume = profile["base_volume"]
+
+        seed = (
+            sum(ord(c) for c in str(stock_code))
+            + tick * 17
+            + sum(ord(c) for c in str(scenario)) * 19
+        )
+
+        rng = random.Random(seed)
 
         bid_bias = 1.0
         ask_bias = 1.0
@@ -296,7 +341,7 @@ class SimulationEngine:
             )
 
         quote = {
-            "name": name,
+            "name": profile["name"],
             "stock_code": str(stock_code),
             "price": latest["price"],
             "vwap": latest["vwap"],
@@ -309,13 +354,15 @@ class SimulationEngine:
             "bids": bids,
             "asks": asks,
             "trade": {
-                "serial": f"SIM_{stock_code}_{tick}_{point_count}",
+                "serial": f"SIM_{stock_code}_{scenario}_{tick}_{reveal_count}",
                 "time": latest["time"].isoformat(),
                 "price": latest["price"],
                 "size": latest["volume"],
             },
-            "serial": f"SIM_{stock_code}_{tick}_{point_count}",
+            "serial": f"SIM_{stock_code}_{scenario}_{tick}_{reveal_count}",
             "history": history,
+            "full_day_points": len(full_history),
+            "replay_points": reveal_count,
             "scenario": scenario,
         }
 
@@ -323,7 +370,7 @@ class SimulationEngine:
 
     @staticmethod
     def get_quote(stock_code="2330", tick=0, scenario="一般波動", **kwargs):
-        return SimulationEngine._make_intraday_history(
+        return SimulationEngine._make_intraday_replay(
             stock_code=stock_code,
             tick=tick,
             scenario=scenario or "一般波動",
