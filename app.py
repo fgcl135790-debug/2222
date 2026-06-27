@@ -1,27 +1,25 @@
 import streamlit as st
-import pandas as pd
-import streamlit.components.v1 as components
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from fugle_provider import FugleProvider
-from simulation_engine import SimulationEngine
 from market_analyzer import MarketAnalyzer
 from ai_predictor import AIPredictor
-from charts import ChartBuilder
+from decision_engine import DecisionEngine
+
 from ui.header import render_header
 from ui.ai_panel import render_ai_panel
 from ui.orderbook import render_orderbook
 from ui.radar import render_radar
 from ui.chart_panel import render_chart
 from ui.decision_card import render_decision_card
-from streamlit_autorefresh import st_autorefresh
 from ui.sidebar import render_sidebar
+
 from core.data_engine import get_market_data
-from core.decision_engine import make_decision
+from streamlit_autorefresh import st_autorefresh
+
 
 # =========================
-# 🧠 V5.5 券商級設定
+# 系統設定
 # =========================
 
 st.set_page_config(
@@ -49,14 +47,16 @@ h1, h2, h3 {
 
 
 # =========================
-# 🕒 台灣時間
+# 台灣時間
 # =========================
+
 now = datetime.now(ZoneInfo("Asia/Taipei"))
 
 
 # =========================
-# 🧠 Session Reset（修復換股不清空）
+# Session Reset
 # =========================
+
 def reset_state():
     st.session_state.price_history = []
     st.session_state.volume_history = []
@@ -70,7 +70,7 @@ for k in ["price_history", "volume_history", "tick", "last_serial"]:
 
 
 # =========================
-# 🧠 Sidebar
+# Sidebar
 # =========================
 
 (
@@ -81,14 +81,19 @@ for k in ["price_history", "volume_history", "tick", "last_serial"]:
     refresh_sec,
 ) = render_sidebar(reset_state)
 
+
 # =========================
-# ⏱ Auto refresh
+# Auto Refresh
 # =========================
-st_autorefresh(interval=refresh_sec * 1000, key="v55")
+
+st_autorefresh(
+    interval=refresh_sec * 1000,
+    key="v75_refresh"
+)
 
 
 # =========================
-# 📡 取得資料
+# 取得資料
 # =========================
 
 if data_source == "真實盤" and not api_key:
@@ -102,16 +107,17 @@ quote = get_market_data(
     tick=st.session_state.tick,
 )
 
-# 模擬盤才累加 Tick
 if data_source == "模擬盤":
     st.session_state.tick += 1
 
+
 # =========================
-# 📊 Quote解析
+# Quote 解析
 # =========================
+
 name = quote.get("name", "Unknown")
-price = quote["price"]
-vwap = quote["vwap"]
+price = quote.get("price", 0)
+vwap = quote.get("vwap", 0)
 volume = quote.get("last_size", 0)
 
 bids = quote.get("bids", [])
@@ -122,16 +128,18 @@ serial = trade.get("serial", 0)
 
 
 # =========================
-# 🧠 換股自動清空（修復bug）
+# 換股清空
 # =========================
+
 if st.session_state.get("last_stock") != stock_code:
     reset_state()
     st.session_state.last_stock = stock_code
 
 
 # =========================
-# 📈 記錄價格
+# 歷史資料
 # =========================
+
 if st.session_state.last_serial != serial:
     st.session_state.last_serial = serial
     st.session_state.price_history.append(price)
@@ -142,28 +150,36 @@ volumes = st.session_state.volume_history
 
 
 # =========================
-# 📊 技術指標
+# 技術指標
 # =========================
+
 ema5 = MarketAnalyzer.calculate_ema(prices, 5)
 ema20 = MarketAnalyzer.calculate_ema(prices, 20)
 ema60 = MarketAnalyzer.calculate_ema(prices, 60)
 
 rsi = MarketAnalyzer.calculate_rsi(prices)
+
 macd, macd_signal, _ = MarketAnalyzer.calculate_macd(prices)
 
 momentum = MarketAnalyzer.momentum(prices)
 
 
 # =========================
-# 🧠 AI Predict（V5.5）
+# AI Predict
 # =========================
+
 ai = AIPredictor.predict_trade(
-    prices, volumes,
-    ema5, ema20, ema60,
-    rsi, macd, macd_signal,
+    prices,
+    volumes,
+    ema5,
+    ema20,
+    ema60,
+    rsi,
+    macd,
+    macd_signal,
     momentum,
     bid_ratio=1.2,
-    vwap=vwap
+    vwap=vwap,
 )
 
 signal = ai["signal"]
@@ -172,37 +188,21 @@ risk = ai["risk"]
 state = ai["market_state"]
 rebound = ai["rebound_prob"]
 
-bid_ratio = (
-    sum([b["size"] for b in bids])
-    /
-    max(sum([a["size"] for a in asks]), 1)
-)
 
-decision = make_decision(
+# =========================
+# Decision Engine
+# =========================
 
+decision = DecisionEngine.generate(
+    ai=ai,
     price=price,
-
-    ema5=ema5,
-
-    ema20=ema20,
-
-    ema60=ema60,
-
-    rsi=rsi,
-
-    macd=macd,
-
-    macd_signal=macd_signal,
-
-    bid_ratio=bid_ratio,
-
-    rebound=rebound,
-
 )
 
+
 # =========================
-# 🧾 Header（券商級）
+# Header
 # =========================
+
 render_header(
     name=name,
     stock_code=stock_code,
@@ -213,34 +213,17 @@ render_header(
 )
 
 
-def signal_dot(color, text):
-    return f"""
-    <div style="
-        display:flex;
-        align-items:center;
-        gap:8px;
-        font-weight:600;
-    ">
-        <div style="
-            width:12px;
-            height:12px;
-            border-radius:50%;
-            background:{color};
-            box-shadow:0 0 6px {color};
-        "></div>
-        <div>{text}</div>
-    </div>
-    """
-
 # =========================
-# 🖥️ V7.5 主畫面
+# V7.5 主畫面
 # =========================
 
 left, right = st.columns([2.2, 1])
 
+
 # =========================
 # 左側
 # =========================
+
 with left:
 
     render_ai_panel(
@@ -249,31 +232,16 @@ with left:
         rebound=rebound,
     )
 
-    st.subheader("📈 分時趨勢")
-
-    fig = ChartBuilder.build_price_chart(
-        prices,
-        volumes,
+    render_chart(
+        prices=prices,
+        volumes=volumes,
     )
 
-    fig.update_layout(
-        height=420,
-        margin=dict(
-            l=10,
-            r=10,
-            t=20,
-            b=10,
-        ),
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True,
-    )
 
 # =========================
 # 右側
 # =========================
+
 with right:
 
     render_decision_card(decision)
