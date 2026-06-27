@@ -46,23 +46,27 @@ def render_decision_card(decision):
 
     reasons = decision.get("reasons", [])
 
+    # =========================
+    # 台股顏色
+    # =========================
+
     if action == "BUY":
         color = UP_COLOR
         title = "可當沖做多"
         badge = "BUY"
-        desc = "偏多觀察"
+        desc = "多方策略成立，等待理想進場區。"
 
     elif action == "SELL":
         color = DOWN_COLOR
         title = "可當沖做空"
         badge = "SELL"
-        desc = "偏空觀察"
+        desc = "空方條件成立，避免追空等待反彈。"
 
     else:
         color = WAIT_COLOR
         title = "等待進場"
         badge = "WAIT"
-        desc = "等待確認"
+        desc = "多空條件尚未同步，暫時觀望。"
 
     title = escape(title)
     badge = escape(badge)
@@ -70,35 +74,45 @@ def render_decision_card(decision):
 
     degree = int(score * 3.6)
 
+    # =========================
+    # 只顯示前三條重點
+    # =========================
+
+    top_reasons = reasons[:3]
+    more_reasons = reasons[3:]
+
     reason_items = ""
 
-    if reasons:
-        for r in reasons[:8]:
-            safe_reason = escape(str(r))
+    if top_reasons:
+
+        for r in top_reasons:
             reason_items += f"""
             <div class="reason-row">
-                <span class="dot">◆</span>
-                <span>{safe_reason}</span>
+                <span class="reason-dot">◆</span>
+                <span>{escape(str(r))}</span>
             </div>
             """
+
     else:
+
         reason_items = """
         <div class="reason-row">
-            <span class="dot">◆</span>
-            <span>目前無分析內容</span>
+            <span class="reason-dot">◆</span>
+            <span>目前無明確判斷依據</span>
         </div>
         """
 
-    more_text = ""
+    more_hint = ""
 
-    if len(reasons) > 8:
-        more_text = f"""
-        <div class="more-text">
-            另有 {len(reasons) - 8} 條判斷依據，之後可放入展開區。
+    if more_reasons:
+
+        more_hint = f"""
+        <div class="more-hint">
+            另有 {len(more_reasons)} 條判斷依據已收合
         </div>
         """
 
-    st.markdown("### 🎯 交易決策 (V7.5)")
+    st.markdown("### 🎯 交易決策")
 
     html = f"""
 <!DOCTYPE html>
@@ -114,19 +128,11 @@ def render_decision_card(decision):
             overflow: hidden;
         }}
 
-        .wrap {{
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            width: 100%;
-            box-sizing: border-box;
-        }}
-
         .card {{
             background: linear-gradient(135deg, rgba(17,24,39,0.98), rgba(9,14,24,0.98));
             border: 1px solid {CARD_BORDER};
-            border-radius: 16px;
-            padding: 14px;
+            border-radius: 15px;
+            padding: 13px;
             box-sizing: border-box;
             width: 100%;
         }}
@@ -135,18 +141,18 @@ def render_decision_card(decision):
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }}
 
-        .small {{
+        .label {{
             color: {SUBTEXT};
             font-size: 12px;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
         }}
 
         .title {{
             color: {color};
-            font-size: 28px;
+            font-size: 27px;
             font-weight: 900;
             line-height: 1.05;
         }}
@@ -154,31 +160,32 @@ def render_decision_card(decision):
         .badge {{
             color: {color};
             border: 1px solid {color};
-            border-radius: 999px;
+            background: rgba(255,255,255,0.035);
             padding: 4px 9px;
+            border-radius: 999px;
             font-size: 11px;
             font-weight: 900;
-            background: rgba(255,255,255,0.035);
+            white-space: nowrap;
         }}
 
         .main {{
             display: grid;
-            grid-template-columns: 1fr 92px;
+            grid-template-columns: 1fr 88px;
             gap: 12px;
             align-items: center;
         }}
 
         .rows {{
             border-top: 1px solid rgba(255,255,255,0.08);
-            padding-top: 10px;
+            padding-top: 9px;
         }}
 
         .row {{
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 7px;
-            font-size: 13px;
+            margin-bottom: 6px;
+            font-size: 12.5px;
         }}
 
         .k {{
@@ -197,21 +204,24 @@ def render_decision_card(decision):
         }}
 
         .score-ring {{
-            width: 86px;
-            height: 86px;
+            width: 82px;
+            height: 82px;
             border-radius: 50%;
             background:
-                conic-gradient({color} 0deg, {color} {degree}deg, rgba(255,255,255,0.10) {degree}deg, rgba(255,255,255,0.10) 360deg);
+                conic-gradient(
+                    {color} 0deg,
+                    {color} {degree}deg,
+                    rgba(255,255,255,0.10) {degree}deg,
+                    rgba(255,255,255,0.10) 360deg
+                );
             display: flex;
             align-items: center;
             justify-content: center;
-            position: relative;
-            margin-left: auto;
         }}
 
         .score-inner {{
-            width: 64px;
-            height: 64px;
+            width: 61px;
+            height: 61px;
             border-radius: 50%;
             background: #0b111c;
             display: flex;
@@ -222,7 +232,7 @@ def render_decision_card(decision):
         }}
 
         .score {{
-            font-size: 24px;
+            font-size: 23px;
             font-weight: 900;
             color: #ffffff;
             line-height: 1;
@@ -235,31 +245,27 @@ def render_decision_card(decision):
         }}
 
         .desc {{
-            text-align: center;
+            margin-top: 9px;
+            padding: 8px 9px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.035);
+            border-left: 4px solid {color};
             color: {SUBTEXT};
-            font-size: 11px;
-            margin-top: 6px;
+            font-size: 11.5px;
+            line-height: 1.4;
         }}
 
         .reason-card {{
-            background: rgba(17,24,39,0.88);
-            border: 1px solid {CARD_BORDER};
-            border-radius: 14px;
-            padding: 12px;
-            box-sizing: border-box;
-            width: 100%;
+            margin-top: 10px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            padding-top: 9px;
         }}
 
         .reason-title {{
-            font-size: 13px;
-            font-weight: 900;
-            margin-bottom: 8px;
             color: {TEXT};
-        }}
-
-        .reason-list {{
-            max-height: 105px;
-            overflow: hidden;
+            font-size: 12.5px;
+            font-weight: 900;
+            margin-bottom: 6px;
         }}
 
         .reason-row {{
@@ -267,85 +273,81 @@ def render_decision_card(decision):
             gap: 7px;
             align-items: flex-start;
             color: {TEXT};
-            font-size: 12px;
-            line-height: 1.45;
-            margin-bottom: 5px;
+            font-size: 11.8px;
+            line-height: 1.35;
+            margin-bottom: 4px;
         }}
 
-        .dot {{
+        .reason-dot {{
             color: #60a5fa;
             font-size: 10px;
             margin-top: 2px;
         }}
 
-        .more-text {{
-            margin-top: 8px;
+        .more-hint {{
+            margin-top: 6px;
             color: {SUBTEXT};
             font-size: 11px;
-            border-top: 1px solid rgba(255,255,255,0.08);
-            padding-top: 7px;
+            text-align: right;
         }}
     </style>
 </head>
 
 <body>
-    <div class="wrap">
+    <div class="card">
 
-        <div class="card">
-
-            <div class="top">
-                <div>
-                    <div class="small">建議策略</div>
-                    <div class="title">{title}</div>
-                </div>
-
-                <div class="badge">{badge}</div>
+        <div class="top">
+            <div>
+                <div class="label">建議策略</div>
+                <div class="title">{title}</div>
             </div>
 
-            <div class="main">
+            <div class="badge">{badge}</div>
+        </div>
 
-                <div class="rows">
-                    <div class="row">
-                        <div class="k">進場區間</div>
-                        <div class="v">{entry}</div>
-                    </div>
+        <div class="main">
 
-                    <div class="row">
-                        <div class="k">停損價位</div>
-                        <div class="v">{stop}</div>
-                    </div>
+            <div class="rows">
 
-                    <div class="row">
-                        <div class="k">停利目標</div>
-                        <div class="v">{target}</div>
-                    </div>
-
-                    <div class="row">
-                        <div class="k">風險報酬比</div>
-                        <div class="v rr">{rr}</div>
-                    </div>
+                <div class="row">
+                    <div class="k">進場區間</div>
+                    <div class="v">{entry}</div>
                 </div>
 
-                <div>
-                    <div class="score-ring">
-                        <div class="score-inner">
-                            <div class="score">{score}</div>
-                            <div class="score-unit">/100</div>
-                        </div>
-                    </div>
-                    <div class="desc">{desc}</div>
+                <div class="row">
+                    <div class="k">停損價位</div>
+                    <div class="v">{stop}</div>
                 </div>
 
+                <div class="row">
+                    <div class="k">停利目標</div>
+                    <div class="v">{target}</div>
+                </div>
+
+                <div class="row">
+                    <div class="k">風險報酬比</div>
+                    <div class="v rr">{rr}</div>
+                </div>
+
+            </div>
+
+            <div class="score-ring">
+                <div class="score-inner">
+                    <div class="score">{score}</div>
+                    <div class="score-unit">/100</div>
+                </div>
             </div>
 
         </div>
 
+        <div class="desc">
+            {desc}
+        </div>
+
         <div class="reason-card">
-            <div class="reason-title">AI 判斷依據</div>
-            <div class="reason-list">
-                {reason_items}
-            </div>
-            {more_text}
+            <div class="reason-title">重點依據</div>
+            {reason_items}
+            {more_hint}
         </div>
 
     </div>
@@ -355,6 +357,37 @@ def render_decision_card(decision):
 
     components.html(
         html,
-        height=350,
+        height=318,
         scrolling=False,
     )
+
+    # =========================
+    # 其餘理由收合
+    # =========================
+
+    if more_reasons:
+
+        with st.expander(
+            f"查看完整 AI 判斷依據（{len(more_reasons)}）",
+            expanded=False,
+        ):
+
+            for r in more_reasons:
+
+                st.markdown(
+                    f"""
+                    <div style="
+                        display:flex;
+                        gap:7px;
+                        align-items:flex-start;
+                        font-size:12px;
+                        line-height:1.45;
+                        margin-bottom:5px;
+                        color:{TEXT};
+                    ">
+                        <span style="color:#60a5fa;">◆</span>
+                        <span>{escape(str(r))}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
