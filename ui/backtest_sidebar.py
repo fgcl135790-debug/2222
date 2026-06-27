@@ -42,6 +42,28 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             key="bt_timeframe",
         )
 
+        day_scope_label = st.selectbox(
+            "回測範圍",
+            options=[
+                "最後一個開市日",
+                "最近 5 個開市日",
+                "近 30 日全部資料",
+            ],
+            index=0,
+            key="bt_day_scope_label",
+        )
+
+        day_scope_map = {
+            "最後一個開市日": "last_open_day",
+            "最近 5 個開市日": "recent_5_days",
+            "近 30 日全部資料": "all",
+        }
+
+        day_scope = day_scope_map.get(
+            day_scope_label,
+            "last_open_day",
+        )
+
         score_threshold = st.slider(
             "最低 Score",
             min_value=50,
@@ -82,7 +104,11 @@ def render_backtest_sidebar_panel(api_key, stock_code):
         )
 
         if run_clicked:
-            st.info("已收到回測指令，開始抓歷史 K 線...")
+            st.session_state.backtest_result = None
+            st.session_state.backtest_status = "running"
+
+            status_box = st.empty()
+            status_box.info("已收到回測指令，正在抓歷史 K 線...")
 
             try:
                 with st.spinner("回測中，請稍等..."):
@@ -94,16 +120,19 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                         require_resonance=require_resonance,
                         avoid_open_minutes=avoid_open_minutes,
                         max_hold_bars=max_hold_bars,
+                        day_scope=day_scope,
                     )
 
                 st.session_state.backtest_result = result
+                st.session_state.backtest_status = "done"
 
                 if result.get("ok"):
-                    st.success("回測完成")
+                    status_box.success(result.get("message", "回測完成"))
                 else:
-                    st.error(result.get("message", "回測失敗"))
+                    status_box.error(result.get("message", "回測失敗"))
 
             except Exception as e:
+                st.session_state.backtest_status = "error"
                 st.session_state.backtest_result = {
                     "ok": False,
                     "message": str(e),
@@ -111,7 +140,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                     "trades": [],
                 }
 
-                st.error("回測執行時發生錯誤")
+                status_box.error("回測執行時發生錯誤")
                 st.exception(e)
 
         result = st.session_state.get("backtest_result")
@@ -126,13 +155,20 @@ def render_backtest_sidebar_panel(api_key, stock_code):
 
         summary = result.get("summary", {})
         trades = result.get("trades", [])
+        selected_days = result.get("selected_days", [])
 
         st.divider()
 
         st.caption(
             f"{result.get('symbol')}｜{result.get('timeframe')}分K｜"
-            f"{result.get('days')} 日｜{result.get('candles')} 根K"
+            f"回測 {result.get('days')} 日｜來源 {result.get('all_days')} 日｜"
+            f"{result.get('candles')} 根K"
         )
+
+        if selected_days:
+            st.info(
+                "回測日期：" + "、".join(selected_days[-5:])
+            )
 
         c1, c2 = st.columns(2)
 
@@ -151,54 +187,61 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             f"最大連敗 {summary.get('max_consecutive_loss', 0)}"
         )
 
-        if trades:
-            import_clicked = st.button(
-                "匯入勝率統計",
-                use_container_width=True,
-                key="bt_import_to_winrate",
+        if not trades:
+            st.warning(
+                "這次沒有符合條件的交易。可以先把最低 Score 降到 60，"
+                "或取消「只測多週期共振」。"
+            )
+            return
+
+        import_clicked = st.button(
+            "匯入勝率統計",
+            use_container_width=True,
+            key="bt_import_to_winrate",
+        )
+
+        if import_clicked:
+            count = WinRateEngine.import_backtest_trades(
+                st=st,
+                trades=trades,
             )
 
-            if import_clicked:
-                count = WinRateEngine.import_backtest_trades(
-                    st=st,
-                    trades=trades,
-                )
+            st.success(f"已匯入 {count} 筆回測交易到勝率統計")
 
-                st.success(f"已匯入 {count} 筆回測交易到勝率統計")
+        st.divider()
+        st.caption("最近 10 筆回測交易")
 
-            st.divider()
-            st.caption("最近 10 筆回測交易")
+        df = pd.DataFrame(trades[-10:])
 
-            df = pd.DataFrame(trades[-10:])
+        show_cols = [
+            "date",
+            "action",
+            "score",
+            "entry_time",
+            "exit_time",
+            "exit_reason",
+            "pnl_pct",
+            "result",
+        ]
 
-            show_cols = [
-                "date",
-                "action",
-                "score",
-                "entry_time",
-                "exit_time",
-                "pnl_pct",
-                "result",
-            ]
+        df = df[[col for col in show_cols if col in df.columns]]
 
-            df = df[[col for col in show_cols if col in df.columns]]
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            height=230,
+        )
 
-            st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True,
-                height=230,
-            )
+        csv = pd.DataFrame(trades).to_csv(
+            index=False,
+            encoding="utf-8-sig",
+        )
 
-            csv = pd.DataFrame(trades).to_csv(
-                index=False,
-                encoding="utf-8-sig",
-            )
-
-            st.download_button(
-                "下載回測明細 CSV",
-                data=csv,
-                file_name=f"backtest_{symbol}_{timeframe}m.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
+        st.download_button(
+            "下載回測明細 CSV",
+            data=csv,
+            file_name=f"backtest_{symbol}_{timeframe}m.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
