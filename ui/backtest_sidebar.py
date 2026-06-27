@@ -142,13 +142,13 @@ def render_backtest_sidebar_panel(api_key, stock_code):
         )
         
         st.caption(
-            f"本次設定：停損 {default_stop_pct:.1f}%｜"
+            f"股價目標：停損 {default_stop_pct:.1f}%｜"
             f"停利 {default_take_pct:.1f}%｜"
             f"最多持有 {max_hold_bars} 根K"
         )
 
         st.caption(
-            f"成本估算：手續費 {effective_commission_pct:.4f}% × 2｜"
+            f"成本只扣在損益：手續費 {effective_commission_pct:.4f}% × 2｜"
             f"證交稅 {tax_rate_pct:.2f}%｜"
             f"單趟來回約 {estimated_round_trip_cost:.3f}%"
         )
