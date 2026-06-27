@@ -357,37 +357,6 @@ def render_decision_card(decision):
 
     components.html(
         html,
-        height=318,
+        height=300,
         scrolling=False,
     )
-
-    # =========================
-    # 其餘理由收合
-    # =========================
-
-    if more_reasons:
-
-        with st.expander(
-            f"查看完整 AI 判斷依據（{len(more_reasons)}）",
-            expanded=False,
-        ):
-
-            for r in more_reasons:
-
-                st.markdown(
-                    f"""
-                    <div style="
-                        display:flex;
-                        gap:7px;
-                        align-items:flex-start;
-                        font-size:12px;
-                        line-height:1.45;
-                        margin-bottom:5px;
-                        color:{TEXT};
-                    ">
-                        <span style="color:#60a5fa;">◆</span>
-                        <span>{escape(str(r))}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
