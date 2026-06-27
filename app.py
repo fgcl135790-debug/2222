@@ -11,22 +11,22 @@ from alert_engine import AlertEngine
 
 from ui.header import render_header
 from ui.ai_panel import render_ai_panel
-from ui.orderbook import render_orderbook
-from ui.radar import render_radar
 from ui.chart_panel import render_chart
 from ui.decision_card import render_decision_card
 from ui.trade_alert_panel import render_trade_alert_panel
 from ui.power_panel import render_power_panel
-from ui.sidebar import render_sidebar
 from ui.big_order_panel import render_big_order_panel
+from ui.orderbook import render_orderbook
+from ui.radar import render_radar
 from ui.alerts import render_alerts
+from ui.sidebar import render_sidebar
 
 from core.data_engine import get_market_data
 from streamlit_autorefresh import st_autorefresh
 
 
 # =========================
-# 系統設定
+# V7.5 Dashboard Setting
 # =========================
 
 st.set_page_config(
@@ -35,23 +35,42 @@ st.set_page_config(
     page_icon="🏦"
 )
 
+
+# =========================
+# Dashboard CSS
+# =========================
+
 st.markdown("""
 <style>
+html, body, [data-testid="stAppViewContainer"] {
+    background: #080c13;
+}
+
 .block-container {
-    padding: 0.35rem 0.75rem;
-    font-size: 13px;
+    max-width: 1760px;
+    padding: 0.25rem 0.55rem 0.8rem 0.55rem;
 }
 
 h1, h2, h3 {
-    font-size: 16px !important;
+    font-size: 15px !important;
+    margin-bottom: 0.25rem !important;
+}
+
+p, div, span {
+    font-size: 12.5px;
 }
 
 div[data-testid="stVerticalBlock"] {
-    gap: 0.35rem;
+    gap: 0.28rem;
 }
 
 div[data-testid="stHorizontalBlock"] {
-    gap: 0.6rem;
+    gap: 0.55rem;
+}
+
+hr {
+    margin: 0.25rem 0 !important;
+    border-color: rgba(255,255,255,0.08) !important;
 }
 
 .stTabs [data-baseweb="tab-list"] {
@@ -59,16 +78,26 @@ div[data-testid="stHorizontalBlock"] {
 }
 
 .stTabs [data-baseweb="tab"] {
-    height: 32px;
-    padding: 4px 8px;
+    height: 30px;
+    padding: 3px 8px;
     font-size: 12px;
 }
 
 .stDataFrame {
     font-size: 12px;
 }
+
+[data-testid="stSidebar"] {
+    background: #0b111c;
+}
+
+button[kind="secondary"] {
+    height: 30px;
+    padding: 2px 8px;
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 # =========================
 # 台灣時間
@@ -106,6 +135,9 @@ if "last_serial" not in st.session_state:
 if "big_order_last_serial" not in st.session_state:
     st.session_state.big_order_last_serial = None
 
+if "last_stock" not in st.session_state:
+    st.session_state.last_stock = None
+
 
 # =========================
 # Sidebar
@@ -126,7 +158,7 @@ if "big_order_last_serial" not in st.session_state:
 
 st_autorefresh(
     interval=refresh_sec * 1000,
-    key="v75_refresh"
+    key="v75_dashboard_refresh",
 )
 
 
@@ -188,8 +220,13 @@ if st.session_state.last_serial != serial:
     st.session_state.price_history.append(price)
     st.session_state.volume_history.append(volume)
 
+    if len(st.session_state.price_history) > 500:
+        st.session_state.price_history = st.session_state.price_history[-500:]
+        st.session_state.volume_history = st.session_state.volume_history[-500:]
+
 prices = st.session_state.price_history
 volumes = st.session_state.volume_history
+
 
 # =========================
 # 主力大單偵測
@@ -217,6 +254,7 @@ if st.session_state.big_order_last_serial != serial:
         if len(st.session_state.big_order_log) > 100:
             st.session_state.big_order_log = st.session_state.big_order_log[-100:]
 
+
 # =========================
 # 技術指標
 # =========================
@@ -226,20 +264,20 @@ ema20 = MarketAnalyzer.calculate_ema(prices, 20)
 ema60 = MarketAnalyzer.calculate_ema(prices, 60)
 
 rsi = MarketAnalyzer.calculate_rsi(prices)
-
 macd, macd_signal, _ = MarketAnalyzer.calculate_macd(prices)
 
 momentum = MarketAnalyzer.momentum(prices)
+
 
 # =========================
 # 五檔買賣力道
 # =========================
 
-bid_ratio = (
-    sum([b.get("size", 0) for b in bids])
-    /
-    max(sum([a.get("size", 0) for a in asks]), 1)
-)
+bid_total = sum([b.get("size", 0) for b in bids])
+ask_total = sum([a.get("size", 0) for a in asks])
+
+bid_ratio = bid_total / max(ask_total, 1)
+
 
 # =========================
 # AI Predict
@@ -285,16 +323,27 @@ decision = DecisionEngine.generate(
     volumes=volumes,
 )
 
+
+# =========================
+# Trade Alert
+# =========================
+
 trade_alert = TradeAlertEngine.track(
     decision=decision,
     price=price,
 )
+
+
+# =========================
+# Alert Engine
+# =========================
 
 alerts = AlertEngine.build(
     decision=decision,
     trade_alert=trade_alert,
     big_order_log=st.session_state.big_order_log,
 )
+
 
 # =========================
 # Header
@@ -311,17 +360,12 @@ render_header(
 
 
 # =========================
-# V7.5 主畫面
+# V7.5 Dashboard Layout
 # =========================
 
-left, right = st.columns([2.2, 1])
+top_left, top_right = st.columns([2.05, 1])
 
-
-# =========================
-# 左側
-# =========================
-
-with left:
+with top_left:
 
     render_ai_panel(
         signal=signal,
@@ -329,48 +373,55 @@ with left:
         rebound=rebound,
     )
 
+with top_right:
+
+    render_alerts(alerts)
+
+
+main_left, main_right = st.columns([1.72, 1])
+
+
+# =========================
+# 左側：主圖 + 下方資訊
+# =========================
+
+with main_left:
+
     render_chart(
         prices=prices,
         volumes=volumes,
     )
 
+    bottom_left, bottom_right = st.columns([1, 1])
 
-# =========================
-# 右側
-# =========================
+    with bottom_left:
 
-with right:
+        render_orderbook(
+            bids=bids,
+            asks=asks,
+        )
 
-    render_alerts(alerts)
-
-    st.divider()
-
-    render_decision_card(decision)
-
-    st.divider()
-
-    render_trade_alert_panel(trade_alert)
-
-    st.divider()
-
-    tab_power, tab_big_order, tab_radar, tab_orderbook = st.tabs(
-        [
-            "⚔️ 多空",
-            "🐋 大單",
-            "📡 雷達",
-            "📋 五檔",
-        ]
-    )
-
-    with tab_power:
+    with bottom_right:
 
         render_power_panel(decision)
 
-    with tab_big_order:
 
-        render_big_order_panel(
-            st.session_state.big_order_log
-        )
+# =========================
+# 右側：決策 + 監控 + 雷達
+# =========================
+
+with main_right:
+
+    render_decision_card(decision)
+
+    render_trade_alert_panel(trade_alert)
+
+    tab_radar, tab_big_order = st.tabs(
+        [
+            "📡 主力雷達",
+            "🐋 主力大單",
+        ]
+    )
 
     with tab_radar:
 
@@ -379,9 +430,8 @@ with right:
             asks=asks,
         )
 
-    with tab_orderbook:
+    with tab_big_order:
 
-        render_orderbook(
-            bids=bids,
-            asks=asks,
+        render_big_order_panel(
+            st.session_state.big_order_log
         )
