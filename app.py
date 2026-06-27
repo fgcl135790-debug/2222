@@ -17,7 +17,7 @@ from ui.chart_panel import render_chart
 from streamlit_autorefresh import st_autorefresh
 from ui.sidebar import render_sidebar
 from core.data_engine import get_market_data
-
+from core.decision_engine import make_decision
 
 # =========================
 # 🧠 V5.5 券商級設定
@@ -171,6 +171,33 @@ risk = ai["risk"]
 state = ai["market_state"]
 rebound = ai["rebound_prob"]
 
+bid_ratio = (
+    sum([b["size"] for b in bids])
+    /
+    max(sum([a["size"] for a in asks]), 1)
+)
+
+decision = make_decision(
+
+    price=price,
+
+    ema5=ema5,
+
+    ema20=ema20,
+
+    ema60=ema60,
+
+    rsi=rsi,
+
+    macd=macd,
+
+    macd_signal=macd_signal,
+
+    bid_ratio=bid_ratio,
+
+    rebound=rebound,
+
+)
 
 # =========================
 # 🧾 Header（券商級）
