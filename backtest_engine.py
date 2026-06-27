@@ -244,24 +244,14 @@ class BacktestEngine:
         day_candles,
         decision,
         max_hold_bars=45,
-        default_stop_pct=0.6,
-        default_take_pct=1.0,
+        default_stop_pct=0.8,
+        default_take_pct=1.7,
         commission_rate_pct=0.1425,
         commission_discount=1.0,
         tax_rate_pct=0.15,
     ):
-        stop_loss = BacktestEngine._safe_float(
-            decision.get("stop_loss"),
-            0,
-        )
-
-        take_profit = BacktestEngine._safe_float(
-            decision.get("take_profit"),
-            0,
-        )
-
-        default_stop_pct = BacktestEngine._safe_float(default_stop_pct, 0.6)
-        default_take_pct = BacktestEngine._safe_float(default_take_pct, 1.0)
+        default_stop_pct = BacktestEngine._safe_float(default_stop_pct, 0.8)
+        default_take_pct = BacktestEngine._safe_float(default_take_pct, 1.7)
 
         commission_rate_pct = BacktestEngine._safe_float(
             commission_rate_pct,
@@ -283,32 +273,34 @@ class BacktestEngine:
         stop_rate = default_stop_pct / 100
         take_rate = default_take_pct / 100
 
+        # =========================
+        # 停損 / 停利只用股價計算
+        # 不包含手續費與證交稅
+        # =========================
+
         if action == "BUY":
-            if stop_loss <= 0 or stop_loss >= entry_price:
-                stop_loss = entry_price * (1 - stop_rate)
+            stop_loss = entry_price * (1 - stop_rate)
+            take_profit = entry_price * (1 + take_rate)
 
-            if take_profit <= entry_price:
-                take_profit = entry_price * (1 + take_rate)
-
-            stop_loss_pct = (entry_price - stop_loss) / entry_price * 100
-            take_profit_pct = (take_profit - entry_price) / entry_price * 100
+            stop_loss_pct = default_stop_pct
+            take_profit_pct = default_take_pct
 
         elif action == "SELL":
-            if stop_loss <= entry_price:
-                stop_loss = entry_price * (1 + stop_rate)
+            stop_loss = entry_price * (1 + stop_rate)
+            take_profit = entry_price * (1 - take_rate)
 
-            if take_profit <= 0 or take_profit >= entry_price:
-                take_profit = entry_price * (1 - take_rate)
-
-            stop_loss_pct = (stop_loss - entry_price) / entry_price * 100
-            take_profit_pct = (entry_price - take_profit) / entry_price * 100
+            stop_loss_pct = default_stop_pct
+            take_profit_pct = default_take_pct
 
         else:
+            stop_loss = entry_price
+            take_profit = entry_price
             stop_loss_pct = 0
             take_profit_pct = 0
 
         exit_price = entry_price
         exit_reason = "時間出場"
+
         exit_index = min(
             len(day_candles) - 1,
             entry_index + max_hold_bars,
@@ -318,6 +310,103 @@ class BacktestEngine:
             len(day_candles) - 1,
             entry_index + max_hold_bars,
         )
+
+        for i in range(entry_index + 1, end_index + 1):
+            c = day_candles[i]
+            high = BacktestEngine._safe_float(c.get("high"))
+            low = BacktestEngine._safe_float(c.get("low"))
+            close = BacktestEngine._safe_float(c.get("close"))
+
+            if action == "BUY":
+                if low <= stop_loss:
+                    exit_price = stop_loss
+                    exit_reason = "停損"
+                    exit_index = i
+                    break
+
+                if high >= take_profit:
+                    exit_price = take_profit
+                    exit_reason = "停利"
+                    exit_index = i
+                    break
+
+            elif action == "SELL":
+                if high >= stop_loss:
+                    exit_price = stop_loss
+                    exit_reason = "停損"
+                    exit_index = i
+                    break
+
+                if low <= take_profit:
+                    exit_price = take_profit
+                    exit_reason = "停利"
+                    exit_index = i
+                    break
+
+            exit_price = close
+            exit_index = i
+
+        # =========================
+        # 報酬計算
+        # gross_pnl_pct：只看股價
+        # cost_pct：交易成本
+        # pnl_pct：扣完成本後
+        # =========================
+
+        if action == "BUY":
+            gross_pnl_pct = (exit_price - entry_price) / entry_price * 100
+
+            buy_commission_pct = effective_commission_pct
+            sell_commission_pct = effective_commission_pct * (exit_price / entry_price)
+            sell_tax_pct = tax_rate_pct * (exit_price / entry_price)
+
+            cost_pct = (
+                buy_commission_pct
+                + sell_commission_pct
+                + sell_tax_pct
+            )
+
+        else:
+            gross_pnl_pct = (entry_price - exit_price) / entry_price * 100
+
+            sell_commission_pct = effective_commission_pct
+            sell_tax_pct = tax_rate_pct
+            buyback_commission_pct = effective_commission_pct * (exit_price / entry_price)
+
+            cost_pct = (
+                sell_commission_pct
+                + sell_tax_pct
+                + buyback_commission_pct
+            )
+
+        net_pnl_pct = gross_pnl_pct - cost_pct
+
+        result = "WIN" if net_pnl_pct > 0 else "LOSS"
+
+        if abs(net_pnl_pct) < 0.03:
+            result = "FLAT"
+
+        hold_bars = max(0, exit_index - entry_index)
+
+        return {
+            "exit_price": exit_price,
+            "exit_reason": exit_reason,
+            "exit_index": exit_index,
+            "gross_pnl_pct": gross_pnl_pct,
+            "cost_pct": cost_pct,
+            "pnl_pct": net_pnl_pct,
+            "result": result,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "stop_loss_pct": stop_loss_pct,
+            "take_profit_pct": take_profit_pct,
+            "commission_rate_pct": commission_rate_pct,
+            "commission_discount": commission_discount,
+            "effective_commission_pct": effective_commission_pct,
+            "tax_rate_pct": tax_rate_pct,
+            "hold_bars": hold_bars,
+            "max_hold_bars": max_hold_bars,
+        }
 
         for i in range(entry_index + 1, end_index + 1):
             c = day_candles[i]
