@@ -708,15 +708,19 @@ def _add_signal_markers(
         decision=decision,
     )
 
+    price_high = max(prices) if prices else 0
+    price_low = min(prices) if prices else 0
+    price_range = max(price_high - price_low, 0.01)
+
+    arrow_gap = price_range * 0.055
+
     if signals["buy_x"]:
         fig.add_trace(
             go.Scatter(
                 x=signals["buy_x"],
                 y=signals["buy_y"],
-                mode="markers+text",
+                mode="markers",
                 name="買進訊號",
-                text=signals["buy_text"],
-                textposition="bottom center",
                 marker=dict(
                     symbol="triangle-up",
                     size=14,
@@ -726,25 +730,44 @@ def _add_signal_markers(
                         width=0.5,
                     ),
                 ),
-                textfont=dict(
-                    color=UP_COLOR,
-                    size=11,
-                ),
                 hovertemplate="買進訊號<br>%{x}<br>%{y:.2f}<extra></extra>",
             ),
             row=1,
             col=1,
         )
 
+        for bx, by, text in zip(
+            signals["buy_x"],
+            signals["buy_y"],
+            signals["buy_text"],
+        ):
+            fig.add_annotation(
+                x=bx,
+                y=by - arrow_gap,
+                text=text,
+                showarrow=True,
+                arrowhead=2,
+                ax=0,
+                ay=22,
+                bgcolor="rgba(0,230,118,0.16)",
+                bordercolor=UP_COLOR,
+                borderwidth=1,
+                borderpad=4,
+                font=dict(
+                    color=UP_COLOR,
+                    size=11,
+                ),
+                row=1,
+                col=1,
+            )
+
     if signals["sell_x"]:
         fig.add_trace(
             go.Scatter(
                 x=signals["sell_x"],
                 y=signals["sell_y"],
-                mode="markers+text",
+                mode="markers",
                 name="賣出訊號",
-                text=signals["sell_text"],
-                textposition="top center",
                 marker=dict(
                     symbol="triangle-down",
                     size=14,
@@ -754,15 +777,36 @@ def _add_signal_markers(
                         width=0.5,
                     ),
                 ),
-                textfont=dict(
-                    color=DOWN_COLOR,
-                    size=11,
-                ),
                 hovertemplate="賣出訊號<br>%{x}<br>%{y:.2f}<extra></extra>",
             ),
             row=1,
             col=1,
         )
+
+        for sx, sy, text in zip(
+            signals["sell_x"],
+            signals["sell_y"],
+            signals["sell_text"],
+        ):
+            fig.add_annotation(
+                x=sx,
+                y=sy + arrow_gap,
+                text=text,
+                showarrow=True,
+                arrowhead=2,
+                ax=0,
+                ay=-22,
+                bgcolor="rgba(255,82,82,0.16)",
+                bordercolor=DOWN_COLOR,
+                borderwidth=1,
+                borderpad=4,
+                font=dict(
+                    color=DOWN_COLOR,
+                    size=11,
+                ),
+                row=1,
+                col=1,
+            )
 
 
 def _add_right_price_label(fig, current_price, color):
