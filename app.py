@@ -7,6 +7,7 @@ from ai_predictor import AIPredictor
 from decision_engine import DecisionEngine
 from big_order_engine import BigOrderEngine
 from trade_alert_engine import TradeAlertEngine
+from alert_engine import AlertEngine
 
 from ui.header import render_header
 from ui.ai_panel import render_ai_panel
@@ -18,6 +19,7 @@ from ui.trade_alert_panel import render_trade_alert_panel
 from ui.power_panel import render_power_panel
 from ui.sidebar import render_sidebar
 from ui.big_order_panel import render_big_order_panel
+from ui.alerts import render_alerts
 
 from core.data_engine import get_market_data
 from streamlit_autorefresh import st_autorefresh
@@ -271,6 +273,12 @@ trade_alert = TradeAlertEngine.track(
     price=price,
 )
 
+alerts = AlertEngine.build(
+    decision=decision,
+    trade_alert=trade_alert,
+    big_order_log=st.session_state.big_order_log,
+)
+
 # =========================
 # Header
 # =========================
@@ -315,6 +323,10 @@ with left:
 # =========================
 
 with right:
+
+    render_alerts(alerts)
+
+    st.divider()
 
     render_decision_card(decision)
 
