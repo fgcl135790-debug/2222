@@ -496,6 +496,7 @@ def main():
     decision=decision,
     now=now,
     min_score=75,
+    max_hold_bars=50,
     )
 
     # =========================
