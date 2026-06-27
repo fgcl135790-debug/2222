@@ -548,30 +548,100 @@ def _render_chart_toolbar(
     )
 
 
+def _select_control(label, options, default, key):
+    """
+    優先使用 Streamlit segmented_control。
+    如果環境不支援，就自動退回 radio。
+    """
+
+    if hasattr(st, "segmented_control"):
+        value = st.segmented_control(
+            label,
+            options,
+            default=default,
+            key=key,
+            label_visibility="collapsed",
+        )
+
+        if value is None:
+            return default
+
+        return value
+
+    return st.radio(
+        label,
+        options,
+        index=options.index(default),
+        horizontal=True,
+        label_visibility="collapsed",
+        key=key,
+    )
+
+
 def _render_period_selector():
 
-    col1, col2 = st.columns([0.92, 1.08])
+    st.markdown(
+        """
+<style>
+.chart-control-title {
+    color: #9ca3af;
+    font-size: 11px;
+    font-weight: 800;
+    margin-bottom: 3px;
+}
+
+div[data-testid="stHorizontalBlock"] {
+    align-items: center;
+}
+
+div[data-testid="stRadio"] label {
+    font-size: 11px !important;
+}
+
+div[data-testid="stRadio"] div[role="radiogroup"] {
+    gap: 6px;
+}
+
+div[data-testid="stRadio"] div[role="radiogroup"] label {
+    background: rgba(255,255,255,0.035);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 999px;
+    padding: 4px 10px;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns([0.92, 1.08], gap="small")
 
     with col1:
-        mode = st.radio(
-            "圖表模式",
-            ["分時走勢", "K線走勢", "多週期分析"],
-            horizontal=True,
-            label_visibility="collapsed",
+        st.markdown(
+            '<div class="chart-control-title">圖表模式</div>',
+            unsafe_allow_html=True,
+        )
+
+        mode = _select_control(
+            label="圖表模式",
+            options=["分時走勢", "K線走勢", "多週期分析"],
+            default="分時走勢",
             key="chart_mode_selector",
         )
 
     with col2:
-        period = st.radio(
-            "週期",
-            ["1分", "5分", "15分", "30分", "日"],
-            horizontal=True,
-            label_visibility="collapsed",
+        st.markdown(
+            '<div class="chart-control-title">週期</div>',
+            unsafe_allow_html=True,
+        )
+
+        period = _select_control(
+            label="週期",
+            options=["1分", "5分", "15分", "30分", "日"],
+            default="1分",
             key="chart_period_selector",
         )
 
     return mode, period
-
 
 def _add_common_layout(fig, chart_key):
     fig.update_layout(
