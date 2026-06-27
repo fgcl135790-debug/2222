@@ -226,6 +226,7 @@ def main():
                 api_key=api_key,
                 stock_code=stock_code,
                 tick=st.session_state.tick,
+                mode=mode,
             )
 
         if not quote:
