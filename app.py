@@ -233,40 +233,61 @@ def signal_dot(color, text):
     """
 
 # =========================
-# 🧠 AI 判讀（V5.5 修正版）
+# 🖥️ V7.5 主畫面
 # =========================
 
-render_ai_panel(
-    signal=signal,
-    score=score,
-    rebound=rebound,
-)
-
-render_decision_card(decision)
+left, right = st.columns([2.2, 1])
 
 # =========================
-# 📡 主力雷達（台股正確顏色版）
+# 左側
 # =========================
+with left:
 
-render_radar(
-    bids=bids,
-    asks=asks,
-)
+    render_ai_panel(
+        signal=signal,
+        score=score,
+        rebound=rebound,
+    )
+
+    st.subheader("📈 分時趨勢")
+
+    fig = ChartBuilder.build_price_chart(
+        prices,
+        volumes,
+    )
+
+    fig.update_layout(
+        height=420,
+        margin=dict(
+            l=10,
+            r=10,
+            t=20,
+            b=10,
+        ),
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+    )
 
 # =========================
-# 📈 走勢圖
+# 右側
 # =========================
+with right:
 
-render_chart(
-    prices=prices,
-    volumes=volumes,
-)
+    render_decision_card(decision)
 
-# =========================
-# 📋 五檔
-# =========================
+    st.divider()
 
-render_orderbook(
-    bids=bids,
-    asks=asks,
-)
+    render_radar(
+        bids=bids,
+        asks=asks,
+    )
+
+    st.divider()
+
+    render_orderbook(
+        bids=bids,
+        asks=asks,
+    )
