@@ -246,6 +246,9 @@ class BacktestEngine:
         max_hold_bars=45,
         default_stop_pct=0.6,
         default_take_pct=1.0,
+        commission_rate_pct=0.1425,
+        commission_discount=1.0,
+        tax_rate_pct=0.15,
     ):
         stop_loss = BacktestEngine._safe_float(
             decision.get("stop_loss"),
@@ -260,10 +263,26 @@ class BacktestEngine:
         default_stop_pct = BacktestEngine._safe_float(default_stop_pct, 0.6)
         default_take_pct = BacktestEngine._safe_float(default_take_pct, 1.0)
 
+        commission_rate_pct = BacktestEngine._safe_float(
+            commission_rate_pct,
+            0.1425,
+        )
+
+        commission_discount = BacktestEngine._safe_float(
+            commission_discount,
+            1.0,
+        )
+
+        tax_rate_pct = BacktestEngine._safe_float(
+            tax_rate_pct,
+            0.15,
+        )
+
+        effective_commission_pct = commission_rate_pct * commission_discount
+
         stop_rate = default_stop_pct / 100
         take_rate = default_take_pct / 100
 
-        # 如果 DecisionEngine 沒給合理停損停利，就用 UI 設定的固定百分比
         if action == "BUY":
             if stop_loss <= 0 or stop_loss >= entry_price:
                 stop_loss = entry_price * (1 - stop_rate)
@@ -299,6 +318,88 @@ class BacktestEngine:
             len(day_candles) - 1,
             entry_index + max_hold_bars,
         )
+
+        for i in range(entry_index + 1, end_index + 1):
+            c = day_candles[i]
+            high = BacktestEngine._safe_float(c.get("high"))
+            low = BacktestEngine._safe_float(c.get("low"))
+            close = BacktestEngine._safe_float(c.get("close"))
+
+            if action == "BUY":
+                if low <= stop_loss:
+                    exit_price = stop_loss
+                    exit_reason = "停損"
+                    exit_index = i
+                    break
+
+                if high >= take_profit:
+                    exit_price = take_profit
+                    exit_reason = "停利"
+                    exit_index = i
+                    break
+
+            elif action == "SELL":
+                if high >= stop_loss:
+                    exit_price = stop_loss
+                    exit_reason = "停損"
+                    exit_index = i
+                    break
+
+                if low <= take_profit:
+                    exit_price = take_profit
+                    exit_reason = "停利"
+                    exit_index = i
+                    break
+
+            exit_price = close
+            exit_index = i
+
+        if action == "BUY":
+            gross_pnl_pct = (exit_price - entry_price) / entry_price * 100
+
+            buy_commission_pct = effective_commission_pct
+            sell_commission_pct = effective_commission_pct * (exit_price / entry_price)
+            sell_tax_pct = tax_rate_pct * (exit_price / entry_price)
+
+            cost_pct = buy_commission_pct + sell_commission_pct + sell_tax_pct
+
+        else:
+            gross_pnl_pct = (entry_price - exit_price) / entry_price * 100
+
+            sell_commission_pct = effective_commission_pct
+            sell_tax_pct = tax_rate_pct
+            buyback_commission_pct = effective_commission_pct * (exit_price / entry_price)
+
+            cost_pct = sell_commission_pct + sell_tax_pct + buyback_commission_pct
+
+        net_pnl_pct = gross_pnl_pct - cost_pct
+
+        result = "WIN" if net_pnl_pct > 0 else "LOSS"
+
+        if abs(net_pnl_pct) < 0.03:
+            result = "FLAT"
+
+        hold_bars = max(0, exit_index - entry_index)
+
+        return {
+            "exit_price": exit_price,
+            "exit_reason": exit_reason,
+            "exit_index": exit_index,
+            "gross_pnl_pct": gross_pnl_pct,
+            "cost_pct": cost_pct,
+            "pnl_pct": net_pnl_pct,
+            "result": result,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "stop_loss_pct": stop_loss_pct,
+            "take_profit_pct": take_profit_pct,
+            "commission_rate_pct": commission_rate_pct,
+            "commission_discount": commission_discount,
+            "effective_commission_pct": effective_commission_pct,
+            "tax_rate_pct": tax_rate_pct,
+            "hold_bars": hold_bars,
+            "max_hold_bars": max_hold_bars,
+        }
 
         for i in range(entry_index + 1, end_index + 1):
             c = day_candles[i]
@@ -525,6 +626,9 @@ class BacktestEngine:
         day_scope="last_open_day",
         default_stop_pct=0.6,
         default_take_pct=1.0,
+        commission_rate_pct=0.1425,
+        commission_discount=1.0,
+        tax_rate_pct=0.15,
     ):
         candles = BacktestEngine.fetch_historical_candles(
             api_key=api_key,
@@ -628,8 +732,11 @@ class BacktestEngine:
                     max_hold_bars=max_hold_bars,
                     default_stop_pct=default_stop_pct,
                     default_take_pct=default_take_pct,
+                    commission_rate_pct=commission_rate_pct,
+                    commission_discount=commission_discount,
+                    tax_rate_pct=tax_rate_pct,
                 )
-
+                
                 exit_index = exit_data["exit_index"]
                 exit_candle = day_candles[exit_index]
 
@@ -642,17 +749,23 @@ class BacktestEngine:
                         "resonance": resonance,
                         "entry_time": entry_candle["time"].strftime("%H:%M"),
                         "entry_price": round(entry_price, 2),
-                        "exit_time": exit_candle["time"].strftime("%H:%M"),
-                        "exit_price": round(exit_data["exit_price"], 2),
-                        "exit_reason": exit_data["exit_reason"],
-                        "pnl_pct": round(exit_data["pnl_pct"], 3),
-                        "result": exit_data["result"],
                         "stop_loss": round(exit_data["stop_loss"], 2),
                         "take_profit": round(exit_data["take_profit"], 2),
                         "stop_loss_pct": round(exit_data["stop_loss_pct"], 2),
                         "take_profit_pct": round(exit_data["take_profit_pct"], 2),
+                        "exit_time": exit_candle["time"].strftime("%H:%M"),
+                        "exit_price": round(exit_data["exit_price"], 2),
+                        "exit_reason": exit_data["exit_reason"],
                         "hold_bars": exit_data["hold_bars"],
                         "max_hold_bars": exit_data["max_hold_bars"],
+                        "gross_pnl_pct": round(exit_data["gross_pnl_pct"], 3),
+                        "cost_pct": round(exit_data["cost_pct"], 3),
+                        "pnl_pct": round(exit_data["pnl_pct"], 3),
+                        "commission_rate_pct": round(exit_data["commission_rate_pct"], 4),
+                        "commission_discount": round(exit_data["commission_discount"], 2),
+                        "effective_commission_pct": round(exit_data["effective_commission_pct"], 4),
+                        "tax_rate_pct": round(exit_data["tax_rate_pct"], 3),
+                        "result": exit_data["result"],
                     }
                 )
 
