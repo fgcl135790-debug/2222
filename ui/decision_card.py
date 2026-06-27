@@ -85,28 +85,28 @@ def render_decision_card(decision):
                         "thickness": 0.25
                     },
 
-                    "bgcolor": "#1b1f2a",
+                    "bgcolor": CARD_BG,
 
                     "steps": [
 
                         {
                             "range": [0, 30],
-                            "color": "#401515"
+                            "color":GAUGE_RED
                         },
 
                         {
                             "range": [30, 60],
-                            "color": "#665522"
+                            "color":GAUGE_YELLOW
                         },
 
                         {
                             "range": [60, 80],
-                            "color": "#225533"
+                            "color":GAUGE_GREEN
                         },
 
                         {
                             "range": [80, 100],
-                            "color": "#00c853"
+                            "color":GAUGE_STRONG
                         }
 
                     ]
@@ -143,4 +143,4 @@ def render_decision_card(decision):
 
         for r in reasons:
 
-            st.markdown(f"✅ {r}")
+            st.markdown(f"🔹 {r}")
