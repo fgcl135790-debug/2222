@@ -104,11 +104,8 @@ def render_header(
     stock_code = escape(str(stock_code))
 
     price = _safe_float(price)
-    score = _safe_int(score)
-    rebound = _safe_int(rebound)
-
-    score = max(0, min(100, score))
-    rebound = max(0, min(100, rebound))
+    score = max(0, min(100, _safe_int(score)))
+    rebound = max(0, min(100, _safe_int(rebound)))
 
     time_text = now.strftime("%H:%M:%S") if hasattr(now, "strftime") else str(now)
 
@@ -118,10 +115,67 @@ def render_header(
     rebound_color = UP_COLOR if rebound >= 60 else WAIT_COLOR if rebound >= 40 else DOWN_COLOR
 
     risk_color, risk_title, risk_sub = _risk_style(risk)
-
     force_color, force_title, force_sub = _force_style(bid_ratio)
-
     status_color, status_title, status_sub = _status_style(signal, state)
+
+    # =========================
+    # 原生 Topbar：避免 components iframe 吃掉
+    # =========================
+
+    st.markdown(
+        f"""
+        <div style="
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            margin:0 0 8px 0;
+            padding:0 2px;
+        ">
+            <div style="
+                display:flex;
+                align-items:center;
+                gap:8px;
+                font-size:17px;
+                font-weight:900;
+                color:{TEXT};
+            ">
+                🏦 {name} ({stock_code})
+                <span style="color:#facc15;">★</span>
+            </div>
+
+            <div style="
+                display:flex;
+                align-items:center;
+                gap:14px;
+                color:{SUBTEXT};
+                font-size:12px;
+                white-space:nowrap;
+            ">
+                <span>◎ {source_text} {time_text}</span>
+                <span>
+                    <span style="
+                        display:inline-block;
+                        width:8px;
+                        height:8px;
+                        border-radius:99px;
+                        background:{conn_color};
+                        box-shadow:0 0 8px {conn_color};
+                        margin-right:5px;
+                    "></span>
+                    {connection_status}
+                </span>
+                <span>⚙ 設定</span>
+                <span>🔔 聲音警示</span>
+                <span>自訂布局</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # =========================
+    # 狀態卡片
+    # =========================
 
     html = f"""
     <!DOCTYPE html>
@@ -136,52 +190,6 @@ def render_header(
                 color: {TEXT};
             }}
 
-            .topbar {{
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 10px;
-            }}
-
-            .title {{
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                font-size: 17px;
-                font-weight: 900;
-                color: {TEXT};
-            }}
-
-            .star {{
-                color: #facc15;
-                font-size: 16px;
-            }}
-
-            .meta {{
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                font-size: 12px;
-                color: {SUBTEXT};
-            }}
-
-            .dot {{
-                width: 8px;
-                height: 8px;
-                border-radius: 999px;
-                background: {conn_color};
-                box-shadow: 0 0 8px {conn_color};
-                display: inline-block;
-                margin-right: 5px;
-            }}
-
-            .tools {{
-                display: flex;
-                gap: 10px;
-                font-size: 12px;
-                color: {SUBTEXT};
-            }}
-
             .grid {{
                 display: grid;
                 grid-template-columns: repeat(6, 1fr);
@@ -193,29 +201,29 @@ def render_header(
                 background: {CARD_BG};
                 border: 1px solid {CARD_BORDER};
                 border-radius: 12px;
-                padding: 12px 13px;
-                min-height: 82px;
+                padding: 11px 13px;
+                min-height: 76px;
                 box-sizing: border-box;
             }}
 
             .label {{
                 color: {SUBTEXT};
                 font-size: 12px;
-                margin-bottom: 7px;
+                margin-bottom: 6px;
             }}
 
             .value {{
-                font-size: 26px;
+                font-size: 25px;
                 line-height: 1.05;
                 font-weight: 900;
-                margin-bottom: 7px;
+                margin-bottom: 6px;
             }}
 
             .midvalue {{
-                font-size: 22px;
+                font-size: 20px;
                 line-height: 1.1;
                 font-weight: 900;
-                margin-bottom: 7px;
+                margin-bottom: 6px;
             }}
 
             .sub {{
@@ -242,33 +250,11 @@ def render_header(
                 .grid {{
                     grid-template-columns: repeat(2, 1fr);
                 }}
-
-                .tools {{
-                    display: none;
-                }}
             }}
         </style>
     </head>
 
     <body>
-        <div class="topbar">
-            <div class="title">
-                🏦 {name} ({stock_code})
-                <span class="star">★</span>
-            </div>
-
-            <div class="meta">
-                <span>◎ {source_text} {time_text}</span>
-                <span><span class="dot"></span>{connection_status}</span>
-            </div>
-
-            <div class="tools">
-                <span>⚙ 設定</span>
-                <span>🔔 聲音警示</span>
-                <span>自訂布局</span>
-            </div>
-        </div>
-
         <div class="grid">
 
             <div class="card">
@@ -316,6 +302,6 @@ def render_header(
 
     components.html(
         html,
-        height=138,
+        height=92,
         scrolling=False,
     )
