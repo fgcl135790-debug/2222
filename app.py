@@ -9,6 +9,7 @@ from simulation_engine import SimulationEngine
 from market_analyzer import MarketAnalyzer
 from ai_predictor import AIPredictor
 from charts import ChartBuilder
+from ui.header import render_header
 
 from streamlit_autorefresh import st_autorefresh
 
@@ -177,14 +178,14 @@ rebound = ai["rebound_prob"]
 # =========================
 # 🧾 Header（券商級）
 # =========================
-st.title(f"🏦  {name} ({stock_code})")
-
-colA, colB, colC, colD = st.columns(4)
-
-colA.metric("現價", price)
-colB.metric("AI信心", f"{score}%")
-colC.metric("風險", f"{risk}%")
-colD.metric("狀態", state)
+render_header(
+    name=name,
+    stock_code=stock_code,
+    price=price,
+    score=score,
+    risk=risk,
+    state=state,
+)
 
 
 def signal_dot(color, text):
