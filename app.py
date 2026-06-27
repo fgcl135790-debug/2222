@@ -140,6 +140,7 @@ try:
     from ui.main_force_panel import render_main_force_panel
     from ui.alerts import render_alerts
     from ui.sidebar import render_sidebar
+    from ui.event_stream_panel import render_event_stream_panel
 
     from core.data_engine import get_market_data
     from streamlit_autorefresh import st_autorefresh
@@ -523,6 +524,7 @@ def main():
             prices=prices,
             volumes=volumes,
             vwap_values=vwaps,
+            time_values=times,
         )
 
         render_lower_market_grid(
@@ -539,6 +541,12 @@ def main():
             volume=volume,
             volumes=volumes,
         )
+
+        render_event_stream_panel(
+            big_order_log=st.session_state.big_order_log,
+            decision=decision,
+        )
+        
     # =========================
     # 右側：警示 + 決策 + 反彈 + 籌碼結論
     # =========================
