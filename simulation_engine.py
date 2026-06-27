@@ -63,10 +63,6 @@ class SimulationEngine:
 
     @staticmethod
     def _scenario_force(scenario, x):
-        """
-        x = 0 ~ 1，代表 09:00 到 13:30 的進度。
-        """
-
         if scenario == "漲停鎖死":
             if x < 0.18:
                 return 0.55
@@ -107,11 +103,10 @@ class SimulationEngine:
                 return 0.06
             return 0.16
 
-        # 一般波動
         return 0.025 * math.sin(x * math.pi * 5)
 
     @staticmethod
-    def _make_full_day_path(stock_code, scenario):
+    def _make_full_day_path(stock_code, scenario, sim_run_id=0):
         profile = SimulationEngine._stock_profile(stock_code)
 
         name = profile["name"]
@@ -122,6 +117,7 @@ class SimulationEngine:
         seed = (
             sum(ord(c) for c in str(stock_code))
             + sum(ord(c) for c in str(scenario)) * 13
+            + int(sim_run_id) * 101
         )
 
         rng = random.Random(seed)
@@ -165,7 +161,6 @@ class SimulationEngine:
                 x=x,
             )
 
-            # 模擬真實盤中走勢：主趨勢 + 盤中波 + 小雜訊
             morning_wave = math.sin(x * math.pi * 2.8) * 0.055
             intraday_wave = math.sin(x * math.pi * 11.0) * 0.035
             micro_wave = math.sin(x * math.pi * 37.0) * 0.014
@@ -199,13 +194,13 @@ class SimulationEngine:
             day_high = max(day_high, price)
             day_low = min(day_low, price)
 
-            # 成交量：開盤大、中段收斂、轉折放量、尾盤再放量
             open_factor = 2.2 if i < 18 else 1.0
             close_factor = 1.5 if i > 235 else 1.0
             wave_volume = 1 + max(0, math.sin(x * math.pi * 5.5)) * 0.75
             volatility_factor = 1 + abs(change) / max(tick_size, 0.01) * 0.26
 
             spike = 1.0
+
             if i in [25, 55, 88, 126, 162, 205, 240]:
                 spike = rng.uniform(2.0, 4.0)
 
@@ -226,17 +221,6 @@ class SimulationEngine:
 
             vwap = cum_amount / max(cum_volume, 1)
 
-            event = ""
-
-            if i >= 1:
-                prev = history[-1]
-
-                if price > vwap and prev["price"] <= prev["vwap"]:
-                    event = "BUY_CROSS_VWAP"
-
-                elif price < vwap and prev["price"] >= prev["vwap"]:
-                    event = "SELL_CROSS_VWAP"
-
             history.append(
                 {
                     "time": start + timedelta(minutes=i),
@@ -245,7 +229,6 @@ class SimulationEngine:
                     "vwap": round(vwap, 2),
                     "high": round(day_high, 2),
                     "low": round(day_low, 2),
-                    "event": event,
                 }
             )
 
@@ -258,22 +241,21 @@ class SimulationEngine:
         }
 
     @staticmethod
-    def _make_intraday_replay(stock_code, tick=0, scenario="一般波動"):
+    def _make_intraday_replay(stock_code, tick=0, scenario="一般波動", sim_run_id=0):
         profile = SimulationEngine._make_full_day_path(
             stock_code=stock_code,
             scenario=scenario,
+            sim_run_id=sim_run_id,
         )
 
         full_history = profile["history"]
 
         tick = SimulationEngine._safe_int(tick, 0)
 
-        # 每次 refresh 推進 3 分鐘。
-        # 1 秒刷新時，大約 90 秒跑完整個 09:00~13:30。
-        replay_step = 3
+        # 一開始 25 筆，之後每次刷新增加 1 分鐘
         reveal_count = min(
             len(full_history),
-            max(25, 25 + tick * replay_step),
+            max(25, 25 + tick),
         )
 
         history = full_history[:reveal_count]
@@ -286,6 +268,7 @@ class SimulationEngine:
             sum(ord(c) for c in str(stock_code))
             + tick * 17
             + sum(ord(c) for c in str(scenario)) * 19
+            + int(sim_run_id) * 97
         )
 
         rng = random.Random(seed)
@@ -340,7 +323,9 @@ class SimulationEngine:
                 }
             )
 
-        quote = {
+        serial = f"SIM_{stock_code}_{scenario}_{sim_run_id}_{tick}_{reveal_count}"
+
+        return {
             "name": profile["name"],
             "stock_code": str(stock_code),
             "price": latest["price"],
@@ -354,48 +339,51 @@ class SimulationEngine:
             "bids": bids,
             "asks": asks,
             "trade": {
-                "serial": f"SIM_{stock_code}_{scenario}_{tick}_{reveal_count}",
+                "serial": serial,
                 "time": latest["time"].isoformat(),
                 "price": latest["price"],
                 "size": latest["volume"],
             },
-            "serial": f"SIM_{stock_code}_{scenario}_{tick}_{reveal_count}",
+            "serial": serial,
             "history": history,
             "full_day_points": len(full_history),
             "replay_points": reveal_count,
             "scenario": scenario,
+            "sim_run_id": sim_run_id,
         }
 
-        return quote
-
     @staticmethod
-    def get_quote(stock_code="2330", tick=0, scenario="一般波動", **kwargs):
+    def get_quote(stock_code="2330", tick=0, scenario="一般波動", sim_run_id=0, **kwargs):
         return SimulationEngine._make_intraday_replay(
             stock_code=stock_code,
             tick=tick,
             scenario=scenario or "一般波動",
+            sim_run_id=sim_run_id,
         )
 
     @staticmethod
-    def generate(stock_code="2330", tick=0, scenario="一般波動", **kwargs):
+    def generate(stock_code="2330", tick=0, scenario="一般波動", sim_run_id=0, **kwargs):
         return SimulationEngine.get_quote(
             stock_code=stock_code,
             tick=tick,
             scenario=scenario,
+            sim_run_id=sim_run_id,
         )
 
     @staticmethod
-    def get_market_data(stock_code="2330", tick=0, scenario="一般波動", **kwargs):
+    def get_market_data(stock_code="2330", tick=0, scenario="一般波動", sim_run_id=0, **kwargs):
         return SimulationEngine.get_quote(
             stock_code=stock_code,
             tick=tick,
             scenario=scenario,
+            sim_run_id=sim_run_id,
         )
 
     @staticmethod
-    def next_quote(stock_code="2330", tick=0, scenario="一般波動", **kwargs):
+    def next_quote(stock_code="2330", tick=0, scenario="一般波動", sim_run_id=0, **kwargs):
         return SimulationEngine.get_quote(
             stock_code=stock_code,
             tick=tick,
             scenario=scenario,
+            sim_run_id=sim_run_id,
         )
