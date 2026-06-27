@@ -260,6 +260,6 @@ def render_orderbook(bids, asks):
 
     components.html(
         html,
-        height=286,
+        height=350,
         scrolling=False,
     )
