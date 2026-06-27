@@ -12,6 +12,7 @@ from ui.orderbook import render_orderbook
 from ui.radar import render_radar
 from ui.chart_panel import render_chart
 from ui.decision_card import render_decision_card
+from ui.power_panel import render_power_panel
 from ui.sidebar import render_sidebar
 
 from core.data_engine import get_market_data
@@ -261,6 +262,10 @@ with left:
 with right:
 
     render_decision_card(decision)
+
+    st.divider()
+
+    render_power_panel(decision)
 
     st.divider()
 
