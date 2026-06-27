@@ -450,11 +450,11 @@ with main_left:
         volumes=volumes,
     )
 
-render_depth_panel(
-    bids=bids,
-    asks=asks,
-    decision=decision,
-)
+    render_depth_panel(
+        bids=bids,
+        asks=asks,
+        decision=decision,
+    )
 
 
 # =========================
