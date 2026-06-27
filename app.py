@@ -15,6 +15,7 @@ from ui.orderbook import render_orderbook
 from ui.radar import render_radar
 from ui.chart_panel import render_chart
 from streamlit_autorefresh import st_autorefresh
+from ui.sidebar import render_sidebar
 
 
 # =========================
@@ -67,26 +68,16 @@ for k in ["price_history", "volume_history", "tick", "last_serial"]:
 
 
 # =========================
-# 🧠 Sidebar（券商級控制中心）
+# 🧠 Sidebar
 # =========================
-with st.sidebar:
 
-    st.title("⚙️  控制中心")
-
-    stock_code = st.text_input("股票代號", "2330")
-
-    data_source = st.radio("資料來源", ["真實盤", "模擬盤"])
-
-    api_key = st.text_input("Fugle API Key", type="password")
-
-    mode = st.selectbox("AI模式", ["一般", "激進", "保守"])
-
-    refresh_sec = st.slider("更新秒數", 1, 5, 2)
-
-    if st.button("重置股票"):
-        reset_state()
-        st.rerun()
-
+(
+    stock_code,
+    data_source,
+    api_key,
+    mode,
+    refresh_sec,
+) = render_sidebar(reset_state)
 
 # =========================
 # ⏱ Auto refresh
@@ -246,4 +237,3 @@ render_orderbook(
     bids=bids,
     asks=asks,
 )
-
