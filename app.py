@@ -249,11 +249,13 @@ def main():
             st.exception(e)
             st.stop()
 
+    # 模擬盤才每次刷新推進 tick
     if data_source == "模擬盤":
         st.session_state.tick += 1
 
     # =========================
     # 統一資料流 Snapshot
+    # 真實盤休市後，serial 不會再用現在時間，所以不會一直新增假資料
     # =========================
 
     snapshot = MarketFlowEngine.build_snapshot(
@@ -261,6 +263,7 @@ def main():
         quote=quote,
         stock_code=stock_code,
         now=now,
+        data_source=data_source,
     )
 
     name = snapshot["name"]
@@ -272,6 +275,7 @@ def main():
     bids = snapshot["bids"]
     asks = snapshot["asks"]
     serial = snapshot["serial"]
+    market_status = snapshot.get("market_status", "未知")
 
     prices = snapshot["prices"]
     volumes = snapshot["volumes"]
@@ -416,6 +420,10 @@ def main():
     else:
         state = f"等待確認｜{final_state}"
 
+    # 休市時，Header 狀態補上休市提醒，但不影響決策卡內容
+    if data_source == "真實盤" and market_status == "休市":
+        state = f"休市｜{state}"
+
     if score >= 80:
         risk = "方向明確"
 
@@ -451,11 +459,12 @@ def main():
     # Header
     # =========================
 
-    connection_status = (
-        "資料延遲"
-        if st.session_state.get("api_error_message")
-        else "連線正常"
-    )
+    if st.session_state.get("api_error_message"):
+        connection_status = "資料延遲"
+    elif data_source == "真實盤" and market_status == "休市":
+        connection_status = "休市快照"
+    else:
+        connection_status = "連線正常"
 
     render_header(
         name=name,
