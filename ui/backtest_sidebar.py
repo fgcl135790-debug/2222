@@ -96,7 +96,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             step=5,
             key="bt_max_hold_bars",
         )
-                default_stop_pct = st.slider(
+        default_stop_pct = st.slider(
             "回測停損 %",
             min_value=0.2,
             max_value=3.0,
