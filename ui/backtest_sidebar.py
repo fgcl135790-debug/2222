@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from backtest_engine import BacktestEngine
+from win_rate_engine import WinRateEngine
 
 
 def _fmt_pct(value):
@@ -19,9 +20,9 @@ def _fmt_num(value):
 
 
 def render_backtest_sidebar_panel(api_key, stock_code):
-    with st.sidebar.expander("📊 回測 / 勝率統計", expanded=False):
+    with st.sidebar.expander("📊 回測", expanded=False):
 
-        st.caption("使用 Fugle 近 30 日歷史分 K 回測目前決策邏輯。")
+        st.caption("使用 Fugle 歷史分 K 回測目前策略。")
 
         if not api_key:
             st.warning("請先輸入 Fugle API KEY。")
@@ -81,8 +82,10 @@ def render_backtest_sidebar_panel(api_key, stock_code):
         )
 
         if run_clicked:
+            st.info("已收到回測指令，開始抓歷史 K 線...")
+
             try:
-                with st.spinner("回測中..."):
+                with st.spinner("回測中，請稍等..."):
                     result = BacktestEngine.run(
                         api_key=api_key,
                         symbol=symbol,
@@ -95,6 +98,11 @@ def render_backtest_sidebar_panel(api_key, stock_code):
 
                 st.session_state.backtest_result = result
 
+                if result.get("ok"):
+                    st.success("回測完成")
+                else:
+                    st.error(result.get("message", "回測失敗"))
+
             except Exception as e:
                 st.session_state.backtest_result = {
                     "ok": False,
@@ -102,6 +110,9 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                     "summary": {},
                     "trades": [],
                 }
+
+                st.error("回測執行時發生錯誤")
+                st.exception(e)
 
         result = st.session_state.get("backtest_result")
 
@@ -126,36 +137,14 @@ def render_backtest_sidebar_panel(api_key, stock_code):
         c1, c2 = st.columns(2)
 
         with c1:
-            st.metric(
-                "總交易",
-                summary.get("total", 0),
-            )
-
-            st.metric(
-                "勝率",
-                _fmt_pct(summary.get("win_rate", 0)),
-            )
-
-            st.metric(
-                "做多勝率",
-                _fmt_pct(summary.get("buy_win_rate", 0)),
-            )
+            st.metric("總交易", summary.get("total", 0))
+            st.metric("勝率", _fmt_pct(summary.get("win_rate", 0)))
+            st.metric("做多勝率", _fmt_pct(summary.get("buy_win_rate", 0)))
 
         with c2:
-            st.metric(
-                "Profit Factor",
-                _fmt_num(summary.get("profit_factor", 0)),
-            )
-
-            st.metric(
-                "總報酬",
-                _fmt_pct(summary.get("total_pnl", 0)),
-            )
-
-            st.metric(
-                "做空勝率",
-                _fmt_pct(summary.get("sell_win_rate", 0)),
-            )
+            st.metric("Profit Factor", _fmt_num(summary.get("profit_factor", 0)))
+            st.metric("總報酬", _fmt_pct(summary.get("total_pnl", 0)))
+            st.metric("做空勝率", _fmt_pct(summary.get("sell_win_rate", 0)))
 
         st.caption(
             f"最大回撤 {_fmt_pct(summary.get('max_drawdown', 0))}｜"
@@ -163,8 +152,22 @@ def render_backtest_sidebar_panel(api_key, stock_code):
         )
 
         if trades:
+            import_clicked = st.button(
+                "匯入勝率統計",
+                use_container_width=True,
+                key="bt_import_to_winrate",
+            )
+
+            if import_clicked:
+                count = WinRateEngine.import_backtest_trades(
+                    st=st,
+                    trades=trades,
+                )
+
+                st.success(f"已匯入 {count} 筆回測交易到勝率統計")
+
             st.divider()
-            st.caption("最近 10 筆交易")
+            st.caption("最近 10 筆回測交易")
 
             df = pd.DataFrame(trades[-10:])
 
@@ -178,13 +181,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "result",
             ]
 
-            df = df[
-                [
-                    col
-                    for col in show_cols
-                    if col in df.columns
-                ]
-            ]
+            df = df[[col for col in show_cols if col in df.columns]]
 
             st.dataframe(
                 df,
