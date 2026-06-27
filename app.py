@@ -142,6 +142,7 @@ try:
     from ui.main_force_panel import render_main_force_panel
     from ui.alerts import render_alerts
     from ui.sidebar import render_sidebar
+    from ui.backtest_sidebar import render_backtest_sidebar_panel
     from ui.event_stream_panel import render_event_stream_panel
 
     from core.data_engine import get_market_data
@@ -203,6 +204,11 @@ def main():
         mode,
         refresh_sec,
     ) = render_sidebar(reset_state)
+
+    render_backtest_sidebar_panel(
+    api_key=api_key,
+    stock_code=stock_code,
+    )
 
     # =========================
     # 切換股票 / 資料來源 / 模擬模式時清空
