@@ -146,6 +146,7 @@ try:
     from ui.backtest_sidebar import render_backtest_sidebar_panel
     from ui.win_rate_sidebar import render_win_rate_sidebar_panel
     from ui.event_stream_panel import render_event_stream_panel
+    from ui.kline_export_sidebar import render_kline_export_sidebar_panel
 
     from core.data_engine import get_market_data
     from streamlit_autorefresh import st_autorefresh
@@ -214,6 +215,11 @@ def main():
     )
 
     render_win_rate_sidebar_panel()
+
+    render_kline_export_sidebar_panel(
+    api_key=api_key,
+    stock_code=stock_code,
+    )
 
     # =========================
     # 切換股票 / 資料來源 / 模擬模式時清空
