@@ -359,12 +359,6 @@ def _render_chart_toolbar(
         price_state = "跌破 VWAP"
         price_color = DOWN_COLOR
 
-    def tab_class(name):
-        return "tab tab-active" if name == mode else "tab"
-
-    def period_class(name):
-        return "period period-active" if name == period else "period"
-
     html = f"""
 <!DOCTYPE html>
 <html>
@@ -393,30 +387,27 @@ def _render_chart_toolbar(
             justify-content: space-between;
             align-items: center;
             gap: 10px;
-            margin-bottom: 8px;
+            margin-bottom: 7px;
         }}
 
-        .tabs {{
+        .mode {{
             display: flex;
             align-items: center;
-            gap: 6px;
-        }}
-
-        .tab {{
-            padding: 5px 10px;
-            border-radius: 999px;
+            gap: 7px;
+            color: {TEXT};
             font-size: 12px;
             font-weight: 900;
-            color: {SUBTEXT};
-            background: rgba(255,255,255,0.035);
-            border: 1px solid rgba(255,255,255,0.06);
             white-space: nowrap;
         }}
 
-        .tab-active {{
+        .pill {{
             color: #ffffff;
-            background: rgba(59,130,246,0.20);
-            border: 1px solid rgba(59,130,246,0.50);
+            background: rgba(59,130,246,0.22);
+            border: 1px solid rgba(59,130,246,0.55);
+            border-radius: 999px;
+            padding: 4px 9px;
+            font-size: 11px;
+            font-weight: 900;
         }}
 
         .tools {{
@@ -441,36 +432,13 @@ def _render_chart_toolbar(
             gap: 10px;
         }}
 
-        .periods {{
-            display: flex;
-            gap: 5px;
-            align-items: center;
-        }}
-
-        .period {{
-            min-width: 34px;
-            text-align: center;
-            padding: 4px 8px;
-            border-radius: 8px;
-            font-size: 11.5px;
-            font-weight: 900;
-            color: {SUBTEXT};
-            background: rgba(255,255,255,0.025);
-            border: 1px solid rgba(255,255,255,0.05);
-        }}
-
-        .period-active {{
-            color: #ffffff;
-            background: rgba(59,130,246,0.24);
-            border-color: rgba(59,130,246,0.55);
-        }}
-
         .info {{
             display: flex;
             gap: 10px;
             color: {SUBTEXT};
             font-size: 11.5px;
             white-space: nowrap;
+            overflow: hidden;
         }}
 
         .info b {{
@@ -502,10 +470,10 @@ def _render_chart_toolbar(
     <div class="wrap">
 
         <div class="top">
-            <div class="tabs">
-                <div class="{tab_class("分時走勢")}">分時走勢</div>
-                <div class="{tab_class("K線走勢")}">K線走勢</div>
-                <div class="{tab_class("多週期分析")}">多週期分析</div>
+            <div class="mode">
+                <span>{mode}</span>
+                <span class="pill">{period}</span>
+                <span class="pill">資料 {data_points}</span>
             </div>
 
             <div class="tools">
@@ -516,17 +484,7 @@ def _render_chart_toolbar(
         </div>
 
         <div class="bottom">
-            <div class="periods">
-                <div class="{period_class("1分")}">1分</div>
-                <div class="{period_class("5分")}">5分</div>
-                <div class="{period_class("15分")}">15分</div>
-                <div class="{period_class("30分")}">30分</div>
-                <div class="{period_class("日")}">日</div>
-            </div>
-
             <div class="info">
-                <span>{period}</span>
-                <span>資料 <b>{data_points}</b></span>
                 <span>Price <b>{current_price:.2f}</b></span>
                 <span>VWAP <b>{vwap:.2f}</b></span>
                 <span>EMA5 <b>{ema5:.2f}</b></span>
@@ -543,7 +501,7 @@ def _render_chart_toolbar(
 
     components.html(
         html,
-        height=76,
+        height=65,
         scrolling=False,
     )
 
