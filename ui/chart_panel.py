@@ -66,9 +66,23 @@ def _to_lot(volume):
     return round(volume, 2)
 
 
-def render_chart(prices, volumes):
+def _align_series(values, target_len):
+    result = []
 
-    st.markdown("### 📈 分時走勢")
+    for v in values or []:
+        result.append(_safe_float(v))
+
+    result = result[-target_len:]
+
+    while len(result) < target_len:
+        result.insert(0, None)
+
+    return result
+
+
+def render_chart(prices, volumes, vwap_values=None):
+
+    st.markdown("### 📈 分時走勢 / VWAP / MACD")
 
     if not prices:
         st.caption("等待行情資料中...")
@@ -100,6 +114,11 @@ def render_chart(prices, volumes):
 
     n = len(clean_prices)
 
+    clean_vwap = _align_series(
+        vwap_values,
+        n,
+    )
+
     x = []
 
     for i in range(n):
@@ -120,7 +139,7 @@ def render_chart(prices, volumes):
     macd_line, signal_line, hist = _macd(clean_prices)
 
     # =========================
-    # 成交量 / MACD 顏色
+    # 顏色
     # 台股：上漲紅，下跌綠
     # =========================
 
@@ -225,6 +244,29 @@ def render_chart(prices, volumes):
         row=1,
         col=1,
     )
+
+    # =========================
+    # VWAP 線
+    # =========================
+
+    if clean_vwap and any(v is not None and v > 0 for v in clean_vwap):
+
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=clean_vwap,
+                mode="lines",
+                name="VWAP",
+                connectgaps=True,
+                line=dict(
+                    color="#22c55e",
+                    width=1.8,
+                    dash="dot",
+                ),
+            ),
+            row=1,
+            col=1,
+        )
 
     fig.add_hline(
         y=current_price,
@@ -335,8 +377,14 @@ def render_chart(prices, volumes):
     # Y 軸範圍
     # =========================
 
-    high = max(clean_prices)
-    low = min(clean_prices)
+    price_candidates = clean_prices[:]
+
+    for v in clean_vwap:
+        if v is not None and v > 0:
+            price_candidates.append(v)
+
+    high = max(price_candidates)
+    low = min(price_candidates)
 
     price_padding = max(
         (high - low) * 0.35,
@@ -469,5 +517,5 @@ def render_chart(prices, volumes):
     st.plotly_chart(
         fig,
         use_container_width=True,
-        key="main_price_volume_macd_chart",
+        key="main_price_volume_vwap_macd_chart",
     )
