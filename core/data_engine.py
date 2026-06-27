@@ -12,7 +12,7 @@ def get_market_data(
     """
     統一資料入口：
     - 真實盤：Fugle REST
-    - 模擬盤：SimulationEngine
+    - 模擬盤：SimulationEngine 開盤到收盤回放
     """
 
     if data_source == "模擬盤":
@@ -27,7 +27,6 @@ def get_market_data(
             raise ValueError("missing api_key")
 
         provider = FugleProvider(api_key)
-
         return provider.get_quote(stock_code)
 
     raise ValueError(f"unknown data_source: {data_source}")
