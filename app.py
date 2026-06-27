@@ -10,7 +10,6 @@ from trade_alert_engine import TradeAlertEngine
 from alert_engine import AlertEngine
 
 from ui.header import render_header
-from ui.ai_panel import render_ai_panel
 from ui.chart_panel import render_chart
 from ui.decision_card import render_decision_card
 from ui.trade_alert_panel import render_trade_alert_panel
@@ -349,13 +348,21 @@ alerts = AlertEngine.build(
 # Header
 # =========================
 
+connection_status = "連線正常" if quote else "連線異常"
+
 render_header(
     name=name,
     stock_code=stock_code,
     price=price,
     score=score,
+    rebound=rebound,
     risk=risk,
     state=state,
+    signal=signal,
+    bid_ratio=bid_ratio,
+    now=now,
+    connection_status=connection_status,
+    data_source=data_source,
 )
 
 
@@ -363,19 +370,6 @@ render_header(
 # V7.5 Dashboard Layout
 # =========================
 
-top_left, top_right = st.columns([2.05, 1])
-
-with top_left:
-
-    render_ai_panel(
-        signal=signal,
-        score=score,
-        rebound=rebound,
-    )
-
-with top_right:
-
-    render_alerts(alerts)
 
 
 main_left, main_right = st.columns([1.72, 1])
@@ -405,6 +399,34 @@ with main_left:
 
         render_power_panel(decision)
 
+
+with main_right:
+
+    render_alerts(alerts)
+
+    render_decision_card(decision)
+
+    render_trade_alert_panel(trade_alert)
+
+    tab_radar, tab_big_order = st.tabs(
+        [
+            "📡 主力雷達",
+            "🐋 主力大單",
+        ]
+    )
+
+    with tab_radar:
+
+        render_radar(
+            bids=bids,
+            asks=asks,
+        )
+
+    with tab_big_order:
+
+        render_big_order_panel(
+            st.session_state.big_order_log
+        )
 
 # =========================
 # 右側：決策 + 監控 + 雷達
