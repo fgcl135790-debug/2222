@@ -1,11 +1,45 @@
-from datetime import datetime
+import pandas as pd
+import numpy as np
 
 
-class MultiPeriodEngine:
+class IntradayProfitModel:
+    """
+    成本感知 + 專業濾網的相似 K 線當沖模型。
+
+    這版不再只看原始勝率，而是加入：
+    1. 扣成本後期望報酬 expected_value
+    2. 校準後勝率 calibrated_win_rate
+    3. ORB / VWAP / 量能 / 時段 / 假突破濾網
+    4. 樣本數不足與午盤低量的保守折扣
+    """
+
+    FEATURE_COLS = [
+        "vwap_gap", "vwap_abs_gap", "ema_gap", "rsi", "macd_hist",
+        "slope_3", "slope_5", "slope_10", "slope_20",
+        "volume_ratio", "volume_ratio_5", "volume_ratio_20", "volume_acceleration",
+        "distance_to_high_30", "distance_to_low_30", "distance_to_high_60", "distance_to_low_60",
+        "open_gap", "day_range_pct",
+        "orb_high_gap", "orb_low_gap", "orb_range_pct",
+        "candle_range_pct", "close_location", "upper_wick_pct", "lower_wick_pct",
+    ]
+
+    def __init__(self, labels_df):
+        self.labels = labels_df.copy() if labels_df is not None else pd.DataFrame()
+        if not self.labels.empty:
+            self.labels = self.labels.replace([np.inf, -np.inf], np.nan).fillna(0)
+            if "trade_date" in self.labels.columns:
+                self.training_days = int(self.labels["trade_date"].nunique())
+            else:
+                self.training_days = 0
+        else:
+            self.training_days = 0
+        self.feature_stats = self._build_feature_stats()
 
     @staticmethod
     def _safe_float(value, default=0.0):
         try:
+            if value is None or pd.isna(value):
+                return default
             return float(value)
         except Exception:
             return default
@@ -18,488 +52,405 @@ class MultiPeriodEngine:
             return default
 
     @staticmethod
-    def _clamp(value, low=0, high=100):
+    def _clamp(value, low, high):
         return max(low, min(high, value))
 
+    def _build_feature_stats(self):
+        stats = {}
+        if self.labels.empty:
+            return stats
+        for col in self.FEATURE_COLS:
+            if col not in self.labels.columns:
+                continue
+            std = float(self.labels[col].std())
+            if std <= 0 or np.isnan(std):
+                std = 1.0
+            stats[col] = {"mean": float(self.labels[col].mean()), "std": std}
+        return stats
+
     @staticmethod
-    def _to_datetime(value):
-        if isinstance(value, datetime):
-            return value
+    def required_win_rate_pct(stop_pct=0.7, take_pct=1.8, cost_pct=0.435, safety_margin=5.0):
+        stop_pct = IntradayProfitModel._safe_float(stop_pct, 0.7)
+        take_pct = IntradayProfitModel._safe_float(take_pct, 1.8)
+        cost_pct = IntradayProfitModel._safe_float(cost_pct, 0.435)
+        safety_margin = IntradayProfitModel._safe_float(safety_margin, 5.0)
+        win_net = take_pct - cost_pct
+        loss_net = stop_pct + cost_pct
+        if win_net <= 0:
+            return 99.0
+        breakeven = loss_net / max(win_net + loss_net, 0.000001) * 100
+        return round(min(95.0, breakeven + safety_margin), 2)
 
-        try:
-            return datetime.fromisoformat(str(value))
-        except Exception:
-            return None
+    def _distance_score(self, df, feature):
+        dist = pd.Series(0.0, index=df.index)
+        weights = {
+            "vwap_gap": 1.65,
+            "vwap_abs_gap": 1.20,
+            "ema_gap": 1.05,
+            "rsi": 0.70,
+            "macd_hist": 1.05,
+            "slope_3": 1.65,
+            "slope_5": 1.45,
+            "slope_10": 1.35,
+            "slope_20": 0.85,
+            "volume_ratio": 0.90,
+            "volume_ratio_5": 1.25,
+            "volume_ratio_20": 1.00,
+            "volume_acceleration": 1.25,
+            "distance_to_high_30": 1.15,
+            "distance_to_low_30": 1.15,
+            "distance_to_high_60": 0.75,
+            "distance_to_low_60": 0.75,
+            "open_gap": 0.80,
+            "day_range_pct": 0.70,
+            "orb_high_gap": 1.65,
+            "orb_low_gap": 1.65,
+            "orb_range_pct": 0.75,
+            "candle_range_pct": 0.55,
+            "close_location": 0.75,
+            "upper_wick_pct": 0.55,
+            "lower_wick_pct": 0.55,
+        }
+        for col in self.FEATURE_COLS:
+            if col not in df.columns:
+                continue
+            stat = self.feature_stats.get(col, {"std": 1.0})
+            std = max(stat.get("std", 1.0), 0.000001)
+            target = self._safe_float(feature.get(col), 0.0)
+            dist += ((df[col] - target).abs() / std) * weights.get(col, 1.0)
+        return dist
 
-    @staticmethod
-    def _ema(values, span):
-        nums = [MultiPeriodEngine._safe_float(v) for v in values]
+    def _summarize(self, sample, action, feature, level):
+        if sample.empty:
+            return {
+                "action": action,
+                "level": level,
+                "sample_count": 0,
+                "win_rate": 0.0,
+                "raw_win_rate": 0.0,
+                "loss_rate": 0.0,
+                "time_rate": 0.0,
+                "avg_pnl_pct": -999.0,
+                "median_pnl_pct": -999.0,
+                "expected_value": -999.0,
+                "raw_expected_value": -999.0,
+                "calibrated_win_rate": 0.0,
+                "calibrated_expected_value": -999.0,
+                "profit_factor": 0.0,
+                "reason": "沒有相似樣本",
+            }
 
-        if not nums:
-            return []
+        wins = sample[sample["pnl_pct"] > 0]
+        losses = sample[sample["pnl_pct"] <= 0]
+        time_exits = sample[sample.get("exit_reason", "") == "時間出場"] if "exit_reason" in sample.columns else pd.DataFrame()
 
-        alpha = 2 / (span + 1)
-        result = [nums[0]]
+        win_rate = len(wins) / len(sample) * 100
+        loss_rate = len(losses) / len(sample) * 100
+        time_rate = len(time_exits) / len(sample) * 100 if len(sample) else 0
+        avg_pnl = float(sample["pnl_pct"].mean())
+        median_pnl = float(sample["pnl_pct"].median())
+        gross_win = float(wins["pnl_pct"].sum()) if not wins.empty else 0.0
+        gross_loss = abs(float(losses["pnl_pct"].sum())) if not losses.empty else 0.0
+        profit_factor = 99.0 if gross_loss <= 0 and gross_win > 0 else (gross_win / gross_loss if gross_loss > 0 else 0.0)
 
-        for v in nums[1:]:
-            result.append(alpha * v + (1 - alpha) * result[-1])
+        reason = f"{level} 相似樣本 {len(sample)} 筆，原始勝率 {win_rate:.1f}%，扣成本均值 {avg_pnl:.3f}%"
+        return {
+            "action": action,
+            "level": level,
+            "sample_count": int(len(sample)),
+            "win_rate": round(win_rate, 2),
+            "raw_win_rate": round(win_rate, 2),
+            "loss_rate": round(loss_rate, 2),
+            "time_rate": round(time_rate, 2),
+            "avg_pnl_pct": round(avg_pnl, 3),
+            "median_pnl_pct": round(median_pnl, 3),
+            "expected_value": round(avg_pnl, 3),
+            "raw_expected_value": round(avg_pnl, 3),
+            "calibrated_win_rate": round(win_rate, 2),
+            "calibrated_expected_value": round(avg_pnl, 3),
+            "profit_factor": round(profit_factor, 2),
+            "best_time_bucket": str(feature.get("time_bucket", "")),
+            "reason": reason,
+        }
 
+    def predict_action(self, feature, action, top_n=120):
+        if self.labels.empty:
+            return self._summarize(pd.DataFrame(), action, feature, "EMPTY")
+        df = self.labels[self.labels["action"] == action].copy()
+        if df.empty:
+            return self._summarize(pd.DataFrame(), action, feature, "NO_ACTION")
+
+        time_bucket = feature.get("time_bucket")
+        vwap_zone = feature.get("vwap_zone")
+        slope_zone = feature.get("slope_zone")
+        orb_zone = feature.get("orb_zone")
+
+        strict = df[
+            (df["time_bucket"] == time_bucket)
+            & (df["vwap_zone"] == vwap_zone)
+            & (df["slope_zone"] == slope_zone)
+            & (df.get("orb_zone", "") == orb_zone)
+        ].copy()
+        if len(strict) >= 22:
+            candidate, level = strict, "STRICT"
+        else:
+            medium = df[
+                (df["time_bucket"] == time_bucket)
+                & (df["slope_zone"] == slope_zone)
+            ].copy()
+            if len(medium) >= 35:
+                candidate, level = medium, "MEDIUM"
+            else:
+                loose = df[df["time_bucket"] == time_bucket].copy()
+                if len(loose) >= 50:
+                    candidate, level = loose, "TIME_ONLY"
+                else:
+                    candidate, level = df.copy(), "ALL"
+
+        if candidate.empty:
+            return self._summarize(pd.DataFrame(), action, feature, level)
+        candidate["distance"] = self._distance_score(candidate, feature)
+        sample = candidate.sort_values("distance").head(top_n).copy()
+        return self._summarize(sample, action, feature, level)
+
+    def _professional_calibration(self, result, feature, action, required_win_rate, min_expected_value):
+        result = dict(result)
+        minute = self._safe_int(feature.get("minute_index"), 0)
+        vwap_gap = self._safe_float(feature.get("vwap_gap"), 0)
+        vwap_abs_gap = abs(vwap_gap)
+        slope3 = self._safe_float(feature.get("slope_3"), 0)
+        slope10 = self._safe_float(feature.get("slope_10"), 0)
+        volume5 = self._safe_float(feature.get("volume_ratio_5"), 1.0)
+        volume_acc = self._safe_float(feature.get("volume_acceleration"), 1.0)
+        orb_high_gap = self._safe_float(feature.get("orb_high_gap"), 0)
+        orb_low_gap = self._safe_float(feature.get("orb_low_gap"), 0)
+        close_location = self._safe_float(feature.get("close_location"), 0.5)
+        upper_wick = self._safe_float(feature.get("upper_wick_pct"), 0)
+        lower_wick = self._safe_float(feature.get("lower_wick_pct"), 0)
+        dist_high30 = self._safe_float(feature.get("distance_to_high_30"), 0)
+        dist_low30 = self._safe_float(feature.get("distance_to_low_30"), 0)
+
+        filters = []
+        blocks = []
+        penalty = 0.0
+        setup_type = "NONE"
+
+        # 樣本與回測可信度校準
+        sample_count = self._safe_int(result.get("sample_count"), 0)
+        level = result.get("level", "ALL")
+        if sample_count < 25:
+            penalty += 7
+            filters.append("樣本少於 25 筆，勝率折扣 7%")
+        elif sample_count < 50:
+            penalty += 3
+            filters.append("樣本少於 50 筆，勝率折扣 3%")
+        if self.training_days < 10:
+            penalty += 5
+            filters.append("訓練日少於 10 日，勝率折扣 5%")
+        elif self.training_days < 15:
+            penalty += 2
+            filters.append("訓練日少於 15 日，勝率折扣 2%")
+        if level in ["ALL", "TIME_ONLY"]:
+            penalty += 3 if level == "ALL" else 2
+            filters.append(f"相似層級 {level}，不是嚴格相似，保守折扣")
+
+        # 時段濾網：午盤低量不輕易開新倉
+        if minute >= 150:
+            penalty += 5
+            filters.append("11:30 後新倉，低量與假突破風險提高")
+        if minute >= 210:
+            penalty += 7
+            filters.append("12:30 後新倉，停利空間通常不足，提高門檻")
+
+        # 方向與 ORB / VWAP 對齊
+        if action == "BUY":
+            orb_break = orb_high_gap >= -0.08
+            vwap_ok = vwap_gap >= -0.05
+            momentum_ok = slope3 >= -0.10 and slope10 >= -0.25
+            if orb_high_gap >= -0.05 and vwap_gap >= -0.03 and volume5 >= 0.65:
+                setup_type = "ORB突破做多"
+                filters.append("多方 ORB / VWAP 同向")
+            elif vwap_gap >= 0.15 and momentum_ok:
+                setup_type = "VWAP上方趨勢做多"
+                filters.append("價格站上 VWAP 且短線動能未轉弱")
+            elif vwap_gap < -0.7 and slope3 > 0.25 and volume_acc >= 0.9:
+                setup_type = "急跌後反彈做多"
+                filters.append("VWAP 下方反彈型，多看反彈不追高")
+            else:
+                penalty += 5
+                filters.append("做多未完全通過 ORB / VWAP / 動能主要濾網，改為降權觀察")
+
+            if vwap_gap > 1.5 and dist_high30 < 0.20:
+                penalty += 12
+                filters.append("價格離 VWAP 太遠且靠近 30K 高點，追高風險")
+            if close_location < 0.35 and upper_wick > lower_wick:
+                penalty += 5
+                filters.append("K 棒收盤位置偏弱，上影線壓力較大")
+            if orb_high_gap > 0 and volume5 < 0.75:
+                penalty += 7
+                filters.append("突破 ORB 但量能不足，假突破風險")
+        else:
+            orb_break = orb_low_gap <= 0.08
+            vwap_ok = vwap_gap <= 0.05
+            momentum_ok = slope3 <= 0.10 and slope10 <= 0.25
+            if orb_low_gap <= 0.05 and vwap_gap <= 0.03 and volume5 >= 0.65:
+                setup_type = "ORB跌破做空"
+                filters.append("空方 ORB / VWAP 同向")
+            elif vwap_gap <= -0.15 and momentum_ok:
+                setup_type = "VWAP下方趨勢做空"
+                filters.append("價格跌破 VWAP 且短線動能未轉強")
+            elif vwap_gap > 0.7 and slope3 < -0.25 and volume_acc >= 0.9:
+                setup_type = "急拉後轉弱做空"
+                filters.append("VWAP 上方轉弱型，非低位追空")
+            else:
+                penalty += 5
+                filters.append("做空未完全通過 ORB / VWAP / 動能主要濾網，改為降權觀察")
+
+            if vwap_gap < -1.5 and dist_low30 < 0.20:
+                penalty += 12
+                filters.append("價格低於 VWAP 太遠且靠近 30K 低點，追空風險")
+            if close_location > 0.65 and lower_wick > upper_wick:
+                penalty += 5
+                filters.append("K 棒收盤位置偏強，下影線支撐較明顯")
+            if orb_low_gap < 0 and volume5 < 0.75:
+                penalty += 7
+                filters.append("跌破 ORB 但量能不足，假跌破風險")
+
+        # 量能濾網：不追低量突破
+        if volume5 < 0.55 and volume_acc < 0.70:
+            penalty += 8
+            filters.append("量能明顯低於短均與長均，波段延續性不足")
+        elif volume5 < 0.75:
+            penalty += 2
+            filters.append("量能略低，降低信心")
+
+        raw_win_rate = self._safe_float(result.get("raw_win_rate", result.get("win_rate")), 0)
+        raw_ev = self._safe_float(result.get("raw_expected_value", result.get("expected_value")), -999)
+        calibrated_win_rate = max(0.0, raw_win_rate - penalty)
+        # 勝率每折扣 1%，期望值額外扣 0.018%。避免看起來正期望但可信度不夠。
+        calibrated_ev = raw_ev - penalty * 0.010
+
+        hard_fail = False
+        hard_reasons = []
+        if blocks:
+            hard_fail = True
+            hard_reasons.extend(blocks)
+        if minute >= 210 and not (calibrated_win_rate >= required_win_rate + 8 and calibrated_ev >= min_expected_value + 0.18 and volume_acc >= 1.15):
+            penalty += 3
+            filters.append("12:30 後訊號未達極強，改為加重折扣，不直接封鎖")
+        if minute >= 150 and not (calibrated_win_rate >= required_win_rate + 5 and calibrated_ev >= min_expected_value + 0.10):
+            penalty += 2
+            filters.append("11:30 後需要較高勝率與期望值，改為加重折扣")
+        if action == "BUY" and vwap_gap > 2.5:
+            hard_fail = True
+            hard_reasons.append("做多離 VWAP 超過 2.5%，禁止追高")
+        if action == "SELL" and vwap_gap < -2.5:
+            hard_fail = True
+            hard_reasons.append("做空離 VWAP 超過 2.5%，禁止追空")
+
+        professional_pass = not hard_fail
+        result.update({
+            "raw_win_rate": round(raw_win_rate, 2),
+            "raw_expected_value": round(raw_ev, 3),
+            "calibrated_win_rate": round(calibrated_win_rate, 2),
+            "calibrated_expected_value": round(calibrated_ev, 3),
+            "win_rate": round(calibrated_win_rate, 2),
+            "expected_value": round(calibrated_ev, 3),
+            "filter_penalty": round(penalty, 2),
+            "professional_pass": professional_pass,
+            "professional_filters": filters[:10],
+            "hard_fail_reasons": hard_reasons[:5],
+            "setup_type": setup_type,
+        })
         return result
 
-    @staticmethod
-    def _period_minutes(period):
-        mapping = {
-            "1分": 1,
-            "5分": 5,
-            "15分": 15,
-        }
+    def predict(
+        self,
+        feature,
+        min_expected_value=0.04,
+        min_win_rate=None,
+        min_sample_count=20,
+        stop_pct=0.7,
+        take_pct=1.8,
+        cost_pct=0.435,
+        safety_margin=2.0,
+        use_professional_filters=True,
+    ):
+        buy = self.predict_action(feature, "BUY")
+        sell = self.predict_action(feature, "SELL")
 
-        return mapping.get(period, 1)
+        required_win_rate = self.required_win_rate_pct(stop_pct, take_pct, cost_pct, safety_margin)
+        if min_win_rate is not None:
+            required_win_rate = max(required_win_rate, self._safe_float(min_win_rate, required_win_rate))
 
-    @staticmethod
-    def _bucket_time(dt, minutes):
-        if dt is None:
-            return None
+        if use_professional_filters:
+            buy = self._professional_calibration(buy, feature, "BUY", required_win_rate, min_expected_value)
+            sell = self._professional_calibration(sell, feature, "SELL", required_win_rate, min_expected_value)
 
-        minute = (dt.minute // minutes) * minutes
+        def _edge(x):
+            return (
+                x["expected_value"] * 22
+                + (x["win_rate"] - required_win_rate) * 0.85
+                + min(x["sample_count"], 120) * 0.025
+                + min(x["profit_factor"], 5) * 3
+                - x.get("filter_penalty", 0) * 0.55
+            )
 
-        return dt.replace(
-            minute=minute,
-            second=0,
-            microsecond=0,
+        buy_edge = _edge(buy)
+        sell_edge = _edge(sell)
+        buy["edge"] = round(buy_edge, 2)
+        sell["edge"] = round(sell_edge, 2)
+        for x in [buy, sell]:
+            x["required_win_rate"] = required_win_rate
+            x["min_expected_value"] = min_expected_value
+
+        allow_buy = (
+            buy["professional_pass"]
+            and buy["expected_value"] >= min_expected_value
+            and buy["win_rate"] >= required_win_rate
+            and buy["sample_count"] >= min_sample_count
+            and buy["profit_factor"] >= 1.00
+        )
+        allow_sell = (
+            sell["professional_pass"]
+            and sell["expected_value"] >= min_expected_value
+            and sell["win_rate"] >= required_win_rate
+            and sell["sample_count"] >= min_sample_count
+            and sell["profit_factor"] >= 1.00
         )
 
-    @staticmethod
-    def _prepare_ticks(prices, volumes, vwap_values, time_values):
-        clean = []
-
-        prices = prices or []
-        volumes = volumes or []
-        vwap_values = vwap_values or []
-        time_values = time_values or []
-
-        for i, price in enumerate(prices):
-            p = MultiPeriodEngine._safe_float(price)
-
-            if p <= 0:
-                continue
-
-            v = (
-                MultiPeriodEngine._safe_float(volumes[i])
-                if i < len(volumes)
-                else 0
-            )
-
-            w = (
-                MultiPeriodEngine._safe_float(vwap_values[i])
-                if i < len(vwap_values)
-                else p
-            )
-
-            if w <= 0:
-                w = p
-
-            t = (
-                MultiPeriodEngine._to_datetime(time_values[i])
-                if i < len(time_values)
-                else None
-            )
-
-            clean.append(
-                {
-                    "price": p,
-                    "volume": v,
-                    "vwap": w,
-                    "time": t,
-                }
-            )
-
-        return clean
-
-    @staticmethod
-    def _aggregate_period(prices, volumes, vwap_values, time_values, period):
-        clean = MultiPeriodEngine._prepare_ticks(
-            prices=prices,
-            volumes=volumes,
-            vwap_values=vwap_values,
-            time_values=time_values,
-        )
-
-        if not clean:
-            return {
-                "prices": [],
-                "volumes": [],
-                "vwaps": [],
-            }
-
-        if period == "1分":
-            return {
-                "prices": [item["price"] for item in clean],
-                "volumes": [item["volume"] for item in clean],
-                "vwaps": [item["vwap"] for item in clean],
-            }
-
-        minutes = MultiPeriodEngine._period_minutes(period)
-        buckets = {}
-        fallback_index = 0
-
-        for item in clean:
-            key = MultiPeriodEngine._bucket_time(
-                item["time"],
-                minutes,
-            )
-
-            if key is None:
-                key = f"bucket_{fallback_index // minutes}"
-                fallback_index += 1
-
-            if key not in buckets:
-                buckets[key] = {
-                    "prices": [],
-                    "volumes": [],
-                    "vwaps": [],
-                }
-
-            buckets[key]["prices"].append(item["price"])
-            buckets[key]["volumes"].append(item["volume"])
-            buckets[key]["vwaps"].append(item["vwap"])
-
-        agg_prices = []
-        agg_volumes = []
-        agg_vwaps = []
-
-        for key in sorted(buckets.keys(), key=lambda x: str(x)):
-            group = buckets[key]
-
-            if not group["prices"]:
-                continue
-
-            agg_prices.append(group["prices"][-1])
-            agg_volumes.append(sum(group["volumes"]))
-
-            valid_vwaps = [
-                MultiPeriodEngine._safe_float(v)
-                for v in group["vwaps"]
-                if MultiPeriodEngine._safe_float(v) > 0
-            ]
-
-            if valid_vwaps:
-                agg_vwaps.append(sum(valid_vwaps) / len(valid_vwaps))
-            else:
-                agg_vwaps.append(group["prices"][-1])
-
-        return {
-            "prices": agg_prices,
-            "volumes": agg_volumes,
-            "vwaps": agg_vwaps,
-        }
-
-    @staticmethod
-    def _analyze_one(period, prices, volumes, vwap_values, time_values):
-        data = MultiPeriodEngine._aggregate_period(
-            prices=prices,
-            volumes=volumes,
-            vwap_values=vwap_values,
-            time_values=time_values,
-            period=period,
-        )
-
-        ps = data["prices"]
-        vs = data["volumes"]
-        ws = data["vwaps"]
-
-        if not ps:
-            return {
-                "period": period,
-                "status": "資料不足",
-                "type": "WAIT",
-                "confidence": 0,
-                "long_score": 0,
-                "short_score": 0,
-                "reason": f"{period} 資料不足",
-            }
-
-        price = ps[-1]
-        prev_price = ps[-2] if len(ps) >= 2 else price
-
-        vwap = ws[-1] if ws else price
-
-        if vwap <= 0:
-            vwap = price
-
-        ema5_list = MultiPeriodEngine._ema(ps, 5)
-        ema20_list = MultiPeriodEngine._ema(ps, 20)
-
-        ema5 = ema5_list[-1] if ema5_list else price
-        ema20 = ema20_list[-1] if ema20_list else price
-
-        current_volume = MultiPeriodEngine._safe_float(vs[-1]) if vs else 0
-
-        valid_volumes = [
-            MultiPeriodEngine._safe_float(v)
-            for v in vs[-20:]
-            if MultiPeriodEngine._safe_float(v) > 0
-        ]
-
-        avg_volume = 0
-
-        if valid_volumes:
-            avg_volume = sum(valid_volumes) / len(valid_volumes)
-
-        long_score = 0
-        short_score = 0
-        reasons = []
-
-        if price > vwap:
-            long_score += 2
-            reasons.append("站上 VWAP")
-        elif price < vwap:
-            short_score += 2
-            reasons.append("跌破 VWAP")
-
-        if ema5 > ema20:
-            long_score += 2
-            reasons.append("EMA5 大於 EMA20")
-        elif ema5 < ema20:
-            short_score += 2
-            reasons.append("EMA5 小於 EMA20")
-
-        if price > prev_price:
-            long_score += 1
-            reasons.append("短線價格上彎")
-        elif price < prev_price:
-            short_score += 1
-            reasons.append("短線價格下彎")
-
-        if avg_volume > 0 and current_volume >= avg_volume * 1.35:
-            if price >= prev_price:
-                long_score += 1
-                reasons.append("上漲伴隨量能放大")
-            else:
-                short_score += 1
-                reasons.append("下跌伴隨量能放大")
-
-        diff = long_score - short_score
-
-        if diff >= 2:
-            status = "多頭"
-            trend_type = "BULL"
-            reason = f"{period} 多方結構成立：" + "、".join(reasons[:3])
-
-        elif diff <= -2:
-            status = "空頭"
-            trend_type = "BEAR"
-            reason = f"{period} 空方結構成立：" + "、".join(reasons[:3])
-
+        if allow_buy and buy_edge >= sell_edge:
+            decision, chosen = "BUY", buy
+        elif allow_sell and sell_edge > buy_edge:
+            decision, chosen = "SELL", sell
         else:
-            status = "盤整"
-            trend_type = "WAIT"
-            reason = f"{period} 多空條件尚未一致"
+            decision, chosen = "WAIT", buy if buy_edge >= sell_edge else sell
 
-        confidence = MultiPeriodEngine._clamp(
-            45 + abs(diff) * 12,
-            0,
-            95,
-        )
+        if decision == "WAIT":
+            risk_level = "HIGH"
+            reason = "專業濾網或扣成本後期望值不足，暫不出手。"
+            score = max(0, min(84, int(44 + max(buy_edge, sell_edge) * 0.50)))
+        else:
+            risk_level = "NORMAL"
+            reason = chosen.get("reason", "")
+            score = 58 + max(0, chosen["expected_value"]) * 20 + max(0, chosen["win_rate"] - required_win_rate) * 0.85 + min(chosen["profit_factor"], 3) * 4
+            if chosen.get("setup_type", "") in ["ORB突破做多", "ORB跌破做空"]:
+                score += 4
+            score = int(self._clamp(score, 50, 100))
 
         return {
-            "period": period,
-            "status": status,
-            "type": trend_type,
-            "confidence": confidence,
-            "long_score": long_score,
-            "short_score": short_score,
-            "price": price,
-            "vwap": vwap,
-            "ema5": ema5,
-            "ema20": ema20,
+            "decision": decision,
+            "score": score,
+            "buy": buy,
+            "sell": sell,
+            "chosen": chosen,
             "reason": reason,
+            "risk_level": risk_level,
+            "required_win_rate": required_win_rate,
+            "min_expected_value": min_expected_value,
+            "stop_pct": round(self._safe_float(stop_pct, 0.7), 3),
+            "take_pct": round(self._safe_float(take_pct, 1.8), 3),
+            "cost_pct": round(self._safe_float(cost_pct, 0.435), 3),
+            "training_days": self.training_days,
+            "use_professional_filters": use_professional_filters,
         }
-
-    @staticmethod
-    def analyze(prices, volumes, vwap_values, time_values):
-        periods = ["1分", "5分", "15分"]
-
-        results = [
-            MultiPeriodEngine._analyze_one(
-                period=period,
-                prices=prices,
-                volumes=volumes,
-                vwap_values=vwap_values,
-                time_values=time_values,
-            )
-            for period in periods
-        ]
-
-        bull_count = len([r for r in results if r["type"] == "BULL"])
-        bear_count = len([r for r in results if r["type"] == "BEAR"])
-        wait_count = len([r for r in results if r["type"] == "WAIT"])
-
-        avg_confidence = MultiPeriodEngine._safe_int(
-            sum([r["confidence"] for r in results]) / max(len(results), 1)
-        )
-
-        if bull_count == 3:
-            resonance = "BULL_STRONG"
-            status = "多頭共振"
-            score_delta = 10
-            long_boost = 5
-            short_boost = 0
-            reason = "1分、5分、15分同步多頭共振，提升做多信心"
-
-        elif bear_count == 3:
-            resonance = "BEAR_STRONG"
-            status = "空頭共振"
-            score_delta = 10
-            long_boost = 0
-            short_boost = 5
-            reason = "1分、5分、15分同步空頭共振，提升做空信心"
-
-        elif bull_count >= 2 and bear_count == 0:
-            resonance = "BULL"
-            status = "多方偏強"
-            score_delta = 6
-            long_boost = 3
-            short_boost = 0
-            reason = "多數週期偏多，多方結構較完整"
-
-        elif bear_count >= 2 and bull_count == 0:
-            resonance = "BEAR"
-            status = "空方偏強"
-            score_delta = 6
-            long_boost = 0
-            short_boost = 3
-            reason = "多數週期偏空，空方壓力較明顯"
-
-        elif bull_count >= 1 and bear_count >= 1:
-            resonance = "DIVERGENCE"
-            status = "多空背離"
-            score_delta = -8
-            long_boost = 0
-            short_boost = 0
-            reason = "多週期方向不一致，容易震盪或假突破"
-
-        else:
-            resonance = "WAIT"
-            status = "盤整觀望"
-            score_delta = -3
-            long_boost = 0
-            short_boost = 0
-            reason = "三週期尚未形成共振，等待方向確認"
-
-        return {
-            "resonance": resonance,
-            "status": status,
-            "score_delta": score_delta,
-            "long_boost": long_boost,
-            "short_boost": short_boost,
-            "confidence": avg_confidence,
-            "bull_count": bull_count,
-            "bear_count": bear_count,
-            "wait_count": wait_count,
-            "reason": reason,
-            "results": results,
-        }
-
-    @staticmethod
-    def apply_to_decision(decision, multi_period):
-        decision = dict(decision or {})
-        multi_period = multi_period or {}
-
-        action = decision.get("action", "WAIT")
-
-        score = MultiPeriodEngine._safe_int(
-            decision.get("score", 50),
-            50,
-        )
-
-        long_score = MultiPeriodEngine._safe_int(
-            decision.get("long_score", 0),
-            0,
-        )
-
-        short_score = MultiPeriodEngine._safe_int(
-            decision.get("short_score", 0),
-            0,
-        )
-
-        reasons = list(decision.get("reasons", []))
-
-        resonance = multi_period.get("resonance", "WAIT")
-        status = multi_period.get("status", "盤整觀望")
-        reason = multi_period.get("reason", "多週期尚未形成明確共振")
-
-        score_delta = MultiPeriodEngine._safe_int(
-            multi_period.get("score_delta", 0),
-            0,
-        )
-
-        long_boost = MultiPeriodEngine._safe_int(
-            multi_period.get("long_boost", 0),
-            0,
-        )
-
-        short_boost = MultiPeriodEngine._safe_int(
-            multi_period.get("short_boost", 0),
-            0,
-        )
-
-        long_score += long_boost
-        short_score += short_boost
-
-        # 多週期共振會提高信心；背離會降低信心
-        score += score_delta
-
-        # 如果交易方向與多週期強共振相反，先降成觀望
-        if action == "BUY" and resonance in ["BEAR_STRONG", "BEAR"]:
-            action = "WAIT"
-            score -= 10
-            reasons.insert(
-                0,
-                "交易方向與多週期空方結構衝突，暫不追多",
-            )
-
-        elif action == "SELL" and resonance in ["BULL_STRONG", "BULL"]:
-            action = "WAIT"
-            score -= 10
-            reasons.insert(
-                0,
-                "交易方向與多週期多方結構衝突，暫不追空",
-            )
-
-        else:
-            reasons.insert(
-                0,
-                reason,
-            )
-
-        # 原本是觀望時，允許多週期共振補強方向，但不過度激進
-        bias = long_score - short_score
-
-        if action == "WAIT":
-            if bias >= 6 and score >= 68:
-                action = "BUY"
-                reasons.insert(
-                    0,
-                    "多週期共振補強，多方條件達到短線觀察門檻",
-                )
-
-            elif bias <= -6 and score >= 68:
-                action = "SELL"
-                reasons.insert(
-                    0,
-                    "多週期共振補強，空方條件達到短線觀察門檻",
-                )
-
-        score = MultiPeriodEngine._clamp(score, 0, 100)
-
-        decision["action"] = action
-        decision["score"] = score
-        decision["long_score"] = long_score
-        decision["short_score"] = short_score
-        decision["bias"] = bias
-        decision["reasons"] = reasons[:8]
-        decision["multi_period"] = multi_period
-        decision["multi_period_status"] = status
-
-        return decision
