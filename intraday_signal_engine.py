@@ -361,6 +361,47 @@ class IntradaySignalEngine:
                 score -= 7
                 penalties.append("量能不足，做空延續性偏弱。")
 
+        # 10:30~11:00 在這批 3481 回測中是明顯的洗盤 / 第一波走完區。
+        # 不是完全禁止，而是要求「二次攻擊」：量能重新放大、K 棒收在攻擊方向、短斜率同向。
+        # 這是即時可判斷的規則，不使用未來結果。
+        if 90 <= minute < 120:
+            if action == "BUY":
+                second_push_ok = (
+                    slope1 > 0.02
+                    and slope3 > 0.12
+                    and close_loc >= 0.62
+                    and (vr5 >= 1.35 or vacc >= 1.25)
+                    and tape_buy >= 58
+                    and vwap_gap <= 1.20
+                )
+            else:
+                second_push_ok = (
+                    slope1 < -0.02
+                    and slope3 < -0.12
+                    and close_loc <= 0.38
+                    and (vr5 >= 1.35 or vacc >= 1.25)
+                    and tape_sell >= 58
+                    and vwap_gap >= -1.20
+                )
+
+            if not second_push_ok:
+                score -= 18
+                penalties.append("10:30~11:00 第一波常已走完；未出現二次量價攻擊，避免追價。")
+            else:
+                score += 4
+                reasons.append("10:30~11:00 仍有二次量價攻擊，允許觀察。")
+
+        # 盤勢延伸後追高 / 追空風險：趨勢盤不是看到同向就追，
+        # 已靠近日高/日低且離 VWAP 偏遠時，勝率容易被高估。
+        if action == "BUY":
+            if minute >= 30 and regime == "TREND_UP" and vwap_gap > 0.55 and dist_high <= 0.45 and slope1 <= 0.05:
+                score -= 12
+                penalties.append("多頭延伸但靠近日高、離 VWAP 偏遠，疑似追高。")
+        else:
+            if minute >= 30 and regime == "TREND_DOWN" and vwap_gap < -0.55 and dist_low <= 0.45 and slope1 >= -0.05:
+                score -= 12
+                penalties.append("空頭延伸但靠近日低、離 VWAP 偏遠，疑似追空。")
+
         # 時段風險：專業當沖不是完全禁止午盤，但門檻要提高。
         if minute >= 230:
             score -= 9
