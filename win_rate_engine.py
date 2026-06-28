@@ -1,257 +1,301 @@
-import requests
-import pandas as pd
+class WinRateEngine:
+    @staticmethod
+    def init_session_state(st):
+        if "winrate_context_key" not in st.session_state:
+            st.session_state.winrate_context_key = None
 
-from intraday_label_engine import IntradayLabelEngine
-from intraday_profit_model import IntradayProfitModel
+        if "winrate_active_trade" not in st.session_state:
+            st.session_state.winrate_active_trade = None
 
+        if "winrate_trades" not in st.session_state:
+            st.session_state.winrate_trades = []
 
-class StockModelCache:
-    BASE_URL = "https://api.fugle.tw/marketdata/v1.0/stock"
+        if "winrate_last_signal_key" not in st.session_state:
+            st.session_state.winrate_last_signal_key = None
 
     @staticmethod
-    def _cache_key(
-        symbol,
-        timeframe,
-        stop_pct,
-        take_pct,
-        max_hold_bars,
-    ):
-        return (
-            f"intraday_profit_model|{symbol}|{timeframe}|"
-            f"stop{stop_pct}|take{take_pct}|hold{max_hold_bars}"
-        )
+    def reset(st):
+        st.session_state.winrate_active_trade = None
+        st.session_state.winrate_trades = []
+        st.session_state.winrate_last_signal_key = None
 
     @staticmethod
-    def fetch_kline(
-        api_key,
-        symbol,
-        timeframe="1",
-    ):
-        url = f"{StockModelCache.BASE_URL}/historical/candles/{symbol}"
+    def reset_if_context_changed(st, stock_code, data_source, mode):
+        context_key = f"{stock_code}|{data_source}|{mode}"
 
-        headers = {
-            "X-API-KEY": api_key,
-        }
-
-        params = {
-            "timeframe": str(timeframe),
-            "fields": "open,high,low,close,volume",
-            "sort": "asc",
-        }
-
-        response = requests.get(
-            url,
-            headers=headers,
-            params=params,
-            timeout=30,
-        )
-
-        if response.status_code == 401:
-            raise RuntimeError("Fugle API KEY 無效或權限不足。")
-
-        if response.status_code == 429:
-            raise RuntimeError("Fugle API 請求過多，請稍後再試。")
-
-        if response.status_code >= 400:
-            raise RuntimeError(f"Fugle K線 API 錯誤：{response.status_code}")
-
-        payload = response.json()
-        data = payload.get("data", [])
-
-        if not data:
-            raise RuntimeError("Fugle 沒有回傳 K 線資料。")
-
-        df = pd.DataFrame(data)
-
-        if "date" not in df.columns:
-            raise RuntimeError("Fugle K 線資料缺少 date 欄位。")
-
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df = df.dropna(subset=["date"])
-
-        for col in ["open", "high", "low", "close", "volume"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        df = df.dropna(subset=["open", "high", "low", "close"])
-        df = df.sort_values("date").reset_index(drop=True)
-
-        return df
+        if st.session_state.get("winrate_context_key") != context_key:
+            st.session_state.winrate_context_key = context_key
+            WinRateEngine.reset(st)
 
     @staticmethod
-    def build_model_package(
-        kline_df,
-        symbol,
-        timeframe="1",
-        stop_pct=0.7,
-        take_pct=1.8,
-        max_hold_bars=50,
-        cost_pct=0.435,
+    def _safe_float(value, default=0.0):
+        try:
+            return float(value)
+        except Exception:
+            return default
+
+    @staticmethod
+    def _safe_int(value, default=0):
+        try:
+            return int(round(float(value)))
+        except Exception:
+            return default
+
+    @staticmethod
+    def _get_stop_take(
+        action,
+        entry_price,
+        decision,
+        default_stop_pct=0.7,
+        default_take_pct=1.8,
     ):
-        enriched_df, labels_df = IntradayLabelEngine.build_labels(
-            kline_df=kline_df,
-            stop_pct=stop_pct,
-            take_pct=take_pct,
-            max_hold_bars=max_hold_bars,
-            cost_pct=cost_pct,
-            start_minute=15,
-            end_minute=250,
+        stop_loss = WinRateEngine._safe_float(
+            decision.get("stop_loss"),
+            0,
         )
 
-        model = IntradayProfitModel(labels_df)
+        take_profit = WinRateEngine._safe_float(
+            decision.get("take_profit"),
+            0,
+        )
 
-        if enriched_df.empty:
-            start_date = ""
-            end_date = ""
-            trading_days = 0
-            rows = 0
+        default_stop_pct = WinRateEngine._safe_float(default_stop_pct, 0.6)
+        default_take_pct = WinRateEngine._safe_float(default_take_pct, 2.0)
+
+        stop_rate = default_stop_pct / 100
+        take_rate = default_take_pct / 100
+
+        if action == "BUY":
+            if stop_loss <= 0 or stop_loss >= entry_price:
+                stop_loss = entry_price * (1 - stop_rate)
+
+            if take_profit <= entry_price:
+                take_profit = entry_price * (1 + take_rate)
+
+            stop_loss_pct = (entry_price - stop_loss) / entry_price * 100
+            take_profit_pct = (take_profit - entry_price) / entry_price * 100
+
+        elif action == "SELL":
+            if stop_loss <= entry_price:
+                stop_loss = entry_price * (1 + stop_rate)
+
+            if take_profit <= 0 or take_profit >= entry_price:
+                take_profit = entry_price * (1 - take_rate)
+
+            stop_loss_pct = (stop_loss - entry_price) / entry_price * 100
+            take_profit_pct = (entry_price - take_profit) / entry_price * 100
+
         else:
-            start_date = str(enriched_df["trade_date"].min())
-            end_date = str(enriched_df["trade_date"].max())
-            trading_days = int(enriched_df["trade_date"].nunique())
-            rows = int(len(enriched_df))
+            stop_loss_pct = 0
+            take_profit_pct = 0
 
-        if labels_df.empty:
-            label_rows = 0
-            buy_win_rate = 0
-            sell_win_rate = 0
-        else:
-            label_rows = int(len(labels_df))
-
-            buy_df = labels_df[labels_df["action"] == "BUY"]
-            sell_df = labels_df[labels_df["action"] == "SELL"]
-
-            buy_win_rate = float((buy_df["pnl_pct"] > 0).mean() * 100) if not buy_df.empty else 0
-            sell_win_rate = float((sell_df["pnl_pct"] > 0).mean() * 100) if not sell_df.empty else 0
-
-        return {
-            "symbol": str(symbol),
-            "timeframe": str(timeframe),
-            "stop_pct": float(stop_pct),
-            "take_pct": float(take_pct),
-            "max_hold_bars": int(max_hold_bars),
-            "cost_pct": float(cost_pct),
-            "start_date": start_date,
-            "end_date": end_date,
-            "trading_days": trading_days,
-            "kline_rows": rows,
-            "label_rows": label_rows,
-            "buy_win_rate_all": round(buy_win_rate, 2),
-            "sell_win_rate_all": round(sell_win_rate, 2),
-            "model": model,
-            "labels": labels_df,
-            "kline": enriched_df,
-        }
+        return stop_loss, take_profit, stop_loss_pct, take_profit_pct
 
     @staticmethod
-    def get_or_build(
+    def update_live(
         st,
-        api_key,
-        symbol,
-        timeframe="1",
-        stop_pct=0.7,
-        take_pct=1.8,
+        stock_code,
+        name,
+        data_source,
+        price,
+        decision,
+        now,
+        min_score=75,
         max_hold_bars=50,
-        cost_pct=0.435,
-        force_rebuild=False,
+        default_stop_pct=0.7,
+        default_take_pct=1.8,
     ):
-        if not api_key:
-            return None
+        action = decision.get("action", "WAIT")
+        score = WinRateEngine._safe_int(decision.get("score", 0))
 
-        key = StockModelCache._cache_key(
-            symbol=symbol,
-            timeframe=timeframe,
-            stop_pct=stop_pct,
-            take_pct=take_pct,
-            max_hold_bars=max_hold_bars,
-        )
+        price = WinRateEngine._safe_float(price)
 
-        if "stock_model_cache" not in st.session_state:
-            st.session_state.stock_model_cache = {}
-
-        if not force_rebuild and key in st.session_state.stock_model_cache:
-            return st.session_state.stock_model_cache[key]
-
-        kline_df = StockModelCache.fetch_kline(
-            api_key=api_key,
-            symbol=symbol,
-            timeframe=timeframe,
-        )
-
-        package = StockModelCache.build_model_package(
-            kline_df=kline_df,
-            symbol=symbol,
-            timeframe=timeframe,
-            stop_pct=stop_pct,
-            take_pct=take_pct,
-            max_hold_bars=max_hold_bars,
-            cost_pct=cost_pct,
-        )
-
-        st.session_state.stock_model_cache[key] = package
-
-        return package
-
-    @staticmethod
-    def clear_symbol(st, symbol):
-        if "stock_model_cache" not in st.session_state:
+        if price <= 0:
             return
 
-        remove_keys = [
-            key for key in st.session_state.stock_model_cache.keys()
-            if f"|{symbol}|" in key
-        ]
+        active = st.session_state.get("winrate_active_trade")
 
-        for key in remove_keys:
-            del st.session_state.stock_model_cache[key]
+        # =========================
+        # 先檢查目前追蹤中的交易
+        # =========================
 
-# Compatibility helper for fast walk-forward backtests.
-def _stock_model_cache_build_from_prebuilt(enriched_df, labels_df, symbol, timeframe="1", stop_pct=0.7, take_pct=1.8, max_hold_bars=50, cost_pct=0.435):
-    from intraday_profit_model import IntradayProfitModel
+        if active is not None:
+            active["bars_held"] = active.get("bars_held", 0) + 1
+            st.session_state.winrate_active_trade = active
 
-    enriched_df = enriched_df.copy() if enriched_df is not None else pd.DataFrame()
-    labels_df = labels_df.copy() if labels_df is not None else pd.DataFrame()
+            active_action = active.get("action")
+            entry_price = WinRateEngine._safe_float(active.get("entry_price"))
+            stop_loss = WinRateEngine._safe_float(active.get("stop_loss"))
+            take_profit = WinRateEngine._safe_float(active.get("take_profit"))
 
-    model = IntradayProfitModel(labels_df)
+            exit_reason = None
 
-    if enriched_df.empty:
-        start_date = ""
-        end_date = ""
-        trading_days = 0
-        rows = 0
-    else:
-        start_date = str(enriched_df["trade_date"].min()) if "trade_date" in enriched_df.columns else ""
-        end_date = str(enriched_df["trade_date"].max()) if "trade_date" in enriched_df.columns else ""
-        trading_days = int(enriched_df["trade_date"].nunique()) if "trade_date" in enriched_df.columns else 0
-        rows = int(len(enriched_df))
+            if active_action == "BUY":
+                if price <= stop_loss:
+                    exit_reason = "停損"
 
-    if labels_df.empty:
-        label_rows = 0
-        buy_win_rate = 0
-        sell_win_rate = 0
-    else:
-        label_rows = int(len(labels_df))
-        buy_df = labels_df[labels_df["action"] == "BUY"]
-        sell_df = labels_df[labels_df["action"] == "SELL"]
-        buy_win_rate = float((buy_df["pnl_pct"] > 0).mean() * 100) if not buy_df.empty else 0
-        sell_win_rate = float((sell_df["pnl_pct"] > 0).mean() * 100) if not sell_df.empty else 0
+                elif price >= take_profit:
+                    exit_reason = "停利"
 
-    return {
-        "symbol": str(symbol),
-        "timeframe": str(timeframe),
-        "stop_pct": float(stop_pct),
-        "take_pct": float(take_pct),
-        "max_hold_bars": int(max_hold_bars),
-        "cost_pct": float(cost_pct),
-        "start_date": start_date,
-        "end_date": end_date,
-        "trading_days": trading_days,
-        "kline_rows": rows,
-        "label_rows": label_rows,
-        "buy_win_rate_all": round(buy_win_rate, 2),
-        "sell_win_rate_all": round(sell_win_rate, 2),
-        "model": model,
-        "labels": labels_df,
-        "kline": enriched_df,
-    }
+                elif action == "SELL" and score >= min_score:
+                    exit_reason = "反向訊號"
 
-StockModelCache.build_model_package_from_prebuilt = staticmethod(_stock_model_cache_build_from_prebuilt)
+                elif active.get("bars_held", 0) >= active.get("max_hold_bars", max_hold_bars):
+                    exit_reason = "時間出場"
+
+                pnl_pct = (price - entry_price) / entry_price * 100
+
+            else:
+                if price >= stop_loss:
+                    exit_reason = "停損"
+
+                elif price <= take_profit:
+                    exit_reason = "停利"
+
+                elif action == "BUY" and score >= min_score:
+                    exit_reason = "反向訊號"
+
+                elif active.get("bars_held", 0) >= active.get("max_hold_bars", max_hold_bars):
+                    exit_reason = "時間出場"
+
+                pnl_pct = (entry_price - price) / entry_price * 100
+
+            if exit_reason is not None:
+                result = "WIN" if pnl_pct > 0 else "LOSS"
+
+                if abs(pnl_pct) < 0.03:
+                    result = "FLAT"
+
+                trade = {
+                    "source": data_source,
+                    "stock_code": stock_code,
+                    "name": name,
+                    "action": active_action,
+                    "entry_time": active.get("entry_time"),
+                    "entry_price": round(entry_price, 2),
+                    "stop_loss": active.get("stop_loss"),
+                    "take_profit": active.get("take_profit"),
+                    "stop_loss_pct": active.get("stop_loss_pct"),
+                    "take_profit_pct": active.get("take_profit_pct"),
+                    "exit_time": now.strftime("%H:%M:%S"),
+                    "exit_price": round(price, 2),
+                    "exit_reason": exit_reason,
+                    "score": active.get("score"),
+                    "hold_bars": active.get("bars_held", 0),
+                    "max_hold_bars": active.get("max_hold_bars", max_hold_bars),
+                    "pnl_pct": round(pnl_pct, 3),
+                    "result": result,
+                }
+
+                st.session_state.winrate_trades.append(trade)
+                st.session_state.winrate_active_trade = None
+
+                if len(st.session_state.winrate_trades) > 300:
+                    st.session_state.winrate_trades = st.session_state.winrate_trades[-300:]
+
+                return
+
+        # =========================
+        # 沒有追蹤交易時，建立新交易
+        # =========================
+
+        if st.session_state.get("winrate_active_trade") is None:
+            if action not in ["BUY", "SELL"]:
+                return
+
+            if score < min_score:
+                return
+
+            signal_key = f"{stock_code}|{data_source}|{action}|{score}|{now.strftime('%H:%M')}"
+
+            if st.session_state.get("winrate_last_signal_key") == signal_key:
+                return
+
+            (
+                stop_loss,
+                take_profit,
+                stop_loss_pct,
+                take_profit_pct,
+            ) = WinRateEngine._get_stop_take(
+                action=action,
+                entry_price=price,
+                decision=decision,
+                default_stop_pct=default_stop_pct,
+                default_take_pct=default_take_pct,
+            )
+
+            st.session_state.winrate_active_trade = {
+                "source": data_source,
+                "stock_code": stock_code,
+                "name": name,
+                "action": action,
+                "entry_time": now.strftime("%H:%M:%S"),
+                "entry_price": round(price, 2),
+                "stop_loss": round(stop_loss, 2),
+                "take_profit": round(take_profit, 2),
+                "stop_loss_pct": round(stop_loss_pct, 2),
+                "take_profit_pct": round(take_profit_pct, 2),
+                "score": score,
+                "bars_held": 0,
+                "max_hold_bars": max_hold_bars,
+            }
+
+            st.session_state.winrate_last_signal_key = signal_key
+
+    @staticmethod
+    def import_backtest_trades(st, trades):
+        if not trades:
+            return 0
+
+        imported = 0
+
+        for trade in trades:
+            item = dict(trade)
+            item["source"] = "回測"
+            st.session_state.winrate_trades.append(item)
+            imported += 1
+
+        if len(st.session_state.winrate_trades) > 300:
+            st.session_state.winrate_trades = st.session_state.winrate_trades[-300:]
+
+        return imported
+
+    @staticmethod
+    def summarize(trades):
+        total = len(trades)
+
+        wins = len([t for t in trades if t.get("result") == "WIN"])
+        losses = len([t for t in trades if t.get("result") == "LOSS"])
+        flats = len([t for t in trades if t.get("result") == "FLAT"])
+
+        win_rate = wins / total * 100 if total else 0
+
+        total_pnl = sum(
+            WinRateEngine._safe_float(t.get("pnl_pct", 0))
+            for t in trades
+        )
+
+        avg_pnl = total_pnl / total if total else 0
+
+        buy_trades = [t for t in trades if t.get("action") == "BUY"]
+        sell_trades = [t for t in trades if t.get("action") == "SELL"]
+
+        buy_wins = len([t for t in buy_trades if t.get("result") == "WIN"])
+        sell_wins = len([t for t in sell_trades if t.get("result") == "WIN"])
+
+        buy_win_rate = buy_wins / len(buy_trades) * 100 if buy_trades else 0
+        sell_win_rate = sell_wins / len(sell_trades) * 100 if sell_trades else 0
+
+        return {
+            "total": total,
+            "wins": wins,
+            "losses": losses,
+            "flats": flats,
+            "win_rate": win_rate,
+            "buy_count": len(buy_trades),
+            "sell_count": len(sell_trades),
+            "buy_win_rate": buy_win_rate,
+            "sell_win_rate": sell_win_rate,
+            "total_pnl": total_pnl,
+            "avg_pnl": avg_pnl,
+        }

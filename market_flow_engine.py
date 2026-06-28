@@ -1,412 +1,575 @@
-import pandas as pd
-import numpy as np
+from datetime import datetime, time
 
 
-class IntradayLabelEngine:
-    """
-    把 1 分 K 轉成當沖訓練標籤，並加入比較接近專業當沖程式會看的特徵：
-    - ORB 開盤區間突破 / 跌破
-    - VWAP 乖離與追價風險
-    - 成交量加速度
-    - K 棒收盤位置與上下影線
-    - 時段分類
+class MarketFlowEngine:
+    FLOW_VERSION = "v3_sim_history_signal_ready"
 
-    重要：
-    每一根候選 K 只使用當下以前的資料計算特徵；標籤才看未來 max_hold_bars，
-    用來訓練 / 回測時必須搭配 walk-forward 才不會偷看未來。
-    """
+    HISTORY_KEYS = [
+        "price_history",
+        "volume_history",
+        "vwap_history",
+        "time_history",
+    ]
+
+    STATE_DEFAULTS = {
+        "price_history": [],
+        "volume_history": [],
+        "vwap_history": [],
+        "time_history": [],
+        "big_order_log": [],
+        "tick": 0,
+        "last_serial": None,
+        "big_order_last_serial": None,
+        "last_stock": None,
+        "last_good_quote": None,
+        "api_error_message": None,
+        "market_flow_version": None,
+    }
 
     @staticmethod
-    def _safe_float(value, default=0.0):
+    def safe_float(value, default=0.0):
         try:
-            if value is None:
-                return default
-            if pd.isna(value):
-                return default
             return float(value)
         except Exception:
             return default
 
     @staticmethod
-    def _ema(series, span):
-        return series.ewm(span=span, adjust=False).mean()
+    def safe_int(value, default=0):
+        try:
+            return int(round(float(value)))
+        except Exception:
+            return default
 
     @staticmethod
-    def _rsi(close, period=14):
-        diff = close.diff()
-        gain = diff.clip(lower=0)
-        loss = (-diff).clip(lower=0)
-        avg_gain = gain.rolling(period).mean()
-        avg_loss = loss.rolling(period).mean()
-        rs = avg_gain / avg_loss.replace(0, np.nan)
-        rsi = 100 - (100 / (1 + rs))
-        return rsi.fillna(50)
+    def init_session_state(st):
+        for key, default in MarketFlowEngine.STATE_DEFAULTS.items():
+            if key not in st.session_state:
+                if isinstance(default, list):
+                    st.session_state[key] = []
+                else:
+                    st.session_state[key] = default
+
+        if st.session_state.get("market_flow_version") != MarketFlowEngine.FLOW_VERSION:
+            keep_stock = st.session_state.get("last_stock", None)
+
+            MarketFlowEngine.reset_market_state(
+                st=st,
+                keep_stock=keep_stock,
+            )
+
+            st.session_state.market_flow_version = MarketFlowEngine.FLOW_VERSION
 
     @staticmethod
-    def _time_bucket(minute_index):
-        minute_index = int(minute_index)
-        if minute_index < 15:
-            return "09:00-09:14"
-        if minute_index < 30:
-            return "09:15-09:29"
-        if minute_index < 60:
-            return "09:30-09:59"
-        if minute_index < 90:
-            return "10:00-10:29"
-        if minute_index < 150:
-            return "10:30-11:29"
-        if minute_index < 210:
-            return "11:30-12:29"
-        return "12:30-13:30"
+    def reset_market_state(st, keep_stock=None):
+        st.session_state.price_history = []
+        st.session_state.volume_history = []
+        st.session_state.vwap_history = []
+        st.session_state.time_history = []
+        st.session_state.big_order_log = []
+        st.session_state.tick = 0
+        st.session_state.last_serial = None
+        st.session_state.big_order_last_serial = None
+        st.session_state.last_good_quote = None
+        st.session_state.api_error_message = None
+
+        if keep_stock is not None:
+            st.session_state.last_stock = keep_stock
 
     @staticmethod
-    def _vwap_zone(vwap_gap):
-        v = IntradayLabelEngine._safe_float(vwap_gap)
-        if v >= 1.5:
-            return "ABOVE_15_CHASE"
-        if v >= 1.0:
-            return "ABOVE_1"
-        if v >= 0.4:
-            return "ABOVE_04"
-        if v >= 0.05:
-            return "ABOVE_SMALL"
-        if v > -0.05:
-            return "NEAR"
-        if v > -0.4:
-            return "BELOW_SMALL"
-        if v > -1.0:
-            return "BELOW_04"
-        if v > -1.5:
-            return "BELOW_1"
-        return "BELOW_15_CHASE"
+    def reset_if_stock_changed(st, stock_code):
+        old_stock = st.session_state.get("last_stock", None)
+
+        if old_stock != stock_code:
+            MarketFlowEngine.reset_market_state(
+                st=st,
+                keep_stock=stock_code,
+            )
 
     @staticmethod
-    def _slope_zone(slope):
-        s = IntradayLabelEngine._safe_float(slope)
-        if s >= 0.8:
-            return "UP_STRONG"
-        if s >= 0.25:
-            return "UP"
-        if s > -0.25:
-            return "FLAT"
-        if s > -0.8:
-            return "DOWN"
-        return "DOWN_STRONG"
+    def is_tw_regular_session(now):
+        if now is None:
+            return False
+
+        if now.weekday() >= 5:
+            return False
+
+        return time(9, 0) <= now.time() <= time(13, 30)
 
     @staticmethod
-    def _orb_zone(orb_high_gap, orb_low_gap):
-        """
-        orb_high_gap = (close - ORB high) / close * 100
-        orb_low_gap  = (close - ORB low) / close * 100
-        """
-        high_gap = IntradayLabelEngine._safe_float(orb_high_gap)
-        low_gap = IntradayLabelEngine._safe_float(orb_low_gap)
+    def normalize_levels(levels):
+        result = []
 
-        if high_gap >= 0.25:
-            return "ABOVE_ORB_STRONG"
-        if high_gap >= 0:
-            return "ABOVE_ORB"
-        if low_gap <= -0.25:
-            return "BELOW_ORB_STRONG"
-        if low_gap <= 0:
-            return "BELOW_ORB"
-        return "INSIDE_ORB"
-
-    @staticmethod
-    def _add_indicators(df):
-        df = df.copy()
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df = df.dropna(subset=["date"])
-        df = df.sort_values("date").reset_index(drop=True)
-
-        df["trade_date"] = df["date"].dt.strftime("%Y-%m-%d")
-        df["time"] = df["date"].dt.strftime("%H:%M")
-        df["minute_index"] = df.groupby("trade_date").cumcount()
-
-        for col in ["open", "high", "low", "close", "volume"]:
-            if col not in df.columns:
-                df[col] = 0
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        df = df.dropna(subset=["open", "high", "low", "close"])
-        df["volume"] = df["volume"].fillna(0)
-
-        frames = []
-        for _, day in df.groupby("trade_date"):
-            day = day.copy().reset_index(drop=True)
-
-            day["ema5"] = IntradayLabelEngine._ema(day["close"], 5)
-            day["ema20"] = IntradayLabelEngine._ema(day["close"], 20)
-            day["ema60"] = IntradayLabelEngine._ema(day["close"], 60)
-
-            amount = day["close"] * day["volume"].fillna(0)
-            volume_sum = day["volume"].fillna(0).cumsum().replace(0, np.nan)
-            day["vwap"] = amount.cumsum() / volume_sum
-            day["vwap"] = day["vwap"].fillna(day["close"])
-
-            ema12 = IntradayLabelEngine._ema(day["close"], 12)
-            ema26 = IntradayLabelEngine._ema(day["close"], 26)
-            day["macd"] = ema12 - ema26
-            day["macd_signal"] = IntradayLabelEngine._ema(day["macd"], 9)
-            day["macd_hist"] = day["macd"] - day["macd_signal"]
-            day["rsi"] = IntradayLabelEngine._rsi(day["close"], 14)
-
-            for n in [3, 5, 10, 20]:
-                day[f"slope_{n}"] = day["close"].pct_change(n) * 100
-
-            day["volume_ma3"] = day["volume"].rolling(3).mean()
-            day["volume_ma5"] = day["volume"].rolling(5).mean()
-            day["volume_ma20"] = day["volume"].rolling(20).mean()
-            day["volume_ratio"] = day["volume"] / day["volume_ma20"].replace(0, np.nan)
-            day["volume_ratio_5"] = day["volume"] / day["volume_ma5"].shift(1).replace(0, np.nan)
-            day["volume_ratio_20"] = day["volume"] / day["volume_ma20"].shift(1).replace(0, np.nan)
-            day["volume_acceleration"] = day["volume_ma3"] / day["volume_ma20"].shift(1).replace(0, np.nan)
-
-            day["high_30"] = day["high"].rolling(30).max().fillna(day["high"].expanding().max())
-            day["low_30"] = day["low"].rolling(30).min().fillna(day["low"].expanding().min())
-            day["high_60"] = day["high"].rolling(60).max().fillna(day["high"].expanding().max())
-            day["low_60"] = day["low"].rolling(60).min().fillna(day["low"].expanding().min())
-
-            # ORB：前 15 根 K 的高低點。前 15 分鐘內用已出現的高低點暫代。
-            if len(day) >= 15:
-                fixed_orb_high = float(day.loc[:14, "high"].max())
-                fixed_orb_low = float(day.loc[:14, "low"].min())
-            else:
-                fixed_orb_high = float(day["high"].max())
-                fixed_orb_low = float(day["low"].min())
-
-            expanding_high = day["high"].expanding().max()
-            expanding_low = day["low"].expanding().min()
-            day["orb_high"] = fixed_orb_high
-            day["orb_low"] = fixed_orb_low
-            early_mask = day["minute_index"] < 15
-            day.loc[early_mask, "orb_high"] = expanding_high[early_mask]
-            day.loc[early_mask, "orb_low"] = expanding_low[early_mask]
-
-            day["vwap_gap"] = (day["close"] - day["vwap"]) / day["vwap"].replace(0, np.nan) * 100
-            day["vwap_abs_gap"] = day["vwap_gap"].abs()
-            day["ema_gap"] = (day["ema5"] - day["ema20"]) / day["ema20"].replace(0, np.nan) * 100
-
-            day["distance_to_high_30"] = (day["high_30"] - day["close"]) / day["close"].replace(0, np.nan) * 100
-            day["distance_to_low_30"] = (day["close"] - day["low_30"]) / day["close"].replace(0, np.nan) * 100
-            day["distance_to_high_60"] = (day["high_60"] - day["close"]) / day["close"].replace(0, np.nan) * 100
-            day["distance_to_low_60"] = (day["close"] - day["low_60"]) / day["close"].replace(0, np.nan) * 100
-
-            first_open = day["open"].iloc[0] if len(day) else 0
-            day["open_gap"] = (day["close"] - first_open) / max(first_open, 0.000001) * 100
-            day["day_range_pct"] = (day["high"].expanding().max() - day["low"].expanding().min()) / day["close"].replace(0, np.nan) * 100
-
-            day["orb_high_gap"] = (day["close"] - day["orb_high"]) / day["close"].replace(0, np.nan) * 100
-            day["orb_low_gap"] = (day["close"] - day["orb_low"]) / day["close"].replace(0, np.nan) * 100
-            day["orb_range_pct"] = (day["orb_high"] - day["orb_low"]) / day["close"].replace(0, np.nan) * 100
-
-            candle_range = (day["high"] - day["low"]).replace(0, np.nan)
-            day["candle_range_pct"] = (day["high"] - day["low"]) / day["close"].replace(0, np.nan) * 100
-            day["close_location"] = (day["close"] - day["low"]) / candle_range
-            day["upper_wick_pct"] = (day["high"] - day[["open", "close"]].max(axis=1)) / day["close"].replace(0, np.nan) * 100
-            day["lower_wick_pct"] = (day[["open", "close"]].min(axis=1) - day["low"]) / day["close"].replace(0, np.nan) * 100
-
-            frames.append(day)
-
-        if not frames:
-            return pd.DataFrame()
-
-        out = pd.concat(frames, ignore_index=True)
-        out = out.replace([np.inf, -np.inf], np.nan)
-        out = out.fillna(0)
-        return out
-
-    @staticmethod
-    def _simulate_trade(day, entry_idx, action, stop_pct=0.7, take_pct=1.8, max_hold_bars=50, cost_pct=0.435):
-        entry_row = day.iloc[entry_idx]
-        entry_price = IntradayLabelEngine._safe_float(entry_row["close"])
-        if entry_price <= 0:
-            return None
-
-        stop_rate = stop_pct / 100
-        take_rate = take_pct / 100
-        if action == "BUY":
-            stop_price = entry_price * (1 - stop_rate)
-            take_price = entry_price * (1 + take_rate)
-        else:
-            stop_price = entry_price * (1 + stop_rate)
-            take_price = entry_price * (1 - take_rate)
-
-        exit_price = entry_price
-        exit_time = entry_row["date"]
-        exit_reason = "時間出場"
-        hold_bars = 0
-        last_idx = min(len(day) - 1, entry_idx + max_hold_bars)
-
-        for i in range(entry_idx + 1, last_idx + 1):
-            row = day.iloc[i]
-            high = IntradayLabelEngine._safe_float(row["high"])
-            low = IntradayLabelEngine._safe_float(row["low"])
-            close = IntradayLabelEngine._safe_float(row["close"])
-            hold_bars = i - entry_idx
-            exit_time = row["date"]
-
-            if action == "BUY":
-                hit_stop = low <= stop_price
-                hit_take = high >= take_price
-                if hit_stop and hit_take:
-                    exit_price = stop_price
-                    exit_reason = "停損"
-                    break
-                if hit_take:
-                    exit_price = take_price
-                    exit_reason = "停利"
-                    break
-                if hit_stop:
-                    exit_price = stop_price
-                    exit_reason = "停損"
-                    break
-            else:
-                hit_stop = high >= stop_price
-                hit_take = low <= take_price
-                if hit_stop and hit_take:
-                    exit_price = stop_price
-                    exit_reason = "停損"
-                    break
-                if hit_take:
-                    exit_price = take_price
-                    exit_reason = "停利"
-                    break
-                if hit_stop:
-                    exit_price = stop_price
-                    exit_reason = "停損"
-                    break
-
-            exit_price = close
-
-        if action == "BUY":
-            gross_pnl_pct = (exit_price - entry_price) / entry_price * 100
-        else:
-            gross_pnl_pct = (entry_price - exit_price) / entry_price * 100
-
-        pnl_pct = gross_pnl_pct - cost_pct
-        if exit_reason == "停利":
-            label = "WIN"
-        elif exit_reason == "停損":
-            label = "LOSS"
-        else:
-            label = "TIME_WIN" if pnl_pct > 0 else "TIME_LOSS"
-
-        return {
-            "action": action,
-            "entry_time": entry_row["date"],
-            "entry_price": round(entry_price, 2),
-            "exit_time": exit_time,
-            "exit_price": round(exit_price, 2),
-            "exit_reason": exit_reason,
-            "hold_bars": hold_bars,
-            "stop_price": round(stop_price, 2),
-            "take_price": round(take_price, 2),
-            "gross_pnl_pct": round(gross_pnl_pct, 3),
-            "cost_pct": round(cost_pct, 3),
-            "pnl_pct": round(pnl_pct, 3),
-            "label": label,
-            "is_win": 1 if pnl_pct > 0 else 0,
-        }
-
-    @staticmethod
-    def _feature_cols():
-        return [
-            "vwap_gap", "vwap_abs_gap", "ema_gap", "rsi", "macd_hist",
-            "slope_3", "slope_5", "slope_10", "slope_20",
-            "volume_ratio", "volume_ratio_5", "volume_ratio_20", "volume_acceleration",
-            "distance_to_high_30", "distance_to_low_30", "distance_to_high_60", "distance_to_low_60",
-            "open_gap", "day_range_pct",
-            "orb_high_gap", "orb_low_gap", "orb_range_pct",
-            "candle_range_pct", "close_location", "upper_wick_pct", "lower_wick_pct",
-        ]
-
-    @staticmethod
-    def build_labels(kline_df, stop_pct=0.7, take_pct=1.8, max_hold_bars=50, cost_pct=0.435, start_minute=15, end_minute=250):
-        df = IntradayLabelEngine._add_indicators(kline_df)
-        if df.empty:
-            return pd.DataFrame(), pd.DataFrame()
-
-        rows = []
-        feature_cols = IntradayLabelEngine._feature_cols()
-
-        for trade_date, day in df.groupby("trade_date"):
-            day = day.copy().reset_index(drop=True)
-            if len(day) < start_minute + max_hold_bars + 5:
+        for item in levels or []:
+            if not isinstance(item, dict):
                 continue
 
-            last_entry_idx = min(len(day) - max_hold_bars - 1, end_minute)
-            for i in range(start_minute, last_entry_idx):
-                base = day.iloc[i]
-                for action in ["BUY", "SELL"]:
-                    sim = IntradayLabelEngine._simulate_trade(
-                        day=day,
-                        entry_idx=i,
-                        action=action,
-                        stop_pct=stop_pct,
-                        take_pct=take_pct,
-                        max_hold_bars=max_hold_bars,
-                        cost_pct=cost_pct,
-                    )
-                    if not sim:
-                        continue
+            price = MarketFlowEngine.safe_float(
+                item.get("price")
+                or item.get("bid")
+                or item.get("ask")
+                or 0
+            )
 
-                    row = {
-                        "trade_date": trade_date,
-                        "time": base["time"],
-                        "minute_index": int(base["minute_index"]),
-                        "time_bucket": IntradayLabelEngine._time_bucket(base["minute_index"]),
-                        "vwap_zone": IntradayLabelEngine._vwap_zone(base["vwap_gap"]),
-                        "slope_zone": IntradayLabelEngine._slope_zone(base["slope_10"]),
-                        "orb_zone": IntradayLabelEngine._orb_zone(base["orb_high_gap"], base["orb_low_gap"]),
-                    }
-                    for col in feature_cols:
-                        row[col] = round(IntradayLabelEngine._safe_float(base.get(col, 0)), 5)
-                    row.update(sim)
-                    rows.append(row)
+            size = MarketFlowEngine.safe_float(
+                item.get("size")
+                or item.get("volume")
+                or item.get("qty")
+                or 0
+            )
 
-        labels = pd.DataFrame(rows)
-        if labels.empty:
-            return df, labels
-        labels = labels.sort_values(["entry_time", "action"]).reset_index(drop=True)
-        return df, labels
+            result.append(
+                {
+                    "price": price,
+                    "size": size,
+                }
+            )
+
+        while len(result) < 5:
+            result.append(
+                {
+                    "price": 0,
+                    "size": 0,
+                }
+            )
+
+        return result[:5]
 
     @staticmethod
-    def extract_current_features(prices, volumes, now_time=None):
-        """從目前盤中價格序列抽出即時特徵。"""
-        prices = prices or []
-        volumes = volumes or []
-        if len(prices) < 20:
-            return None
+    def _first_valid(*values):
+        for value in values:
+            if value is None:
+                continue
 
-        df = pd.DataFrame({
-            "close": prices,
-            "volume": volumes if len(volumes) == len(prices) else [1] * len(prices),
-        })
-        df["open"] = df["close"].shift(1).fillna(df["close"])
-        df["high"] = df[["open", "close"]].max(axis=1)
-        df["low"] = df[["open", "close"]].min(axis=1)
+            if isinstance(value, str) and value.strip() == "":
+                continue
 
-        if now_time is None:
-            base_time = pd.Timestamp("2026-01-01 09:00:00")
-            df["date"] = [base_time + pd.Timedelta(minutes=i) for i in range(len(df))]
+            return value
+
+        return None
+
+    @staticmethod
+    def _get_trade_dict(quote):
+        trade = quote.get("trade", {}) if isinstance(quote, dict) else {}
+
+        if isinstance(trade, dict):
+            return trade
+
+        return {}
+
+    @staticmethod
+    def _to_datetime(value, fallback=None):
+        if isinstance(value, datetime):
+            return value
+
+        if value is None:
+            return fallback
+
+        try:
+            return datetime.fromisoformat(str(value))
+        except Exception:
+            return fallback
+
+    @staticmethod
+    def _build_quote_fingerprint(
+        stock_code,
+        price,
+        volume,
+        vwap,
+        high,
+        low,
+        bids,
+        asks,
+    ):
+        bid_1_price = 0
+        bid_1_size = 0
+        ask_1_price = 0
+        ask_1_size = 0
+
+        if bids:
+            bid_1_price = MarketFlowEngine.safe_float(bids[0].get("price", 0))
+            bid_1_size = MarketFlowEngine.safe_float(bids[0].get("size", 0))
+
+        if asks:
+            ask_1_price = MarketFlowEngine.safe_float(asks[0].get("price", 0))
+            ask_1_size = MarketFlowEngine.safe_float(asks[0].get("size", 0))
+
+        return (
+            f"{stock_code}|"
+            f"p={price:.4f}|"
+            f"v={volume:.4f}|"
+            f"vw={vwap:.4f}|"
+            f"h={high:.4f}|"
+            f"l={low:.4f}|"
+            f"bp={bid_1_price:.4f}|"
+            f"bs={bid_1_size:.4f}|"
+            f"ap={ask_1_price:.4f}|"
+            f"as={ask_1_size:.4f}"
+        )
+
+    @staticmethod
+    def _build_serial(
+        quote,
+        stock_code,
+        data_source,
+        now,
+        tick,
+        price,
+        volume,
+        vwap,
+        high,
+        low,
+        bids,
+        asks,
+    ):
+        quote = quote or {}
+        trade = MarketFlowEngine._get_trade_dict(quote)
+
+        raw_serial = MarketFlowEngine._first_valid(
+            quote.get("serial"),
+            quote.get("tick_id"),
+            quote.get("tickId"),
+            quote.get("tradeTime"),
+            quote.get("lastTradeTime"),
+            quote.get("lastUpdated"),
+            quote.get("time"),
+            quote.get("dateTime"),
+            trade.get("serial"),
+            trade.get("time"),
+            trade.get("tradeTime"),
+        )
+
+        fingerprint = MarketFlowEngine._build_quote_fingerprint(
+            stock_code=stock_code,
+            price=price,
+            volume=volume,
+            vwap=vwap,
+            high=high,
+            low=low,
+            bids=bids,
+            asks=asks,
+        )
+
+        if data_source == "模擬盤":
+            if raw_serial is not None:
+                return f"SIM|{stock_code}|{raw_serial}"
+
+            return f"SIM|{stock_code}|tick={tick}|{fingerprint}"
+
+        if raw_serial is not None:
+            return f"REAL|{stock_code}|{raw_serial}|{fingerprint}"
+
+        return f"REAL|{fingerprint}"
+
+    @staticmethod
+    def normalize_quote(
+        quote,
+        stock_code,
+        now=None,
+        data_source=None,
+        tick=None,
+    ):
+        quote = quote or {}
+        now = now or datetime.now()
+        trade = MarketFlowEngine._get_trade_dict(quote)
+
+        name = (
+            quote.get("name")
+            or quote.get("stock_name")
+            or quote.get("symbolName")
+            or quote.get("symbol_name")
+            or stock_code
+        )
+
+        price = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("price"),
+                quote.get("lastPrice"),
+                quote.get("closePrice"),
+                quote.get("close"),
+                trade.get("price"),
+                0,
+            )
+        )
+
+        vwap = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("vwap"),
+                quote.get("avgPrice"),
+                quote.get("averagePrice"),
+                price,
+            )
+        )
+
+        if vwap <= 0:
+            vwap = price
+
+        volume = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("last_size"),
+                quote.get("lastSize"),
+                quote.get("last_size_lot"),
+                quote.get("volume"),
+                quote.get("size"),
+                trade.get("size"),
+                trade.get("volume"),
+                0,
+            )
+        )
+
+        high = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("high"),
+                quote.get("highPrice"),
+                price,
+            )
+        )
+
+        low = MarketFlowEngine.safe_float(
+            MarketFlowEngine._first_valid(
+                quote.get("low"),
+                quote.get("lowPrice"),
+                price,
+            )
+        )
+
+        bids = MarketFlowEngine.normalize_levels(
+            quote.get("bids") or []
+        )
+
+        asks = MarketFlowEngine.normalize_levels(
+            quote.get("asks") or []
+        )
+
+        serial = MarketFlowEngine._build_serial(
+            quote=quote,
+            stock_code=stock_code,
+            data_source=data_source,
+            now=now,
+            tick=tick,
+            price=price,
+            volume=volume,
+            vwap=vwap,
+            high=high,
+            low=low,
+            bids=bids,
+            asks=asks,
+        )
+
+        if data_source == "真實盤":
+            market_status = (
+                "盤中"
+                if MarketFlowEngine.is_tw_regular_session(now)
+                else "休市"
+            )
+
+        elif data_source == "模擬盤":
+            market_status = "模擬"
+
         else:
-            base_day = pd.Timestamp(now_time).strftime("%Y-%m-%d")
-            base_time = pd.Timestamp(f"{base_day} 09:00:00")
-            df["date"] = [base_time + pd.Timedelta(minutes=i) for i in range(len(df))]
+            market_status = "未知"
 
-        enriched = IntradayLabelEngine._add_indicators(df)
-        if enriched.empty:
-            return None
-
-        row = enriched.iloc[-1]
-        feature = {
-            "minute_index": int(row["minute_index"]),
-            "time_bucket": IntradayLabelEngine._time_bucket(row["minute_index"]),
-            "vwap_zone": IntradayLabelEngine._vwap_zone(row["vwap_gap"]),
-            "slope_zone": IntradayLabelEngine._slope_zone(row["slope_10"]),
-            "orb_zone": IntradayLabelEngine._orb_zone(row["orb_high_gap"], row["orb_low_gap"]),
+        return {
+            "name": name,
+            "stock_code": stock_code,
+            "price": price,
+            "vwap": vwap,
+            "volume": volume,
+            "high": high,
+            "low": low,
+            "bids": bids,
+            "asks": asks,
+            "serial": str(serial),
+            "market_status": market_status,
+            "raw": quote,
         }
-        for col in IntradayLabelEngine._feature_cols():
-            feature[col] = IntradayLabelEngine._safe_float(row.get(col, 0))
-        return feature
+
+    @staticmethod
+    def load_history_from_quote(st, quote, now, max_len=500):
+        history = quote.get("history", [])
+
+        if not history:
+            return False
+
+        prices = []
+        volumes = []
+        vwaps = []
+        times = []
+
+        for item in history[-max_len:]:
+            if not isinstance(item, dict):
+                continue
+
+            price = MarketFlowEngine.safe_float(
+                item.get("price")
+                or item.get("close")
+                or item.get("lastPrice")
+                or 0
+            )
+
+            if price <= 0:
+                continue
+
+            volume = MarketFlowEngine.safe_float(
+                item.get("volume")
+                or item.get("last_size")
+                or item.get("lastSize")
+                or 0
+            )
+
+            vwap = MarketFlowEngine.safe_float(
+                item.get("vwap")
+                or item.get("avgPrice")
+                or price
+            )
+
+            if vwap <= 0:
+                vwap = price
+
+            item_time = MarketFlowEngine._to_datetime(
+                item.get("time"),
+                fallback=now,
+            )
+
+            prices.append(price)
+            volumes.append(volume)
+            vwaps.append(vwap)
+            times.append(item_time)
+
+        if not prices:
+            return False
+
+        st.session_state.price_history = prices
+        st.session_state.volume_history = volumes
+        st.session_state.vwap_history = vwaps
+        st.session_state.time_history = times
+
+        return True
+
+    @staticmethod
+    def append_history(st, price, volume, vwap, now, serial, max_len=500):
+        if st.session_state.get("last_serial") == serial:
+            return False
+
+        st.session_state.last_serial = serial
+
+        st.session_state.price_history.append(
+            MarketFlowEngine.safe_float(price)
+        )
+
+        st.session_state.volume_history.append(
+            MarketFlowEngine.safe_float(volume)
+        )
+
+        st.session_state.vwap_history.append(
+            MarketFlowEngine.safe_float(vwap)
+        )
+
+        st.session_state.time_history.append(now)
+
+        MarketFlowEngine.trim_and_align_history(
+            st=st,
+            max_len=max_len,
+        )
+
+        return True
+
+    @staticmethod
+    def trim_and_align_history(st, max_len=500):
+        for key in MarketFlowEngine.HISTORY_KEYS:
+            if key not in st.session_state:
+                st.session_state[key] = []
+
+        lengths = [
+            len(st.session_state.price_history),
+            len(st.session_state.volume_history),
+            len(st.session_state.vwap_history),
+            len(st.session_state.time_history),
+        ]
+
+        min_len = min(lengths) if lengths else 0
+
+        if min_len <= 0:
+            st.session_state.price_history = []
+            st.session_state.volume_history = []
+            st.session_state.vwap_history = []
+            st.session_state.time_history = []
+            return
+
+        min_len = min(min_len, max_len)
+
+        st.session_state.price_history = st.session_state.price_history[-min_len:]
+        st.session_state.volume_history = st.session_state.volume_history[-min_len:]
+        st.session_state.vwap_history = st.session_state.vwap_history[-min_len:]
+        st.session_state.time_history = st.session_state.time_history[-min_len:]
+
+    @staticmethod
+    def get_series(st):
+        MarketFlowEngine.trim_and_align_history(st)
+
+        return {
+            "prices": st.session_state.price_history,
+            "volumes": st.session_state.volume_history,
+            "vwaps": st.session_state.vwap_history,
+            "times": st.session_state.time_history,
+        }
+
+    @staticmethod
+    def build_snapshot(
+        st,
+        quote,
+        stock_code,
+        now,
+        data_source=None,
+    ):
+        q = MarketFlowEngine.normalize_quote(
+            quote=quote,
+            stock_code=stock_code,
+            now=now,
+            data_source=data_source,
+            tick=st.session_state.get("tick", None),
+        )
+
+        did_load_history = False
+
+        if data_source == "模擬盤":
+            did_load_history = MarketFlowEngine.load_history_from_quote(
+                st=st,
+                quote=quote,
+                now=now,
+            )
+
+        if did_load_history:
+            st.session_state.last_serial = q["serial"]
+            did_append = True
+
+        else:
+            did_append = MarketFlowEngine.append_history(
+                st=st,
+                price=q["price"],
+                volume=q["volume"],
+                vwap=q["vwap"],
+                now=now,
+                serial=q["serial"],
+            )
+
+        series = MarketFlowEngine.get_series(st)
+
+        return {
+            "quote": q,
+            "name": q["name"],
+            "stock_code": q["stock_code"],
+            "price": q["price"],
+            "vwap": q["vwap"],
+            "volume": q["volume"],
+            "high": q["high"],
+            "low": q["low"],
+            "bids": q["bids"],
+            "asks": q["asks"],
+            "serial": q["serial"],
+            "market_status": q["market_status"],
+            "did_append": did_append,
+            "prices": series["prices"],
+            "volumes": series["volumes"],
+            "vwaps": series["vwaps"],
+            "times": series["times"],
+        }

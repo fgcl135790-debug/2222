@@ -1,416 +1,190 @@
-import math
-import random
-from datetime import datetime, timedelta
-
-
-class SimulationEngine:
-    STOCK_BASE = {
-        "2330": {
-            "name": "台積電",
-            "price": 2340.0,
-            "tick": 5.0,
-            "base_volume": 360,
-        },
-        "3481": {
-            "name": "群創",
-            "price": 65.0,
-            "tick": 0.05,
-            "base_volume": 520,
-        },
-        "2317": {
-            "name": "鴻海",
-            "price": 210.0,
-            "tick": 0.5,
-            "base_volume": 420,
-        },
-        "2454": {
-            "name": "聯發科",
-            "price": 1360.0,
-            "tick": 5.0,
-            "base_volume": 260,
-        },
-    }
-
-    TOTAL_MINUTES = 271  # 09:00 ~ 13:30
-
-    # 關鍵：快取同一條模擬日內路徑
-    # key = stock_code | scenario | sim_run_id
-    PATH_CACHE = {}
+class TradeAlertEngine:
 
     @staticmethod
-    def _safe_int(value, default=0):
+    def _safe_float(value, default=None):
         try:
-            return int(value)
+            return float(value)
         except Exception:
             return default
 
     @staticmethod
-    def _round_to_tick(price, tick_size):
-        if tick_size <= 0:
-            return round(price, 2)
+    def _parse_entry(entry):
 
-        return round(round(price / tick_size) * tick_size, 2)
+        if not entry or entry == "-":
+            return None, None
+
+        try:
+            parts = str(entry).replace(" ", "").split("~")
+
+            if len(parts) != 2:
+                return None, None
+
+            low = float(parts[0])
+            high = float(parts[1])
+
+            return low, high
+
+        except Exception:
+            return None, None
 
     @staticmethod
-    def _stock_profile(stock_code):
-        code = str(stock_code)
+    def track(decision, price):
 
-        if code in SimulationEngine.STOCK_BASE:
-            return SimulationEngine.STOCK_BASE[code]
+        action = decision.get("action", "WAIT")
+        score = decision.get("score", 0)
+
+        price = TradeAlertEngine._safe_float(price, 0)
+
+        entry = decision.get("entry", "-")
+        stop_loss = TradeAlertEngine._safe_float(
+            decision.get("stop_loss", None)
+        )
+        take_profit = TradeAlertEngine._safe_float(
+            decision.get("take_profit", None)
+        )
+
+        entry_low, entry_high = TradeAlertEngine._parse_entry(entry)
+
+        # =========================
+        # 無交易訊號
+        # =========================
+
+        if action == "WAIT":
+
+            return {
+                "level": "WAIT",
+                "title": "等待進場",
+                "message": "目前沒有明確進場條件，建議先觀察。",
+                "detail": "多空條件尚未同步，不建議硬做。",
+                "score": score,
+            }
+
+        # =========================
+        # 資料不足
+        # =========================
+
+        if entry_low is None or entry_high is None:
+
+            return {
+                "level": "WAIT",
+                "title": "等待進場區",
+                "message": "目前尚未形成有效進場區。",
+                "detail": "請等待 DecisionEngine 給出完整進場、停損、停利。",
+                "score": score,
+            }
+
+        # =========================
+        # BUY 監控
+        # =========================
+
+        if action == "BUY":
+
+            if stop_loss is not None and price <= stop_loss:
+
+                return {
+                    "level": "DANGER",
+                    "title": "觸及多單停損",
+                    "message": "現價已跌破多方停損區。",
+                    "detail": f"停損價：{stop_loss}，現價：{price}",
+                    "score": score,
+                }
+
+            if take_profit is not None and price >= take_profit:
+
+                return {
+                    "level": "SUCCESS",
+                    "title": "多單達成停利",
+                    "message": "現價已達到多方停利目標。",
+                    "detail": f"停利價：{take_profit}，現價：{price}",
+                    "score": score,
+                }
+
+            if entry_low <= price <= entry_high:
+
+                return {
+                    "level": "ENTRY",
+                    "title": "進入多方進場區",
+                    "message": "現價已進入 DecisionEngine 建議的多方觀察區。",
+                    "detail": f"進場區：{entry_low} ~ {entry_high}",
+                    "score": score,
+                }
+
+            if price > entry_high:
+
+                return {
+                    "level": "WARNING",
+                    "title": "多方價格偏高",
+                    "message": "現價已高於建議進場區，避免追高。",
+                    "detail": f"建議等回測 {entry_low} ~ {entry_high}",
+                    "score": score,
+                }
+
+            return {
+                "level": "WAIT",
+                "title": "等待回測進場",
+                "message": "多方條件存在，但價格尚未進入理想區。",
+                "detail": f"等待回測：{entry_low} ~ {entry_high}",
+                "score": score,
+            }
+
+        # =========================
+        # SELL 監控
+        # =========================
+
+        if action == "SELL":
+
+            if stop_loss is not None and price >= stop_loss:
+
+                return {
+                    "level": "DANGER",
+                    "title": "觸及空單停損",
+                    "message": "現價已突破空方停損區。",
+                    "detail": f"停損價：{stop_loss}，現價：{price}",
+                    "score": score,
+                }
+
+            if take_profit is not None and price <= take_profit:
+
+                return {
+                    "level": "SUCCESS",
+                    "title": "空單達成停利",
+                    "message": "現價已達到空方停利目標。",
+                    "detail": f"停利價：{take_profit}，現價：{price}",
+                    "score": score,
+                }
+
+            if entry_low <= price <= entry_high:
+
+                return {
+                    "level": "ENTRY",
+                    "title": "進入空方進場區",
+                    "message": "現價已進入 DecisionEngine 建議的空方觀察區。",
+                    "detail": f"進場區：{entry_low} ~ {entry_high}",
+                    "score": score,
+                }
+
+            if price < entry_low:
+
+                return {
+                    "level": "WARNING",
+                    "title": "空方價格偏低",
+                    "message": "現價已低於建議進場區，避免追空。",
+                    "detail": f"建議等反彈：{entry_low} ~ {entry_high}",
+                    "score": score,
+                }
+
+            return {
+                "level": "WAIT",
+                "title": "等待反彈進場",
+                "message": "空方條件存在，但價格尚未進入理想區。",
+                "detail": f"等待反彈：{entry_low} ~ {entry_high}",
+                "score": score,
+            }
 
         return {
-            "name": code,
-            "price": 100.0,
-            "tick": 0.1,
-            "base_volume": 300,
+            "level": "WAIT",
+            "title": "等待訊號",
+            "message": "目前尚無有效監控狀態。",
+            "detail": "-",
+            "score": score,
         }
-
-    @staticmethod
-    def _scenario_force(scenario, x):
-        if scenario == "漲停鎖死":
-            if x < 0.18:
-                return 0.55
-            return 0.07
-
-        if scenario == "跌停鎖死":
-            if x < 0.18:
-                return -0.55
-            return -0.07
-
-        if scenario == "跳空急跌":
-            if x < 0.15:
-                return -0.55
-            if x < 0.42:
-                return -0.18
-            if x < 0.70:
-                return 0.06
-            return -0.03
-
-        if scenario in ["軋空行情", "誘空嘎空"]:
-            if x < 0.22:
-                return -0.11
-            if x < 0.58:
-                return 0.25
-            return 0.10
-
-        if scenario in ["誘多出貨", "拉高出貨"]:
-            if x < 0.35:
-                return 0.22
-            if x < 0.58:
-                return 0.03
-            return -0.20
-
-        if scenario == "主力吸籌":
-            if x < 0.40:
-                return 0.00
-            if x < 0.72:
-                return 0.06
-            return 0.16
-
-        return 0.025 * math.sin(x * math.pi * 5)
-
-    @staticmethod
-    def _make_full_day_path(stock_code, scenario, sim_run_id=0):
-        """
-        產生完整 09:00 ~ 13:30 走勢。
-        注意：這裡的 seed 絕對不能包含 tick。
-        tick 只能控制目前播放到第幾分鐘。
-        """
-
-        profile = SimulationEngine._stock_profile(stock_code)
-
-        name = profile["name"]
-        base_price = float(profile["price"])
-        tick_size = float(profile["tick"])
-        base_volume = float(profile["base_volume"])
-
-        seed = (
-            sum(ord(c) for c in str(stock_code))
-            + sum(ord(c) for c in str(scenario)) * 13
-            + int(sim_run_id) * 101
-        )
-
-        rng = random.Random(seed)
-
-        # 固定日期時間，不使用現在的秒數，避免 x 軸每秒改變
-        start = datetime(2026, 1, 1, 9, 0, 0)
-
-        open_gap = rng.uniform(-0.006, 0.006)
-
-        if scenario == "跳空急跌":
-            open_gap = rng.uniform(-0.025, -0.012)
-
-        elif scenario in ["軋空行情", "誘空嘎空"]:
-            open_gap = rng.uniform(-0.012, 0.002)
-
-        elif scenario == "漲停鎖死":
-            open_gap = rng.uniform(0.018, 0.035)
-
-        elif scenario == "跌停鎖死":
-            open_gap = rng.uniform(-0.035, -0.018)
-
-        last_price = base_price * (1 + open_gap)
-
-        day_high = last_price
-        day_low = last_price
-
-        cum_amount = 0.0
-        cum_volume = 0.0
-
-        history = []
-
-        for i in range(SimulationEngine.TOTAL_MINUTES):
-            x = i / max(SimulationEngine.TOTAL_MINUTES - 1, 1)
-
-            scenario_force = SimulationEngine._scenario_force(
-                scenario=scenario,
-                x=x,
-            )
-
-            morning_wave = math.sin(x * math.pi * 2.8) * 0.055
-            intraday_wave = math.sin(x * math.pi * 11.0) * 0.035
-            micro_wave = math.sin(x * math.pi * 37.0) * 0.014
-            noise = rng.uniform(-0.045, 0.045)
-
-            price_scale = max(base_price * 0.00115, tick_size)
-
-            change = (
-                scenario_force
-                + morning_wave
-                + intraday_wave
-                + micro_wave
-                + noise
-            ) * price_scale
-
-            last_price = last_price + change
-
-            limit_high = base_price * 1.095
-            limit_low = base_price * 0.905
-
-            last_price = max(
-                limit_low,
-                min(limit_high, last_price),
-            )
-
-            price = SimulationEngine._round_to_tick(
-                last_price,
-                tick_size,
-            )
-
-            day_high = max(day_high, price)
-            day_low = min(day_low, price)
-
-            open_factor = 2.2 if i < 18 else 1.0
-            close_factor = 1.5 if i > 235 else 1.0
-            wave_volume = 1 + max(0, math.sin(x * math.pi * 5.5)) * 0.75
-            volatility_factor = 1 + abs(change) / max(tick_size, 0.01) * 0.26
-
-            spike = 1.0
-
-            if i in [25, 55, 88, 126, 162, 205, 240]:
-                spike = rng.uniform(2.0, 4.0)
-
-            volume = (
-                base_volume
-                * open_factor
-                * close_factor
-                * wave_volume
-                * volatility_factor
-                * spike
-                * rng.uniform(0.65, 1.35)
-            )
-
-            volume = max(8, round(volume, 0))
-
-            cum_amount += price * volume
-            cum_volume += volume
-
-            vwap = cum_amount / max(cum_volume, 1)
-
-            history.append(
-                {
-                    "time": start + timedelta(minutes=i),
-                    "price": price,
-                    "volume": volume,
-                    "vwap": round(vwap, 2),
-                    "high": round(day_high, 2),
-                    "low": round(day_low, 2),
-                }
-            )
-
-        return {
-            "name": name,
-            "base_price": base_price,
-            "tick_size": tick_size,
-            "base_volume": base_volume,
-            "history": history,
-            "sim_run_id": sim_run_id,
-            "scenario": scenario,
-        }
-
-    @staticmethod
-    def _get_cached_full_day_path(stock_code, scenario, sim_run_id):
-        cache_key = f"{stock_code}|{scenario}|{sim_run_id}"
-
-        if cache_key not in SimulationEngine.PATH_CACHE:
-            SimulationEngine.PATH_CACHE[cache_key] = SimulationEngine._make_full_day_path(
-                stock_code=stock_code,
-                scenario=scenario,
-                sim_run_id=sim_run_id,
-            )
-
-            # 避免快取無限長大，只保留最近 20 條
-            if len(SimulationEngine.PATH_CACHE) > 20:
-                oldest_key = list(SimulationEngine.PATH_CACHE.keys())[0]
-                SimulationEngine.PATH_CACHE.pop(oldest_key, None)
-
-        return SimulationEngine.PATH_CACHE[cache_key]
-
-    @staticmethod
-    def _make_intraday_replay(stock_code, tick=0, scenario="一般波動", sim_run_id=0):
-        profile = SimulationEngine._get_cached_full_day_path(
-            stock_code=stock_code,
-            scenario=scenario,
-            sim_run_id=sim_run_id,
-        )
-
-        full_history = profile["history"]
-
-        tick = SimulationEngine._safe_int(tick, 0)
-
-        # 一開始 25 筆，之後每次刷新增加 1 分鐘
-        reveal_count = min(
-            len(full_history),
-            max(25, 25 + tick),
-        )
-
-        history = full_history[:reveal_count]
-        latest = history[-1]
-
-        tick_size = profile["tick_size"]
-        base_volume = profile["base_volume"]
-
-        # 五檔可以隨 tick 微變，這不會影響走勢線
-        book_seed = (
-            sum(ord(c) for c in str(stock_code))
-            + tick * 17
-            + sum(ord(c) for c in str(scenario)) * 19
-            + int(sim_run_id) * 97
-        )
-
-        rng = random.Random(book_seed)
-
-        bid_bias = 1.0
-        ask_bias = 1.0
-
-        if latest["price"] >= latest["vwap"]:
-            bid_bias = 1.24
-            ask_bias = 0.92
-        else:
-            bid_bias = 0.92
-            ask_bias = 1.24
-
-        bids = []
-        asks = []
-
-        for level in range(5):
-            step = tick_size * (level + 1)
-
-            bid_price = SimulationEngine._round_to_tick(
-                latest["price"] - step,
-                tick_size,
-            )
-
-            ask_price = SimulationEngine._round_to_tick(
-                latest["price"] + step,
-                tick_size,
-            )
-
-            bid_size = round(
-                base_volume * bid_bias * rng.uniform(0.55, 1.65),
-                0,
-            )
-
-            ask_size = round(
-                base_volume * ask_bias * rng.uniform(0.55, 1.65),
-                0,
-            )
-
-            bids.append(
-                {
-                    "price": bid_price,
-                    "size": bid_size,
-                }
-            )
-
-            asks.append(
-                {
-                    "price": ask_price,
-                    "size": ask_size,
-                }
-            )
-
-        serial = f"SIM_{stock_code}_{scenario}_{sim_run_id}_{tick}_{reveal_count}"
-
-        return {
-            "name": profile["name"],
-            "stock_code": str(stock_code),
-            "price": latest["price"],
-            "vwap": latest["vwap"],
-            "avgPrice": latest["vwap"],
-            "last_size": latest["volume"],
-            "lastSize": latest["volume"],
-            "volume": latest["volume"],
-            "high": latest["high"],
-            "low": latest["low"],
-            "bids": bids,
-            "asks": asks,
-            "trade": {
-                "serial": serial,
-                "time": latest["time"].isoformat(),
-                "price": latest["price"],
-                "size": latest["volume"],
-            },
-            "serial": serial,
-            "history": history,
-            "full_day_points": len(full_history),
-            "replay_points": reveal_count,
-            "scenario": scenario,
-            "sim_run_id": sim_run_id,
-        }
-
-    @staticmethod
-    def get_quote(stock_code="2330", tick=0, scenario="一般波動", sim_run_id=0, **kwargs):
-        return SimulationEngine._make_intraday_replay(
-            stock_code=stock_code,
-            tick=tick,
-            scenario=scenario or "一般波動",
-            sim_run_id=sim_run_id,
-        )
-
-    @staticmethod
-    def generate(stock_code="2330", tick=0, scenario="一般波動", sim_run_id=0, **kwargs):
-        return SimulationEngine.get_quote(
-            stock_code=stock_code,
-            tick=tick,
-            scenario=scenario,
-            sim_run_id=sim_run_id,
-        )
-
-    @staticmethod
-    def get_market_data(stock_code="2330", tick=0, scenario="一般波動", sim_run_id=0, **kwargs):
-        return SimulationEngine.get_quote(
-            stock_code=stock_code,
-            tick=tick,
-            scenario=scenario,
-            sim_run_id=sim_run_id,
-        )
-
-    @staticmethod
-    def next_quote(stock_code="2330", tick=0, scenario="一般波動", sim_run_id=0, **kwargs):
-        return SimulationEngine.get_quote(
-            stock_code=stock_code,
-            tick=tick,
-            scenario=scenario,
-            sim_run_id=sim_run_id,
-        )

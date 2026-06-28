@@ -105,7 +105,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "回測掃描間隔 K 數",
                 min_value=1,
                 max_value=5,
-                value=2,
+                value=1,
                 step=1,
                 key="bt_scan_step_bars",
                 help="1 最精準；2~5 比較快但可能跳過部分進場點。",
@@ -115,7 +115,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "回測最長秒數",
                 min_value=20,
                 max_value=120,
-                value=90,
+                value=120,
                 step=5,
                 key="bt_max_runtime_seconds",
                 help="避免 Streamlit Cloud 長時間卡住。超過時間會先輸出已完成結果。",
@@ -125,7 +125,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "最低 Score",
                 min_value=50,
                 max_value=95,
-                value=80,
+                value=70,
                 step=5,
                 key="bt_score_threshold",
             )
@@ -173,6 +173,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             )
 
             st.caption("專業濾網：ORB / VWAP / 量能加速度 / 假突破 / 午盤風險 / 停損冷卻")
+            st.caption("目前版本：平衡濾網｜不再把 ORB / VWAP 未完全對齊直接封鎖，改成扣分；避免 0 交易。")
 
             max_trades_per_day = st.slider(
                 "每日最多交易",
@@ -430,8 +431,8 @@ def render_backtest_sidebar_panel(api_key, stock_code):
 
         if not trades:
             st.warning(
-                "這次沒有符合條件的交易。可以降低最低 Score，"
-                "或取消「只測多週期共振」。"
+                "這次沒有符合條件的交易。可以把最低 Score 降到 60～65，"
+                "或把回測掃描間隔改成 1K，再測一次。"
             )
             return
 

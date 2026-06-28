@@ -1,134 +1,145 @@
-from datetime import datetime
+import requests
 
 
-class BigOrderEngine:
+class FugleProvider:
+    """
+    Fugle REST Provider 修正版。
+
+    不再依賴 fugle_marketdata 套件，直接使用官方 REST endpoint：
+    https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/{symbol}
+
+    這樣可以避免 Streamlit Cloud 套件版本或 WebSocket 權限造成主畫面卡住。
+    """
+
+    BASE_URL = "https://api.fugle.tw/marketdata/v1.0/stock"
+
+    def __init__(self, api_key):
+        self.api_key = self._clean_api_key(api_key)
+
+    @staticmethod
+    def _clean_api_key(api_key):
+        return str(api_key or "").strip().replace("\n", "").replace("\r", "")
 
     @staticmethod
     def _safe_float(value, default=0.0):
         try:
+            if value is None:
+                return default
             return float(value)
         except Exception:
             return default
 
     @staticmethod
-    def _to_lot(volume):
-        """
-        Fugle last_size 通常是股數。
-        1000 股 = 1 張。
-        但模擬盤可能直接給張數，所以這裡做保護。
-        """
-        volume = BigOrderEngine._safe_float(volume)
-
-        if volume >= 1000:
-            return round(volume / 1000, 2)
-
-        return round(volume, 2)
+    def _safe_int(value, default=0):
+        try:
+            if value is None:
+                return default
+            return int(round(float(value)))
+        except Exception:
+            return default
 
     @staticmethod
-    def _auto_threshold(volumes):
-        """
-        自動大單門檻：
-        最近 20 筆平均量 x 3
-        最低 10 張
-        """
-        if not volumes:
-            return 10
+    def _normalize_levels(levels):
+        if not isinstance(levels, list):
+            return []
 
-        lots = [
-            BigOrderEngine._to_lot(v)
-            for v in volumes[-20:]
-            if BigOrderEngine._safe_float(v) > 0
-        ]
+        result = []
 
-        if not lots:
-            return 10
+        for item in levels[:5]:
+            if not isinstance(item, dict):
+                continue
 
-        avg_lot = sum(lots) / len(lots)
-
-        return round(max(10, avg_lot * 3), 1)
-
-    @staticmethod
-    def _detect_direction(price, bids, asks, prices):
-
-        price = BigOrderEngine._safe_float(price)
-
-        best_bid = None
-        best_ask = None
-
-        if bids:
-            best_bid = BigOrderEngine._safe_float(
-                bids[0].get("price", 0)
+            result.append(
+                {
+                    "price": FugleProvider._safe_float(item.get("price"), 0),
+                    "size": FugleProvider._safe_float(item.get("size"), 0),
+                }
             )
 
-        if asks:
-            best_ask = BigOrderEngine._safe_float(
-                asks[0].get("price", 0)
-            )
+        while len(result) < 5:
+            result.append({"price": 0, "size": 0})
 
-        if best_ask and price >= best_ask:
-            return "BUY", "主動買進"
+        return result
 
-        if best_bid and price <= best_bid:
-            return "SELL", "主動賣出"
+    def get_quote(self, symbol):
+        if not self.api_key:
+            raise RuntimeError("missing Fugle API key")
 
-        if len(prices) >= 2:
+        symbol = str(symbol or "").strip()
 
-            prev_price = BigOrderEngine._safe_float(prices[-2])
+        if not symbol:
+            raise RuntimeError("missing stock symbol")
 
-            if price > prev_price:
-                return "BUY", "價格上推"
+        url = f"{self.BASE_URL}/intraday/quote/{symbol}"
 
-            if price < prev_price:
-                return "SELL", "價格下殺"
+        headers = {
+            "X-API-KEY": self.api_key,
+        }
 
-        return "UNKNOWN", "方向不明"
-
-    @staticmethod
-    def detect(
-        stock_code,
-        name,
-        price,
-        volume,
-        bids,
-        asks,
-        prices,
-        volumes,
-        threshold_lot=None,
-    ):
-
-        price = BigOrderEngine._safe_float(price)
-        volume_lot = BigOrderEngine._to_lot(volume)
-
-        if threshold_lot is None:
-            threshold_lot = BigOrderEngine._auto_threshold(volumes)
-
-        threshold_lot = BigOrderEngine._safe_float(threshold_lot, 10)
-
-        if volume_lot < threshold_lot:
-            return None
-
-        direction, direction_text = BigOrderEngine._detect_direction(
-            price=price,
-            bids=bids,
-            asks=asks,
-            prices=prices,
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=20,
         )
 
-        if volume_lot >= threshold_lot * 3:
-            strength = "超大單"
-        elif volume_lot >= threshold_lot * 1.5:
-            strength = "大單"
-        else:
-            strength = "異常量"
+        if response.status_code == 401:
+            raise RuntimeError("Fugle API KEY 無效或權限不足。")
+
+        if response.status_code == 403:
+            raise RuntimeError("Fugle API 權限不足，請確認方案與 endpoint 權限。")
+
+        if response.status_code == 429:
+            raise RuntimeError("Fugle API 請求過多，請稍後再試。")
+
+        if response.status_code >= 400:
+            raise RuntimeError(f"Fugle API 錯誤：HTTP {response.status_code}")
+
+        data = response.json()
+
+        if not isinstance(data, dict):
+            raise RuntimeError("Fugle 回傳格式不是 JSON object。")
+
+        price = (
+            self._safe_float(data.get("lastPrice"), 0)
+            or self._safe_float(data.get("closePrice"), 0)
+            or self._safe_float(data.get("close"), 0)
+        )
+
+        open_price = (
+            self._safe_float(data.get("openPrice"), 0)
+            or self._safe_float(data.get("open"), 0)
+            or price
+        )
+
+        high_price = (
+            self._safe_float(data.get("highPrice"), 0)
+            or self._safe_float(data.get("high"), 0)
+            or price
+        )
+
+        low_price = (
+            self._safe_float(data.get("lowPrice"), 0)
+            or self._safe_float(data.get("low"), 0)
+            or price
+        )
+
+        vwap = (
+            self._safe_float(data.get("avgPrice"), 0)
+            or self._safe_float(data.get("vwap"), 0)
+            or price
+        )
 
         return {
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "stock_code": stock_code,
-            "name": name,
+            "name": data.get("name") or symbol,
             "price": price,
-            "volume_lot": volume_lot,
-            "threshold_lot": threshold_lot,
-            "direction": direction,
-            "direction_text": direction_text,
-            "strength": strength,
+            "open": open_price,
+            "high": high_price,
+            "low": low_price,
+            "vwap": vwap,
+            "last_size": self._safe_float(data.get("lastSize"), 0),
+            "bids": self._normalize_levels(data.get("bids", [])),
+            "asks": self._normalize_levels(data.get("asks", [])),
+            "trade": data.get("lastTrade", {}) or {},
+            "is_close": bool(data.get("isClose", False)),
+            "raw": data,
         }

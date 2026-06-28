@@ -1,774 +1,384 @@
-import streamlit as st
-
-# =========================
-# Page Config 必須盡量放最前面
-# =========================
-
-st.set_page_config(
-    page_title="主力監控",
-    layout="wide",
-    page_icon="🏦",
-)
+from intraday_label_engine import IntradayLabelEngine
 
 
-# =========================
-# Dashboard CSS
-# =========================
-
-st.markdown(
+class DecisionEngine:
     """
-<style>
-html, body, [data-testid="stAppViewContainer"] {
-    background: #080c13;
-}
+    成本感知決策引擎。
 
-/* Streamlit 上方列 */
-header[data-testid="stHeader"] {
-    background: #080c13;
-    height: 38px;
-}
-
-/* 主內容寬度 */
-.block-container {
-    max-width: 1840px;
-    padding: 2.05rem 0.55rem 0.6rem 0.55rem !important;
-}
-
-/* 壓縮標題 */
-h1, h2, h3 {
-    font-size: 14px !important;
-    margin-top: 0 !important;
-    margin-bottom: 0.16rem !important;
-}
-
-/* 全域字體 */
-p, div, span {
-    font-size: 12px;
-}
-
-/* 壓縮垂直間距 */
-div[data-testid="stVerticalBlock"] {
-    gap: 0.20rem;
-}
-
-/* 壓縮左右欄位間距 */
-div[data-testid="stHorizontalBlock"] {
-    gap: 0.40rem;
-}
-
-/* 分隔線 */
-hr {
-    margin: 0.16rem 0 !important;
-    border-color: rgba(255,255,255,0.07) !important;
-}
-
-/* 側邊欄 */
-[data-testid="stSidebar"] {
-    background: #0b111c;
-}
-
-/* 按鈕 */
-button[kind="secondary"] {
-    height: 28px;
-    padding: 2px 8px;
-}
-
-/* Plotly 工具列縮小 */
-.modebar {
-    transform: scale(0.78);
-    transform-origin: top right;
-}
-
-/* 表格 */
-.stDataFrame {
-    font-size: 11.5px;
-}
-
-/* Expander 壓縮 */
-[data-testid="stExpander"] {
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 10px;
-    background: rgba(255,255,255,0.025);
-}
-
-[data-testid="stExpander"] details {
-    padding: 0;
-}
-
-/* 隱藏 footer */
-footer {
-    visibility: hidden;
-}
-
-/* 手機版 */
-@media (max-width: 900px) {
-    .block-container {
-        padding: 2.0rem 0.45rem 0.6rem 0.45rem !important;
-    }
-
-    h1, h2, h3 {
-        font-size: 13px !important;
-    }
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-
-# =========================
-# Import 區：任何 import 錯誤都會顯示
-# =========================
-
-try:
-    import random
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    from market_analyzer import MarketAnalyzer
-    from ai_predictor import AIPredictor
-    from decision_engine import DecisionEngine
-    from multi_period_engine import MultiPeriodEngine
-    from big_order_engine import BigOrderEngine
-    from trade_alert_engine import TradeAlertEngine
-    from alert_engine import AlertEngine
-    from market_flow_engine import MarketFlowEngine
-    from win_rate_engine import WinRateEngine
-
-    # 當沖模型是加值功能：缺檔時不讓主畫面整個掛掉
-    try:
-        from stock_model_cache import StockModelCache
-    except Exception:
-        StockModelCache = None
-
-    from ui.header import render_header
-    from ui.chart_panel import render_chart
-    from ui.lower_market_grid import render_lower_market_grid
-    from ui.decision_card import render_decision_card
-    from ui.rebound_panel import render_rebound_panel
-    from ui.main_force_panel import render_main_force_panel
-    from ui.alerts import render_alerts
-    from ui.sidebar import render_sidebar
-    from ui.backtest_sidebar import render_backtest_sidebar_panel
-    from ui.win_rate_sidebar import render_win_rate_sidebar_panel
-    from ui.event_stream_panel import render_event_stream_panel
-    from ui.kline_export_sidebar import render_kline_export_sidebar_panel
-
-    from core.data_engine import get_market_data
-    from streamlit_autorefresh import st_autorefresh
-
-except Exception as e:
-    st.error("程式在 import 階段就中斷，所以畫面才會空白。")
-    st.exception(e)
-    st.stop()
-
-
-# =========================
-# 小工具
-# =========================
-
-def _safe_float(value, default=0.0):
-    try:
-        return float(value)
-    except Exception:
-        return default
-
-
-def _resolve_api_key(api_key):
+    重點：
+    1. 有建立近 30 日當沖模型時，優先使用模型。
+    2. 模型必須預測「扣成本後期望值 > 0」才放行。
+    3. 勝率必須高於該停損 / 停利 / 成本組合的損益兩平勝率。
+    4. 沒有模型時才回退一般 AI，但一般 AI 會更保守。
     """
-    統一從 sidebar 回傳值與 session_state 讀取 Fugle API Key。
-    這可以避免畫面上有密碼點點，但主程式拿到空值的問題。
-    """
-    return (
-        api_key
-        or st.session_state.get("runtime_fugle_api_key")
-        or st.session_state.get("fugle_api_key")
-        or ""
-    ).strip()
 
+    COST_PCT = 0.435
+    DEFAULT_STOP_PCT = 0.7
+    DEFAULT_TAKE_PCT = 1.8
+    DEFAULT_MAX_HOLD_BARS = 50
+    MIN_EXPECTED_VALUE = 0.04
 
-def _get_loaded_model_package(stock_code):
-    """
-    只讀取已建立的模型，不自動抓 30 天 K 線。
-    避免 Streamlit 每次刷新時卡住主畫面。
-    """
-    package = st.session_state.get("current_intraday_model_package")
+    @staticmethod
+    def _safe_float(value, default=0.0):
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except Exception:
+            return default
 
-    if not package:
-        return None
+    @staticmethod
+    def _safe_int(value, default=0):
+        try:
+            if value is None:
+                return default
+            return int(round(float(value)))
+        except Exception:
+            return default
 
-    if str(package.get("symbol", "")) != str(stock_code):
-        return None
+    @staticmethod
+    def _base_wait(price, score, title, reason, extra=None):
+        payload = {
+            "action": "WAIT",
+            "score": int(max(0, min(100, score))),
+            "title": title,
+            "reason": reason,
+            "reasons": [reason],
+            "entry_price": price,
+            "entry": price,
+            "stop_loss": 0,
+            "take_profit": 0,
+            "risk_reward": 0,
+            "rr": 0,
+            "rebound": 50,
+            "multi_period_status": "WAIT",
+            "multi_period": {},
+            "swing_state": "等待確認",
+            "swing_prediction": {},
+            "predicted_up_pct": 0,
+            "predicted_down_pct": 0,
+            "long_rr": 0,
+            "short_rr": 0,
+            "risk_level": "HIGH",
+            "expected_value": 0,
+            "predicted_win_rate": 0,
+            "required_win_rate": 0,
+        }
 
-    return package
+        if extra:
+            payload.update(extra)
 
+        return payload
 
-def _render_intraday_model_sidebar(api_key, stock_code, data_source):
-    """
-    當沖模型改成手動建立。
-    主畫面行情先能穩定運作，使用者需要模型時再按鈕建立。
-    """
-    with st.sidebar.expander("🧠 當沖模型", expanded=False):
-        if StockModelCache is None:
-            st.warning("stock_model_cache.py 尚未載入，暫時無法建立模型。")
-            return
+    @staticmethod
+    def _fallback_from_ai(ai, price, prices, volumes):
+        ai = ai or {}
+        action = str(ai.get("signal", "WAIT") or "WAIT").upper()
+        score = DecisionEngine._safe_int(ai.get("score", 0), 0)
+        rebound = ai.get("rebound_prob", 50)
+        reasons = ai.get("reasons") or ai.get("reason") or []
 
-        if data_source != "真實盤":
-            st.info("當沖模型只在真實盤使用。")
-            return
+        if isinstance(reasons, str):
+            reasons = [reasons]
 
-        if not api_key:
-            st.warning("請先輸入 Fugle API KEY。")
-            return
+        if not reasons:
+            reasons = ["尚未建立近 30 日當沖模型，使用一般 AI 備援。"]
 
-        package = _get_loaded_model_package(stock_code)
-
-        if package:
-            st.success("模型已建立")
-            st.caption(f"股票：{package.get('symbol')}")
-            st.caption(
-                f"區間：{package.get('start_date')} ~ "
-                f"{package.get('end_date')}"
+        if len(prices or []) < 20:
+            return DecisionEngine._base_wait(
+                price=price,
+                score=min(score, 35),
+                title="等待盤中資料",
+                reason="至少需要 20 根盤中資料才能判斷。",
             )
-            st.caption(f"交易日：{package.get('trading_days')}")
-            st.caption(f"K線：{package.get('kline_rows')} 根")
-            st.caption(f"候選標籤：{package.get('label_rows')} 筆")
-            st.caption(f"BUY 全樣本勝率：{package.get('buy_win_rate_all')}%")
-            st.caption(f"SELL 全樣本勝率：{package.get('sell_win_rate_all')}%")
+
+        if action not in ["BUY", "SELL"]:
+            return DecisionEngine._base_wait(
+                price=price,
+                score=score,
+                title="一般 AI 觀望",
+                reason="一般 AI 尚未出現明確多空訊號。",
+                extra={"reasons": reasons, "rebound": rebound},
+            )
+
+        # 沒有模型時，分數要更高才允許，避免尚未成本感知就亂出手。
+        if score < 75:
+            return DecisionEngine._base_wait(
+                price=price,
+                score=score,
+                title="備援訊號風險偏高",
+                reason="尚未建立成本感知模型，且一般 AI 分數低於 75，暫不出手。",
+                extra={"reasons": reasons, "rebound": rebound},
+            )
+
+        stop_pct = DecisionEngine.DEFAULT_STOP_PCT
+        take_pct = DecisionEngine.DEFAULT_TAKE_PCT
+        risk_reward = take_pct / max(stop_pct, 0.01)
+
+        if action == "BUY":
+            stop_loss = price * (1 - stop_pct / 100)
+            take_profit = price * (1 + take_pct / 100)
+            title = "一般 AI 做多"
+            reason = "尚未建立當沖模型，僅使用高分一般 AI 多方訊號。"
+            multi_period_status = "BULL_STRONG"
+            predicted_up_pct = take_pct
+            predicted_down_pct = 0
         else:
-            st.info("尚未建立目前股票模型。主畫面會先用一般 AI 監控。")
+            stop_loss = price * (1 + stop_pct / 100)
+            take_profit = price * (1 - take_pct / 100)
+            title = "一般 AI 做空"
+            reason = "尚未建立當沖模型，僅使用高分一般 AI 空方訊號。"
+            multi_period_status = "BEAR_STRONG"
+            predicted_up_pct = 0
+            predicted_down_pct = take_pct
 
-        build_clicked = st.button(
-            "建立 / 重建目前股票模型",
-            use_container_width=True,
-            key="build_intraday_model",
-        )
+        reasons = [
+            "備援模式：尚未套用近 30 日相似 K 線模型。",
+            "建議先在左側建立當沖模型，再以成本感知訊號為主。",
+        ] + reasons[:5]
 
-        if build_clicked:
-            try:
-                with st.spinner("正在抓取近 30 日 K 線並建立模型..."):
-                    StockModelCache.clear_symbol(st, stock_code)
-                    package = StockModelCache.get_or_build(
-                        st=st,
-                        api_key=api_key,
-                        symbol=stock_code,
-                        timeframe="1",
-                        stop_pct=0.7,
-                        take_pct=1.8,
-                        max_hold_bars=50,
-                        cost_pct=0.435,
-                        force_rebuild=True,
-                    )
+        return {
+            "action": action,
+            "score": int(max(0, min(100, score))),
+            "title": title,
+            "reason": reason,
+            "reasons": reasons,
+            "entry_price": price,
+            "entry": round(price, 2),
+            "stop_loss": round(stop_loss, 2),
+            "take_profit": round(take_profit, 2),
+            "risk_reward": round(risk_reward, 2),
+            "rr": round(risk_reward, 2),
+            "rebound": rebound,
+            "multi_period_status": multi_period_status,
+            "multi_period": {},
+            "swing_state": "一般 AI 備援模式",
+            "swing_prediction": {
+                "mode": "fallback_ai",
+                "ai_signal": action,
+                "ai_score": score,
+                "note": "尚未建立近 30 日模型，風險較高。",
+            },
+            "predicted_up_pct": predicted_up_pct,
+            "predicted_down_pct": predicted_down_pct,
+            "long_rr": round(risk_reward, 2),
+            "short_rr": round(risk_reward, 2),
+            "risk_level": "MEDIUM",
+            "expected_value": 0,
+            "predicted_win_rate": 0,
+            "required_win_rate": 0,
+            "model_label_rows": 0,
+        }
 
-                    st.session_state.current_intraday_model_package = package
+    @staticmethod
+    def _build_trade_payload(action, price, score, prediction, model_package):
+        stop_pct = float(model_package.get("stop_pct", DecisionEngine.DEFAULT_STOP_PCT))
+        take_pct = float(model_package.get("take_pct", DecisionEngine.DEFAULT_TAKE_PCT))
+        cost_pct = float(model_package.get("cost_pct", DecisionEngine.COST_PCT))
 
-                st.success("模型建立完成")
-                st.rerun()
+        chosen = prediction.get("chosen", {}) or {}
+        buy = prediction.get("buy", {}) or {}
+        sell = prediction.get("sell", {}) or {}
 
-            except Exception as e:
-                st.error("模型建立失敗")
-                st.exception(e)
+        expected_value = DecisionEngine._safe_float(chosen.get("expected_value"), 0)
+        predicted_win_rate = DecisionEngine._safe_float(chosen.get("win_rate"), 0)
+        required_win_rate = DecisionEngine._safe_float(prediction.get("required_win_rate"), 0)
+        sample_count = DecisionEngine._safe_int(chosen.get("sample_count"), 0)
+        profit_factor = DecisionEngine._safe_float(chosen.get("profit_factor"), 0)
 
-
-def reset_state():
-    MarketFlowEngine.reset_market_state(st)
-
-    # 手動重置時，下一次會重新建立模擬路徑
-    st.session_state.market_context_key = None
-    st.session_state.sim_run_id = random.randint(100000, 999999)
-
-
-def init_session_state():
-    MarketFlowEngine.init_session_state(st)
-
-
-# =========================
-# 主程式
-# =========================
-
-def main():
-
-    init_session_state()
-    WinRateEngine.init_session_state(st)
-
-    if "market_context_key" not in st.session_state:
-        st.session_state.market_context_key = None
-
-    if "sim_run_id" not in st.session_state:
-        st.session_state.sim_run_id = random.randint(100000, 999999)
-
-    now = datetime.now(ZoneInfo("Asia/Taipei"))
-
-    # =========================
-    # Sidebar
-    # =========================
-
-    (
-        stock_code,
-        data_source,
-        api_key,
-        mode,
-        refresh_sec,
-    ) = render_sidebar(reset_state)
-
-    api_key = _resolve_api_key(api_key)
-
-    st.sidebar.caption(
-        f"主程式 API KEY：已讀取，長度 {len(api_key)}"
-        if api_key
-        else "主程式 API KEY：未讀取"
-    )
-
-    render_backtest_sidebar_panel(
-        api_key=api_key,
-        stock_code=stock_code,
-    )
-
-    render_win_rate_sidebar_panel()
-
-    render_kline_export_sidebar_panel(
-        api_key=api_key,
-        stock_code=stock_code,
-    )
-
-    _render_intraday_model_sidebar(
-        api_key=api_key,
-        stock_code=stock_code,
-        data_source=data_source,
-    )
-
-    # =========================
-    # 切換股票 / 資料來源 / 模擬模式時清空
-    # =========================
-
-    context_key = f"{stock_code}|{data_source}|{mode}"
-    old_context_key = st.session_state.get("market_context_key")
-
-    if old_context_key != context_key:
-        MarketFlowEngine.reset_market_state(
-            st=st,
-            keep_stock=stock_code,
-        )
-
-        st.session_state.market_context_key = context_key
-
-        # 只有切換情境 / 股票 / 資料來源時，才重新產生模擬走勢
-        # 不能每次 refresh 都 random
-        if data_source == "模擬盤":
-            st.session_state.sim_run_id = random.randint(100000, 999999)
-
-        WinRateEngine.reset(st)
-
-    # =========================
-    # Auto Refresh
-    # =========================
-
-    chart_fullscreen = st.session_state.get("chart_fullscreen", False)
-    backtest_running = st.session_state.get("backtest_status") == "running"
-
-    if not chart_fullscreen and not backtest_running:
-        st_autorefresh(
-            interval=refresh_sec * 1000,
-            key="v75_dashboard_refresh",
-        )
-    elif chart_fullscreen:
-        st.info("圖表全屏檢視中，自動刷新已暫停。按圖表工具列的「返回」恢復。")
-    elif backtest_running:
-        st.info("回測執行中，自動刷新已暫停。")
-
-    # =========================
-    # 取得資料
-    # =========================
-
-    api_key = _resolve_api_key(api_key)
-
-    if data_source == "真實盤" and not api_key:
-        st.warning("請輸入 API KEY，或先切換到模擬盤測試 UI。")
-        st.stop()
-
-    try:
-        with st.spinner("取得行情資料中..."):
-            quote = get_market_data(
-                data_source=data_source,
-                api_key=api_key,
-                stock_code=stock_code,
-                tick=st.session_state.tick,
-                mode=mode,
-                sim_run_id=st.session_state.get("sim_run_id", 0),
+        if action == "BUY":
+            stop_loss = price * (1 - stop_pct / 100)
+            take_profit = price * (1 + take_pct / 100)
+            risk_reward = take_pct / max(stop_pct, 0.01)
+            title = "成本感知模型做多"
+            reason = (
+                f"BUY 校準後勝率 {predicted_win_rate:.1f}% ≥ 需求 {required_win_rate:.1f}%，"
+                f"扣成本期望 {expected_value:.3f}%。"
             )
-
-        if not quote:
-            raise ValueError("empty quote")
-
-        st.session_state.last_good_quote = quote
-        st.session_state.api_error_message = None
-
-    except Exception as e:
-        st.session_state.api_error_message = type(e).__name__
-
-        if st.session_state.last_good_quote is not None:
-            quote = st.session_state.last_good_quote
-
-            st.warning(
-                f"資料來源暫時異常，已使用上一筆有效資料。錯誤：{type(e).__name__}"
-            )
-
+            reasons = [
+                buy.get("reason", ""),
+                f"SELL 扣成本期望 {sell.get('expected_value', 0)}%",
+                f"BUY 樣本數 {sample_count}，Profit Factor {profit_factor:.2f}",
+                f"型態：{chosen.get('setup_type', '未分類')}｜濾網折扣 {chosen.get('filter_penalty', 0)}%",
+                *(chosen.get("professional_filters", [])[:3]),
+                f"停損 {stop_pct:.1f}%｜停利 {take_pct:.1f}%｜成本約 {cost_pct:.3f}%",
+                f"模型區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}",
+            ]
+            multi_period_status = "MODEL_BULL"
+            swing_state = "正期望偏多"
+            predicted_up_pct = take_pct
+            predicted_down_pct = 0
         else:
-            st.error("Fugle API 暫時異常，且目前沒有上一筆有效資料可使用。")
-            st.exception(e)
-            st.stop()
+            stop_loss = price * (1 + stop_pct / 100)
+            take_profit = price * (1 - take_pct / 100)
+            risk_reward = take_pct / max(stop_pct, 0.01)
+            title = "成本感知模型做空"
+            reason = (
+                f"SELL 校準後勝率 {predicted_win_rate:.1f}% ≥ 需求 {required_win_rate:.1f}%，"
+                f"扣成本期望 {expected_value:.3f}%。"
+            )
+            reasons = [
+                sell.get("reason", ""),
+                f"BUY 扣成本期望 {buy.get('expected_value', 0)}%",
+                f"SELL 樣本數 {sample_count}，Profit Factor {profit_factor:.2f}",
+                f"型態：{chosen.get('setup_type', '未分類')}｜濾網折扣 {chosen.get('filter_penalty', 0)}%",
+                *(chosen.get("professional_filters", [])[:3]),
+                f"停損 {stop_pct:.1f}%｜停利 {take_pct:.1f}%｜成本約 {cost_pct:.3f}%",
+                f"模型區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}",
+            ]
+            multi_period_status = "MODEL_BEAR"
+            swing_state = "正期望偏空"
+            predicted_up_pct = 0
+            predicted_down_pct = take_pct
 
-    # 模擬盤才每次刷新推進 tick
-    if data_source == "模擬盤":
-        st.session_state.tick += 1
+        return {
+            "action": action,
+            "score": int(max(0, min(100, score))),
+            "title": title,
+            "reason": reason,
+            "reasons": [r for r in reasons if r],
+            "entry_price": price,
+            "entry": round(price, 2),
+            "stop_loss": round(stop_loss, 2),
+            "take_profit": round(take_profit, 2),
+            "risk_reward": round(risk_reward, 2),
+            "rr": round(risk_reward, 2),
+            "rebound": 55 if action == "BUY" else 45,
+            "multi_period_status": multi_period_status,
+            "multi_period": {},
+            "swing_state": swing_state,
+            "swing_prediction": prediction,
+            "predicted_up_pct": predicted_up_pct,
+            "predicted_down_pct": predicted_down_pct,
+            "long_rr": round(risk_reward, 2),
+            "short_rr": round(risk_reward, 2),
+            "risk_level": prediction.get("risk_level", "NORMAL"),
+            "expected_value": round(expected_value, 3),
+            "predicted_win_rate": round(predicted_win_rate, 2),
+            "required_win_rate": round(required_win_rate, 2),
+            "model_start_date": model_package.get("start_date", ""),
+            "model_end_date": model_package.get("end_date", ""),
+            "model_label_rows": model_package.get("label_rows", 0),
+        }
 
-    # =========================
-    # 統一資料流 Snapshot
-    # 真實盤休市後，serial 不會再用現在時間，所以不會一直新增假資料
-    # =========================
-
-    snapshot = MarketFlowEngine.build_snapshot(
-        st=st,
-        quote=quote,
-        stock_code=stock_code,
-        now=now,
-        data_source=data_source,
-    )
-
-    name = snapshot["name"]
-    price = snapshot["price"]
-    vwap = snapshot["vwap"]
-    volume = snapshot["volume"]
-    high = snapshot["high"]
-    low = snapshot["low"]
-    bids = snapshot["bids"]
-    asks = snapshot["asks"]
-    serial = snapshot["serial"]
-    market_status = snapshot.get("market_status", "未知")
-
-    prices = snapshot["prices"]
-    volumes = snapshot["volumes"]
-    vwaps = snapshot["vwaps"]
-    times = snapshot["times"]
-
-    # =========================
-    # 主力大單偵測
-    # =========================
-
-    if st.session_state.big_order_last_serial != serial:
-        st.session_state.big_order_last_serial = serial
-
-        big_order = BigOrderEngine.detect(
-            stock_code=stock_code,
-            name=name,
-            price=price,
-            volume=volume,
-            bids=bids,
-            asks=asks,
-            prices=prices,
-            volumes=volumes,
-        )
-
-        if big_order is not None:
-            st.session_state.big_order_log.append(big_order)
-
-            if len(st.session_state.big_order_log) > 100:
-                st.session_state.big_order_log = st.session_state.big_order_log[-100:]
-
-    # =========================
-    # 技術指標
-    # =========================
-
-    ema5 = MarketAnalyzer.calculate_ema(prices, 5)
-    ema20 = MarketAnalyzer.calculate_ema(prices, 20)
-    ema60 = MarketAnalyzer.calculate_ema(prices, 60)
-
-    rsi = MarketAnalyzer.calculate_rsi(prices)
-    macd, macd_signal, _ = MarketAnalyzer.calculate_macd(prices)
-
-    momentum = MarketAnalyzer.momentum(prices)
-
-    # =========================
-    # 五檔買賣力道
-    # =========================
-
-    bid_total = sum(
-        [
-            _safe_float(b.get("size", 0))
-            for b in bids
-        ]
-    )
-
-    ask_total = sum(
-        [
-            _safe_float(a.get("size", 0))
-            for a in asks
-        ]
-    )
-
-    bid_ratio = bid_total / max(ask_total, 1)
-
-    # =========================
-    # AI Predict
-    # =========================
-
-    ai = AIPredictor.predict_trade(
-        prices,
-        volumes,
+    @staticmethod
+    def generate(
+        ai,
+        price,
+        vwap,
         ema5,
         ema20,
         ema60,
         rsi,
         macd,
         macd_signal,
-        momentum,
-        bid_ratio=bid_ratio,
-        vwap=vwap,
-    )
+        bid_ratio,
+        prices,
+        volumes,
+    ):
+        ai = ai or {}
+        price = DecisionEngine._safe_float(price)
 
-    signal = ai.get("signal", "WAIT")
-    score = ai.get("score", 0)
-    risk = ai.get("risk", "監控中")
-    state = ai.get("market_state", "資料累積中")
-    rebound = ai.get("rebound_prob", 0)
+        if price <= 0:
+            return DecisionEngine._base_wait(
+                price=price,
+                score=0,
+                title="價格異常",
+                reason="目前價格小於等於 0，無法判斷。",
+            )
 
-    # 當沖模型只使用「已手動建立」的模型，不在每次刷新時自動抓 30 日 K 線。
-    intraday_model_package = _get_loaded_model_package(stock_code)
+        prices = prices or []
+        volumes = volumes or []
+        model_package = ai.get("intraday_model_package")
 
-    if intraday_model_package is not None:
-        ai["intraday_model_package"] = intraday_model_package
+        if not model_package:
+            return DecisionEngine._fallback_from_ai(ai=ai, price=price, prices=prices, volumes=volumes)
 
-    # =========================
-    # Decision Engine
-    # =========================
+        model = model_package.get("model")
+        if model is None:
+            return DecisionEngine._fallback_from_ai(ai=ai, price=price, prices=prices, volumes=volumes)
 
-    decision = DecisionEngine.generate(
-        ai=ai,
-        price=price,
-        vwap=vwap,
-        ema5=ema5,
-        ema20=ema20,
-        ema60=ema60,
-        rsi=rsi,
-        macd=macd,
-        macd_signal=macd_signal,
-        bid_ratio=bid_ratio,
-        prices=prices,
-        volumes=volumes,
-    )
+        if len(prices) < 20:
+            return DecisionEngine._base_wait(
+                price=price,
+                score=30,
+                title="等待盤中資料",
+                reason="模型模式至少需要 20 根盤中資料才能比對相似情境。",
+                extra={
+                    "model_start_date": model_package.get("start_date", ""),
+                    "model_end_date": model_package.get("end_date", ""),
+                    "model_label_rows": model_package.get("label_rows", 0),
+                },
+            )
 
-    # =========================
-    # Multi Period Engine
-    # =========================
+        feature = IntradayLabelEngine.extract_current_features(prices=prices, volumes=volumes)
+        if feature is None:
+            return DecisionEngine._fallback_from_ai(ai=ai, price=price, prices=prices, volumes=volumes)
 
-    multi_period = MultiPeriodEngine.analyze(
-        prices=prices,
-        volumes=volumes,
-        vwap_values=vwaps,
-        time_values=times,
-    )
+        stop_pct = DecisionEngine._safe_float(model_package.get("stop_pct"), DecisionEngine.DEFAULT_STOP_PCT)
+        take_pct = DecisionEngine._safe_float(model_package.get("take_pct"), DecisionEngine.DEFAULT_TAKE_PCT)
+        cost_pct = DecisionEngine._safe_float(model_package.get("cost_pct"), DecisionEngine.COST_PCT)
 
-    # 成本感知模型訊號以「扣成本後正期望」為主，
-    # 多週期只當參考，不再直接把正期望模型訊號改成 WAIT。
-    model_signal_active = (
-        decision.get("action") in ["BUY", "SELL"]
-        and decision.get("model_label_rows", 0)
-    )
-
-    if model_signal_active:
-        decision["multi_period"] = multi_period
-        decision["multi_period_reference_status"] = multi_period.get("status", "")
-        reasons = list(decision.get("reasons", []))
-        reasons.insert(0, f"多週期參考：{multi_period.get('status', '未知')}｜模型仍以扣成本期望為主")
-        decision["reasons"] = reasons[:8]
-    else:
-        decision = MultiPeriodEngine.apply_to_decision(
-            decision=decision,
-            multi_period=multi_period,
+        prediction = model.predict(
+            feature=feature,
+            min_expected_value=DecisionEngine.MIN_EXPECTED_VALUE,
+            min_win_rate=None,
+            min_sample_count=20,
+            stop_pct=stop_pct,
+            take_pct=take_pct,
+            cost_pct=cost_pct,
+            safety_margin=2.0,
+            use_professional_filters=True,
         )
 
-    # =========================
-    # Header 同步最終決策結果
-    # =========================
+        decision = prediction.get("decision", "WAIT")
+        score = int(prediction.get("score", 50))
+        buy = prediction.get("buy", {}) or {}
+        sell = prediction.get("sell", {}) or {}
+        chosen = prediction.get("chosen", {}) or {}
 
-    final_action = decision.get("action", "WAIT")
-    final_score = decision.get("score", score)
-    final_rebound = decision.get("rebound", rebound)
-    final_state = decision.get("multi_period_status", state)
+        if decision == "BUY":
+            return DecisionEngine._build_trade_payload(
+                action="BUY",
+                price=price,
+                score=score,
+                prediction=prediction,
+                model_package=model_package,
+            )
 
-    score = final_score
-    signal = final_action
-    rebound = final_rebound
+        if decision == "SELL":
+            return DecisionEngine._build_trade_payload(
+                action="SELL",
+                price=price,
+                score=score,
+                prediction=prediction,
+                model_package=model_package,
+            )
 
-    if final_action == "BUY":
-        state = f"多方監控｜{final_state}"
+        wait_reasons = [
+            f"BUY 校準勝率 {buy.get('win_rate', 0)}%，原始 {buy.get('raw_win_rate', 0)}%，EV {buy.get('expected_value', 0)}%",
+            f"SELL 校準勝率 {sell.get('win_rate', 0)}%，原始 {sell.get('raw_win_rate', 0)}%，EV {sell.get('expected_value', 0)}%",
+            f"需求勝率 {prediction.get('required_win_rate', 0)}%，最低期望 {prediction.get('min_expected_value', 0)}%",
+            f"目前最佳方向 {chosen.get('action', '無')}，型態 {chosen.get('setup_type', '未分類')}，濾網折扣 {chosen.get('filter_penalty', 0)}%",
+            *(chosen.get("hard_fail_reasons", [])[:3]),
+            *(chosen.get("professional_filters", [])[:3]),
+            "判斷：此次交易風險高，不出手。",
+        ]
 
-    elif final_action == "SELL":
-        state = f"空方監控｜{final_state}"
-
-    else:
-        state = f"等待確認｜{final_state}"
-
-    # 休市時，Header 狀態補上休市提醒，但不影響決策卡內容
-    if data_source == "真實盤" and market_status == "休市":
-        state = f"休市｜{state}"
-
-    if score >= 80:
-        risk = "方向明確"
-
-    elif score >= 65:
-        risk = "可觀察"
-
-    elif score <= 40:
-        risk = "高風險"
-
-    else:
-        risk = "等待確認"
-
-    # =========================
-    # Trade Alert
-    # =========================
-
-    trade_alert = TradeAlertEngine.track(
-        decision=decision,
-        price=price,
-    )
-
-    WinRateEngine.update_live(
-        st=st,
-        stock_code=stock_code,
-        name=name,
-        data_source=data_source,
-        price=price,
-        decision=decision,
-        now=now,
-        min_score=75,
-        max_hold_bars=50,
-    )
-
-    # =========================
-    # Alert Engine
-    # =========================
-
-    alerts = AlertEngine.build(
-        decision=decision,
-        trade_alert=trade_alert,
-        big_order_log=st.session_state.big_order_log,
-    )
-
-    # =========================
-    # Header
-    # =========================
-
-    if st.session_state.get("api_error_message"):
-        connection_status = "資料延遲"
-    elif data_source == "真實盤" and market_status == "休市":
-        connection_status = "休市快照"
-    else:
-        connection_status = "連線正常"
-
-    render_header(
-        name=name,
-        stock_code=stock_code,
-        price=price,
-        score=score,
-        rebound=rebound,
-        risk=risk,
-        state=state,
-        signal=signal,
-        bid_ratio=bid_ratio,
-        now=now,
-        connection_status=connection_status,
-        data_source=data_source,
-    )
-
-    # =========================
-    # 全屏圖表模式
-    # =========================
-
-    if st.session_state.get("chart_fullscreen", False):
-        render_chart(
-            prices=prices,
-            volumes=volumes,
-            vwap_values=vwaps,
-            time_values=times,
-            decision=decision,
-            trade_alert=trade_alert,
-        )
-        return
-
-    # =========================
-    # V7.6 Dashboard Layout
-    # =========================
-
-    main_left, main_right = st.columns(
-        [1.92, 0.92],
-        gap="small",
-    )
-
-    # =========================
-    # 左側：主圖 + 市場資訊 + 大單事件流
-    # =========================
-
-    with main_left:
-        render_chart(
-            prices=prices,
-            volumes=volumes,
-            vwap_values=vwaps,
-            time_values=times,
-            decision=decision,
-            trade_alert=trade_alert,
-        )
-
-        render_lower_market_grid(
-            bids=bids,
-            asks=asks,
-            decision=decision,
+        return DecisionEngine._base_wait(
             price=price,
-            vwap=vwap,
-            ema5=ema5,
-            ema20=ema20,
-            rsi=rsi,
-            macd=macd,
-            macd_signal=macd_signal,
-            volume=volume,
-            volumes=volumes,
+            score=score,
+            title="專業濾網未通過",
+            reason="扣成本後期望值、校準勝率或 ORB / VWAP / 量能濾網不足，暫不出手。",
+            extra={
+                "reasons": wait_reasons,
+                "swing_prediction": prediction,
+                "risk_level": "HIGH",
+                "expected_value": chosen.get("expected_value", 0),
+                "predicted_win_rate": chosen.get("win_rate", 0),
+                "required_win_rate": prediction.get("required_win_rate", 0),
+                "model_start_date": model_package.get("start_date", ""),
+                "model_end_date": model_package.get("end_date", ""),
+                "model_label_rows": model_package.get("label_rows", 0),
+            },
         )
-
-        render_event_stream_panel(
-            big_order_log=st.session_state.big_order_log,
-            decision=decision,
-        )
-
-    # =========================
-    # 右側：決策 + 反彈 + 主力 + 警示
-    # =========================
-
-    with main_right:
-        render_decision_card(decision)
-
-        render_rebound_panel(
-            decision=decision,
-            trade_alert=trade_alert,
-        )
-
-        render_main_force_panel(
-            bids=bids,
-            asks=asks,
-            big_order_log=st.session_state.big_order_log,
-            decision=decision,
-        )
-
-        render_alerts(alerts)
-
-
-# =========================
-# Run
-# =========================
-
-try:
-    main()
-
-except Exception as e:
-    st.error("程式執行途中發生錯誤，所以剛剛才會整頁空白。")
-    st.exception(e)
