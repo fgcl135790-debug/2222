@@ -198,8 +198,4 @@ def render_alerts(alerts):
 </html>
 """
 
-    components.html(
-        html,
-        height=165,
-        scrolling=False,
-    )
+    st.markdown(html, unsafe_allow_html=True)

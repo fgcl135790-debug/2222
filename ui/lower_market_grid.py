@@ -473,6 +473,21 @@ def render_lower_market_grid(
         @media (max-width: 900px) {{
             .grid {{
                 grid-template-columns: 1fr;
+                gap: 8px;
+            }}
+
+            .card {{
+                min-height: auto;
+                padding: 10px;
+            }}
+
+            .big-status {{
+                font-size: 20px;
+            }}
+
+            td {{
+                font-size: 13px;
+                padding: 5px 2px;
             }}
         }}
     </style>
@@ -621,8 +636,4 @@ def render_lower_market_grid(
 </html>
 """
 
-    components.html(
-        html,
-        height=330,
-        scrolling=False,
-    )
+    st.markdown(html, unsafe_allow_html=True)

@@ -421,8 +421,4 @@ def render_event_stream_panel(big_order_log, decision=None):
 </html>
 """
 
-    components.html(
-        html,
-        height=315,
-        scrolling=False,
-    )
+    st.markdown(html, unsafe_allow_html=True)

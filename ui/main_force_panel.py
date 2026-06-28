@@ -465,8 +465,4 @@ def render_main_force_panel(bids, asks, big_order_log, decision):
 </html>
 """
 
-    components.html(
-        html,
-        height=305,
-        scrolling=False,
-    )
+    st.markdown(html, unsafe_allow_html=True)

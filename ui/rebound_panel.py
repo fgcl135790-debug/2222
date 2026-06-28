@@ -244,8 +244,4 @@ def render_rebound_panel(decision, trade_alert):
 </html>
 """
 
-    components.html(
-        html,
-        height=210,
-        scrolling=False,
-    )
+    st.markdown(html, unsafe_allow_html=True)
