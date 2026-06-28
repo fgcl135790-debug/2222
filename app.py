@@ -259,9 +259,9 @@ def main():
             else:
                 st.info("真實盤輸入 API KEY 後會自動建立模型。")
 
-       except Exception as e:
-            st.error("模型建立失敗")
-            st.exception(e)
+    except Exception as e:
+        st.error("模型建立失敗")
+        st.exception(e)
 
     # =========================
     # 切換股票 / 資料來源 / 模擬模式時清空
