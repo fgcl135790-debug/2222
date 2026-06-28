@@ -23,6 +23,7 @@ def render_sidebar(reset_callback):
         api_key = st.text_input(
             "Fugle API Key",
             type="password"
+            key="fugle_api_key",
         )
 
         mode = st.selectbox(
