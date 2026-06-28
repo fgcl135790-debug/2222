@@ -57,7 +57,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                     "最近 5 個開市日",
                     "近 30 日全部資料",
                 ],
-                index=1,
+                index=2,
                 key="bt_day_scope_label",
             )
 
@@ -75,9 +75,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             model_mode_label = st.selectbox(
                 "AI 判斷模式",
                 options=[
-                    "專業即時結構 AI（不訓練）",
-                    "Walk-forward 歷史校準",
-                    "同區間模型 Debug",
+                    "專業即時結構 AI（不訓練、不偷看）",
                     "一般 AI 無模型",
                 ],
                 index=0,
@@ -85,15 +83,13 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             )
 
             model_mode_map = {
-                "專業即時結構 AI（不訓練）": "realtime_structure",
-                "Walk-forward 歷史校準": "walk_forward",
-                "同區間模型 Debug": "same_period",
+                "專業即時結構 AI（不訓練、不偷看）": "realtime_structure",
                 "一般 AI 無模型": "classic",
             }
 
             model_mode = model_mode_map.get(model_mode_label, "realtime_structure")
 
-            st.caption("專業即時結構 AI：不訓練、不回頭挑候選，只用當下已知 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷。")
+            st.caption("這版已移除 Walk-forward 歷史模型與每日候選；只用當下以前 K 線結構判斷。每日最多交易=當天第一個達標訊號，不是事後挑最佳點。")
 
             scan_step_bars = st.slider(
                 "回測掃描間隔 K 數",
@@ -116,13 +112,13 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             )
 
 
-            st.caption("已移除候選硬湊：回測只允許當下已達正期望的 BUY / SELL 訊號。")
+            st.caption("已移除候選硬湊：回測只允許當下已達標的 BUY / SELL 訊號；預設每日最多 1 筆，代表每日第一個有效訊號。")
 
             score_threshold = st.slider(
                 "最低 Score",
                 min_value=50,
                 max_value=95,
-                value=65,
+                value=60,
                 step=5,
                 key="bt_score_threshold",
             )
@@ -170,13 +166,13 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             )
 
             st.caption("專業訊號：ORB / VWAP / Tape Flow / 五檔壓力 / 盤勢分類 / 動態停損停利 / 停損冷卻")
-            st.caption("目前版本：專業即時結構判斷｜不靠訓練天數，不硬湊每日候選，提升當下判斷精準度。")
+            st.caption("目前版本：即時結構每日首訊號｜不訓練、不硬湊、不偷看；先看每天第一個達標訊號是否有效。")
 
             max_trades_per_day = st.slider(
                 "每日最多交易",
                 min_value=1,
                 max_value=5,
-                value=3,
+                value=1,
                 step=1,
                 key="bt_max_trades_per_day",
                 help="避免同一段盤整反覆進出，專業當沖通常會限制每日出手次數。",
@@ -233,15 +229,8 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                     f"模式：專業即時結構 AI｜不訓練｜不偷看｜"
                     f"掃描間隔 {scan_step_bars}K｜最長 {max_runtime_seconds} 秒｜每日最多 {max_trades_per_day} 筆"
                 )
-            elif model_mode == "walk_forward":
-                st.caption(
-                    f"模式：Walk-forward 歷史校準｜測試日前全部歷史資料建模｜"
-                    f"掃描間隔 {scan_step_bars}K｜最長 {max_runtime_seconds} 秒｜每日最多 {max_trades_per_day} 筆"
-                )
-            elif model_mode == "same_period":
-                st.caption("模式：同區間模型 Debug｜⚠️ 有資料洩漏，不代表真實能力")
             else:
-                st.caption("模式：一般 AI 無模型｜不使用相似 K 線成本模型")
+                st.caption("模式：一般 AI 無模型｜只作對照，不建議當主策略")
 
             st.caption(
                 f"股價目標：停損 {default_stop_pct:.1f}%｜"

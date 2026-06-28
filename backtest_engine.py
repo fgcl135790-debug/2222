@@ -260,8 +260,8 @@ class BacktestEngine:
                 stop_pct=stop_pct,
                 take_pct=take_pct,
                 cost_pct=cost_pct,
-                min_score=64,
-                min_expected_value=0.02,
+                min_score=60,
+                min_expected_value=0.00,
             )
             action = signal.get("decision", "WAIT")
             chosen = signal.get("chosen", {}) or {}
@@ -710,7 +710,7 @@ class BacktestEngine:
         commission_rate_pct=0.1425,
         commission_discount=1.0,
         tax_rate_pct=0.15,
-        model_mode="walk_forward",
+        model_mode="realtime_structure",
         scan_step_bars=1,
         max_runtime_seconds=120,
         pro_filters_enabled=True,
@@ -848,7 +848,8 @@ class BacktestEngine:
         elif model_mode == "realtime_structure":
             shared_model_message = (
                 "即時結構 AI：不訓練、不使用事後結果、不設定訓練天數；"
-                "每一根 K 只用當下以前的 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷。"
+                "每一根 K 只用當下以前的 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷；"
+                "每日最多交易=取當天第一個達標訊號，不是回頭挑最佳點。"
                 f"｜每日最多 {max_trades_per_day} 筆"
             )
 
@@ -856,7 +857,8 @@ class BacktestEngine:
             model_mode = "realtime_structure"
             shared_model_message = (
                 "即時結構 AI：不訓練、不使用事後結果、不設定訓練天數；"
-                "每一根 K 只用當下以前的 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷。"
+                "每一根 K 只用當下以前的 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷；"
+                "每日最多交易=取當天第一個達標訊號，不是回頭挑最佳點。"
                 f"｜每日最多 {max_trades_per_day} 筆"
             )
 
@@ -872,7 +874,7 @@ class BacktestEngine:
                 continue
 
             base_percent = 10 + int((day_pos - 1) / max(len(selected_days), 1) * 85)
-            _progress(f"Walk-forward 回測中：{day}（{day_pos}/{len(selected_days)}）", base_percent)
+            _progress(f"即時結構回測中：{day}（{day_pos}/{len(selected_days)}）", base_percent)
 
             model_package = None
             model_message = ""
@@ -1132,7 +1134,7 @@ class BacktestEngine:
         elif model_mode == "walk_forward":
             leak_warning = "Walk-forward：測試日只使用該日前所有歷史資料建模，不偷看未來。"
         elif model_mode == "realtime_structure":
-            leak_warning = "專業即時結構 AI：只使用當下以前的盤中資料，不訓練、不偷看未來，加入 Tape Flow / 五檔 / 盤勢 / 動態風控。"
+            leak_warning = "專業即時結構 AI：只使用當下以前的盤中資料，不訓練、不偷看未來；每日最多交易代表當天第一個達標訊號，不是事後候選。"
         else:
             leak_warning = "一般 AI：未使用相似 K 線成本模型。"
 
