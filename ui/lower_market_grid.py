@@ -12,6 +12,8 @@ from ui.theme import (
     SUBTEXT,
 )
 
+from ui.html_utils import render_html
+
 
 def _safe_float(value, default=0.0):
     try:
@@ -636,4 +638,4 @@ def render_lower_market_grid(
 </html>
 """
 
-    st.markdown(html, unsafe_allow_html=True)
+    render_html(html, height=720)

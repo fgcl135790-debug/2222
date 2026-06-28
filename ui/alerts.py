@@ -12,6 +12,8 @@ from ui.theme import (
     SUBTEXT,
 )
 
+from ui.html_utils import render_html
+
 
 def _level_style(level):
     level = str(level or "info").lower()
@@ -198,4 +200,4 @@ def render_alerts(alerts):
 </html>
 """
 
-    st.markdown(html, unsafe_allow_html=True)
+    render_html(html, height=300)

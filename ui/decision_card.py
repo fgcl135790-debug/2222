@@ -12,6 +12,8 @@ from ui.theme import (
     SUBTEXT,
 )
 
+from ui.html_utils import render_html
+
 
 def _safe_int(value, default=50):
     try:
@@ -504,4 +506,4 @@ def render_decision_card(decision):
 </html>
 """
 
-    st.markdown(html, unsafe_allow_html=True)
+    render_html(html, height=620)

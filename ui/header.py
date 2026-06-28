@@ -11,6 +11,8 @@ from ui.theme import (
     SUBTEXT,
 )
 
+from ui.html_utils import render_html
+
 
 def _safe_int(value, default=0):
     try:
@@ -160,4 +162,4 @@ def render_header(
     <div class="status-card-mobile-safe"><div class="status-label">狀態</div><div class="status-midvalue" style="color:{status_color};">{status_title}</div><div class="status-sub">{status_sub}</div></div>
 </div>
 '''
-    st.markdown(html, unsafe_allow_html=True)
+    render_html(html, height=160)
