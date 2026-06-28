@@ -1,4 +1,5 @@
 import math
+import time
 import requests
 from datetime import datetime
 from collections import defaultdict
@@ -160,15 +161,98 @@ class BacktestEngine:
         return prices, volumes, vwaps, times
 
     @staticmethod
-    def _make_decision(candles, model_package=None):
+    def _make_decision(
+        candles,
+        model_package=None,
+        use_multi_period=False,
+        require_resonance=False,
+    ):
         prices, volumes, vwaps, times = BacktestEngine._build_series(candles)
+        return BacktestEngine._make_decision_from_series(
+            prices=prices,
+            volumes=volumes,
+            vwaps=vwaps,
+            times=times,
+            model_package=model_package,
+            use_multi_period=use_multi_period,
+            require_resonance=require_resonance,
+        )
+
+    @staticmethod
+    def _make_decision_from_series(
+        prices,
+        volumes,
+        vwaps,
+        times,
+        model_package=None,
+        use_multi_period=False,
+        require_resonance=False,
+    ):
+        """
+        回測用快速決策。
+
+        原本每一根 K 都會重建 current_candles、重算 VWAP、跑一般 AI、跑多週期，
+        Walk-forward 近 30 日會非常慢。
+
+        這版在有成本感知模型時，直接走 DecisionEngine 的模型路徑：
+        - 不先跑一般 AIPredictor
+        - 預設不跑 MultiPeriodEngine
+        - 只有勾選「只測多週期共振」時才計算多週期參考
+
+        這不會偷看未來，因為傳入的 prices/volumes 仍然只到目前這一根 K。
+        """
 
         if len(prices) < 30:
             return None
 
         price = prices[-1]
-        vwap = vwaps[-1]
+        vwap = vwaps[-1] if vwaps else price
 
+        # 成本感知模型模式：直接讓 DecisionEngine 用模型判斷，避免每根 K 都跑一般 AI。
+        if model_package is not None:
+            ai = {
+                "signal": "WAIT",
+                "score": 50,
+                "rebound_prob": 50,
+                "reasons": ["回測快速模式：使用成本感知模型，未使用一般 AI 預判。"],
+                "intraday_model_package": model_package,
+            }
+
+            decision = DecisionEngine.generate(
+                ai=ai,
+                price=price,
+                vwap=vwap,
+                ema5=0,
+                ema20=0,
+                ema60=0,
+                rsi=50,
+                macd=0,
+                macd_signal=0,
+                bid_ratio=1.0,
+                prices=prices,
+                volumes=volumes,
+            )
+
+            if not use_multi_period and not require_resonance:
+                return decision
+
+            multi_period = MultiPeriodEngine.analyze(
+                prices=prices,
+                volumes=volumes,
+                vwap_values=vwaps,
+                time_values=times,
+            )
+
+            decision["multi_period"] = multi_period
+            decision["multi_period_reference_status"] = multi_period.get("status", "")
+
+            reasons = list(decision.get("reasons", []))
+            reasons.insert(0, f"多週期參考：{multi_period.get('status', '未知')}｜模型以扣成本期望為主")
+            decision["reasons"] = reasons[:8]
+
+            return decision
+
+        # 一般 AI 模式：保留原本指標與多週期判斷。
         ema5 = MarketAnalyzer.calculate_ema(prices, 5)
         ema20 = MarketAnalyzer.calculate_ema(prices, 20)
         ema60 = MarketAnalyzer.calculate_ema(prices, 60)
@@ -190,9 +274,6 @@ class BacktestEngine:
             bid_ratio=bid_ratio,
             vwap=vwap,
         )
-
-        if model_package is not None:
-            ai["intraday_model_package"] = model_package
 
         decision = DecisionEngine.generate(
             ai=ai,
@@ -216,23 +297,8 @@ class BacktestEngine:
             time_values=times,
         )
 
-        # 成本感知模型的正期望訊號，不再被多週期共振直接改成 WAIT。
-        # 多週期只作為參考欄位保留。
-        model_signal_active = (
-            decision.get("action") in ["BUY", "SELL"]
-            and decision.get("model_label_rows", 0)
-        )
+        return MultiPeriodEngine.apply_to_decision(decision=decision, multi_period=multi_period)
 
-        if model_signal_active:
-            decision["multi_period"] = multi_period
-            decision["multi_period_reference_status"] = multi_period.get("status", "")
-            reasons = list(decision.get("reasons", []))
-            reasons.insert(0, f"多週期參考：{multi_period.get('status', '未知')}｜模型以扣成本期望為主")
-            decision["reasons"] = reasons[:8]
-        else:
-            decision = MultiPeriodEngine.apply_to_decision(decision=decision, multi_period=multi_period)
-
-        return decision
 
     @staticmethod
     def _simulate_exit(
@@ -497,6 +563,9 @@ class BacktestEngine:
         tax_rate_pct=0.15,
         model_mode="walk_forward",
         walk_forward_train_days=5,
+        scan_step_bars=1,
+        max_runtime_seconds=55,
+        progress_callback=None,
     ):
         """
         model_mode:
@@ -504,6 +573,20 @@ class BacktestEngine:
         - same_period：Debug 模式。用同一段資料建立模型再回測，會有資料洩漏。
         - classic：不使用近 30 日模型，只跑一般 AI 備援。
         """
+
+        start_time = time.time()
+        scan_step_bars = max(1, BacktestEngine._safe_int(scan_step_bars, 1))
+        max_runtime_seconds = max(15, BacktestEngine._safe_int(max_runtime_seconds, 55))
+
+        def _progress(message, percent=None):
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(message, percent)
+            except Exception:
+                pass
+
+        _progress("正在抓 Fugle 歷史 K 線...", 2)
 
         candles = BacktestEngine.fetch_historical_candles(
             api_key=api_key,
@@ -553,7 +636,10 @@ class BacktestEngine:
         shared_model_package = None
         shared_model_message = ""
 
+        _progress(f"已取得 {len(candles)} 根 K 線，準備回測 {len(selected_days)} 個交易日...", 8)
+
         if model_mode == "same_period":
+            _progress("正在建立同區間 Debug 模型...", 12)
             shared_model_package, shared_model_message = BacktestEngine._build_model_package_from_candles(
                 candles=candles,
                 symbol=symbol,
@@ -575,12 +661,19 @@ class BacktestEngine:
                 "不使用測試日與未來資料。"
             )
 
-        for day_item in selected_days:
+        for day_pos, day_item in enumerate(selected_days, start=1):
+            if time.time() - start_time > max_runtime_seconds:
+                skipped_days.append({"date": "TIME_LIMIT", "reason": f"超過 {max_runtime_seconds} 秒，已提前結束並保留已完成結果"})
+                break
+
             day = day_item["date"]
             day_candles = day_item["candles"]
 
             if len(day_candles) < 60:
                 continue
+
+            base_percent = 10 + int((day_pos - 1) / max(len(selected_days), 1) * 85)
+            _progress(f"Walk-forward 回測中：{day}（{day_pos}/{len(selected_days)}）", base_percent)
 
             model_package = None
             model_message = ""
@@ -619,6 +712,7 @@ class BacktestEngine:
                     continue
 
                 train_candles = BacktestEngine._flatten_day_items(train_day_items)
+                _progress(f"{day}：使用前 {model_train_days} 日建立模型...", min(base_percent + 2, 95))
                 model_package, model_message = BacktestEngine._build_model_package_from_candles(
                     candles=train_candles,
                     symbol=symbol,
@@ -637,14 +731,27 @@ class BacktestEngine:
                     skipped_days.append({"date": day, "reason": model_message})
                     continue
 
+            day_prices, day_volumes, day_vwaps, day_times = BacktestEngine._build_series(day_candles)
             i = max(35, avoid_bars)
 
             while i < len(day_candles) - 2:
-                current_candles = day_candles[: i + 1]
-                decision = BacktestEngine._make_decision(current_candles, model_package=model_package)
+                if time.time() - start_time > max_runtime_seconds:
+                    skipped_days.append({"date": day, "reason": f"超過 {max_runtime_seconds} 秒，提前停止"})
+                    break
+
+                # 只傳到目前 K 為止，不偷看未來。
+                decision = BacktestEngine._make_decision_from_series(
+                    prices=day_prices[: i + 1],
+                    volumes=day_volumes[: i + 1],
+                    vwaps=day_vwaps[: i + 1],
+                    times=day_times[: i + 1],
+                    model_package=model_package,
+                    use_multi_period=False,
+                    require_resonance=require_resonance,
+                )
 
                 if not decision:
-                    i += 1
+                    i += scan_step_bars
                     continue
 
                 action = decision.get("action", "WAIT")
@@ -654,11 +761,11 @@ class BacktestEngine:
                 multi_status = decision.get("multi_period_status", "盤整觀望")
 
                 if action not in ["BUY", "SELL"]:
-                    i += 1
+                    i += scan_step_bars
                     continue
 
                 if score < score_threshold:
-                    i += 1
+                    i += scan_step_bars
                     continue
 
                 if require_resonance:
@@ -756,7 +863,10 @@ class BacktestEngine:
         else:
             leak_warning = "一般 AI：未使用相似 K 線成本模型。"
 
-        message = f"回測完成｜{leak_warning}｜{shared_model_message}"
+        elapsed_seconds = round(time.time() - start_time, 2)
+        _progress(f"回測完成，用時 {elapsed_seconds} 秒", 100)
+
+        message = f"回測完成｜用時 {elapsed_seconds} 秒｜{leak_warning}｜{shared_model_message}"
         if not trades:
             message = f"回測完成，但沒有符合正期望條件的交易。｜{leak_warning}｜{shared_model_message}"
 
@@ -771,6 +881,8 @@ class BacktestEngine:
             "selected_days": selected_day_names,
             "model_mode": model_mode,
             "walk_forward_train_days": walk_forward_train_days,
+            "scan_step_bars": scan_step_bars,
+            "elapsed_seconds": elapsed_seconds,
             "leak_warning": leak_warning,
             "model_message": shared_model_message,
             "skipped_days": skipped_days,

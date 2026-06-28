@@ -101,6 +101,26 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 help="真實模式下，測某一天時只使用前 N 個交易日建立模型，不偷看當天與未來資料。",
             )
 
+            scan_step_bars = st.slider(
+                "回測掃描間隔 K 數",
+                min_value=1,
+                max_value=5,
+                value=1,
+                step=1,
+                key="bt_scan_step_bars",
+                help="1 最精準；2~5 比較快但可能跳過部分進場點。",
+            )
+
+            max_runtime_seconds = st.slider(
+                "回測最長秒數",
+                min_value=20,
+                max_value=120,
+                value=55,
+                step=5,
+                key="bt_max_runtime_seconds",
+                help="避免 Streamlit Cloud 長時間卡住。超過時間會先輸出已完成結果。",
+            )
+
             score_threshold = st.slider(
                 "最低 Score",
                 min_value=50,
@@ -181,7 +201,8 @@ def render_backtest_sidebar_panel(api_key, stock_code):
 
             if model_mode == "walk_forward":
                 st.caption(
-                    f"模式：Walk-forward 真實模式｜只用過去 {walk_forward_train_days} 日建模"
+                    f"模式：Walk-forward 真實模式｜只用過去 {walk_forward_train_days} 日建模｜"
+                    f"掃描間隔 {scan_step_bars}K｜最長 {max_runtime_seconds} 秒"
                 )
             elif model_mode == "same_period":
                 st.caption("模式：同區間模型 Debug｜⚠️ 有資料洩漏，不代表真實能力")
@@ -215,7 +236,18 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             st.session_state.backtest_message = "已收到回測指令，正在抓歷史 K 線..."
 
             status_box = st.empty()
+            progress_box = st.empty()
+            progress_bar = st.progress(0)
             status_box.info(st.session_state.backtest_message)
+
+            def _on_backtest_progress(message, percent=None):
+                st.session_state.backtest_message = str(message)
+                progress_box.info(str(message))
+                if percent is not None:
+                    try:
+                        progress_bar.progress(max(0, min(100, int(percent))))
+                    except Exception:
+                        pass
 
             try:
                 with st.spinner("回測中，請稍等..."):
@@ -235,6 +267,9 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                         tax_rate_pct=tax_rate_pct,
                         model_mode=model_mode,
                         walk_forward_train_days=walk_forward_train_days,
+                        scan_step_bars=scan_step_bars,
+                        max_runtime_seconds=max_runtime_seconds,
+                        progress_callback=_on_backtest_progress,
                     )
 
                 st.session_state.backtest_result = result
@@ -289,7 +324,9 @@ def render_backtest_sidebar_panel(api_key, stock_code):
         st.caption(
             f"{result.get('symbol')}｜{result.get('timeframe')}分K｜"
             f"回測 {result.get('days')} 日｜來源 {result.get('all_days')} 日｜"
-            f"{result.get('candles')} 根K"
+            f"{result.get('candles')} 根K｜"
+            f"用時 {result.get('elapsed_seconds', '-')} 秒｜"
+            f"掃描間隔 {result.get('scan_step_bars', 1)}K"
         )
 
         leak_warning = result.get("leak_warning")
