@@ -210,6 +210,11 @@ def main():
         refresh_sec,
     ) = render_sidebar(reset_state)
 
+    api_key = (api_key or "").strip()
+
+    if not api_key:
+        api_key = (st.session_state.get("fugle_api_key") or "").strip()
+
     render_backtest_sidebar_panel(
         api_key=api_key,
         stock_code=stock_code,
