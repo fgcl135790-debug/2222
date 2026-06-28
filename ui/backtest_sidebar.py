@@ -112,7 +112,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             )
 
 
-            st.caption("已移除候選硬湊：回測只允許當下已達標的 BUY / SELL 訊號；預設每日最多 1 筆，代表每日第一個有效訊號。")
+            st.caption("已移除候選硬湊：回測只允許當下已達標的 BUY / SELL 訊號；若每日最多交易 > 1，第二筆會自動提高門檻，避免盤整段重複進場。")
 
             score_threshold = st.slider(
                 "最低 Score",
@@ -166,7 +166,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             )
 
             st.caption("專業訊號：ORB / VWAP / Tape Flow / 五檔壓力 / 盤勢分類 / 動態停損停利 / 停損冷卻")
-            st.caption("目前版本：即時結構精準版｜新增 10:30~11:00 二次攻擊濾網、追高追空濾網；不訓練、不硬湊、不偷看。")
+            st.caption("目前版本：訊號品質 v3｜修正真實時鐘判斷、ORB 缺資料保護、K棒收盤位置濾網、第二筆交易加嚴；不訓練、不硬湊、不偷看。")
 
             max_trades_per_day = st.slider(
                 "每日最多交易",
