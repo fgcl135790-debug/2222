@@ -30,6 +30,9 @@ def render_sidebar(reset_callback):
 
         api_key = (api_key or "").strip()
 
+        # 強制同步給 app.py 主程式使用
+        st.session_state["runtime_fugle_api_key"] = api_key
+
         st.caption("API KEY：已讀取" if api_key else "API KEY：未讀取")
 
         mode = st.selectbox(
