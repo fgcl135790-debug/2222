@@ -222,46 +222,46 @@ def main():
     stock_code=stock_code,
     )
 
-with st.sidebar.expander("🧠 當沖模型", expanded=False):
-    model_package = None
+    with st.sidebar.expander("🧠 當沖模型", expanded=False):
+        model_package = None
 
-    try:
-        if data_source == "真實盤" and api_key and stock_code:
-            model_package = StockModelCache.get_or_build(
-                st=st,
-                api_key=api_key,
-                symbol=stock_code,
-                timeframe="1",
-                stop_pct=0.6,
-                take_pct=1.8,
-                max_hold_bars=25,
-                cost_pct=0.435,
-                force_rebuild=False,
-            )
+        try:
+            if data_source == "真實盤" and api_key and stock_code:
+                model_package = StockModelCache.get_or_build(
+                    st=st,
+                    api_key=api_key,
+                    symbol=stock_code,
+                    timeframe="1",
+                    stop_pct=0.6,
+                    take_pct=1.8,
+                    max_hold_bars=25,
+                    cost_pct=0.435,
+                    force_rebuild=False,
+                )
 
-        if model_package:
-            st.success("模型已建立")
-            st.caption(f"股票：{model_package.get('symbol')}")
-            st.caption(
-                f"區間：{model_package.get('start_date')} ~ "
-                f"{model_package.get('end_date')}"
-            )
-            st.caption(f"交易日：{model_package.get('trading_days')}")
-            st.caption(f"K線：{model_package.get('kline_rows')} 根")
-            st.caption(f"候選標籤：{model_package.get('label_rows')} 筆")
-            st.caption(f"BUY 全樣本勝率：{model_package.get('buy_win_rate_all')}%")
-            st.caption(f"SELL 全樣本勝率：{model_package.get('sell_win_rate_all')}%")
+            if model_package:
+                st.success("模型已建立")
+                st.caption(f"股票：{model_package.get('symbol')}")
+                st.caption(
+                    f"區間：{model_package.get('start_date')} ~ "
+                    f"{model_package.get('end_date')}"
+                )
+                st.caption(f"交易日：{model_package.get('trading_days')}")
+                st.caption(f"K線：{model_package.get('kline_rows')} 根")
+                st.caption(f"候選標籤：{model_package.get('label_rows')} 筆")
+                st.caption(f"BUY 全樣本勝率：{model_package.get('buy_win_rate_all')}%")
+                st.caption(f"SELL 全樣本勝率：{model_package.get('sell_win_rate_all')}%")
 
-            if st.button("重建目前股票模型", use_container_width=True):
-                StockModelCache.clear_symbol(st, stock_code)
-                st.rerun()
+                if st.button("重建目前股票模型", use_container_width=True):
+                    StockModelCache.clear_symbol(st, stock_code)
+                    st.rerun()
 
-        else:
-            st.info("真實盤輸入 API KEY 後會自動建立模型。")
+            else:
+                st.info("真實盤輸入 API KEY 後會自動建立模型。")
 
-    except Exception as e:
-        st.error("模型建立失敗")
-        st.exception(e)
+       except Exception as e:
+            st.error("模型建立失敗")
+            st.exception(e)
 
     # =========================
     # 切換股票 / 資料來源 / 模擬模式時清空
