@@ -222,7 +222,7 @@ def main():
     stock_code=stock_code,
     )
 
-    with st.sidebar.expander("🧠 當沖模型", expanded=False):
+with st.sidebar.expander("🧠 當沖模型", expanded=False):
     model_package = None
 
     try:
@@ -242,7 +242,10 @@ def main():
         if model_package:
             st.success("模型已建立")
             st.caption(f"股票：{model_package.get('symbol')}")
-            st.caption(f"區間：{model_package.get('start_date')} ~ {model_package.get('end_date')}")
+            st.caption(
+                f"區間：{model_package.get('start_date')} ~ "
+                f"{model_package.get('end_date')}"
+            )
             st.caption(f"交易日：{model_package.get('trading_days')}")
             st.caption(f"K線：{model_package.get('kline_rows')} 根")
             st.caption(f"候選標籤：{model_package.get('label_rows')} 筆")
@@ -252,6 +255,7 @@ def main():
             if st.button("重建目前股票模型", use_container_width=True):
                 StockModelCache.clear_symbol(st, stock_code)
                 st.rerun()
+
         else:
             st.info("真實盤輸入 API KEY 後會自動建立模型。")
 
