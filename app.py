@@ -317,9 +317,23 @@ def main():
     # 取得資料
     # =========================
 
-    if data_source == "真實盤" and not api_key:
+    api_key_runtime = (
+        api_key
+        or st.session_state.get("fugle_api_key")
+        or ""
+    ).strip()
+
+    st.sidebar.caption(
+        f"主程式 API KEY：已讀取，長度 {len(api_key_runtime)}"
+        if api_key_runtime
+        else "主程式 API KEY：未讀取"
+    )
+
+    if data_source == "真實盤" and not api_key_runtime:
         st.warning("請輸入 API KEY，或先切換到模擬盤測試 UI。")
         st.stop()
+
+    api_key = api_key_runtime
 
     try:
         with st.spinner("取得行情資料中..."):
