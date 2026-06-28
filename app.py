@@ -134,6 +134,7 @@ try:
     from alert_engine import AlertEngine
     from market_flow_engine import MarketFlowEngine
     from win_rate_engine import WinRateEngine
+    from stock_model_cache import StockModelCache
 
     from ui.header import render_header
     from ui.chart_panel import render_chart
@@ -220,6 +221,43 @@ def main():
     api_key=api_key,
     stock_code=stock_code,
     )
+
+    with st.sidebar.expander("🧠 當沖模型", expanded=False):
+    model_package = None
+
+    try:
+        if data_source == "真實盤" and api_key and stock_code:
+            model_package = StockModelCache.get_or_build(
+                st=st,
+                api_key=api_key,
+                symbol=stock_code,
+                timeframe="1",
+                stop_pct=0.6,
+                take_pct=1.8,
+                max_hold_bars=25,
+                cost_pct=0.435,
+                force_rebuild=False,
+            )
+
+        if model_package:
+            st.success("模型已建立")
+            st.caption(f"股票：{model_package.get('symbol')}")
+            st.caption(f"區間：{model_package.get('start_date')} ~ {model_package.get('end_date')}")
+            st.caption(f"交易日：{model_package.get('trading_days')}")
+            st.caption(f"K線：{model_package.get('kline_rows')} 根")
+            st.caption(f"候選標籤：{model_package.get('label_rows')} 筆")
+            st.caption(f"BUY 全樣本勝率：{model_package.get('buy_win_rate_all')}%")
+            st.caption(f"SELL 全樣本勝率：{model_package.get('sell_win_rate_all')}%")
+
+            if st.button("重建目前股票模型", use_container_width=True):
+                StockModelCache.clear_symbol(st, stock_code)
+                st.rerun()
+        else:
+            st.info("真實盤輸入 API KEY 後會自動建立模型。")
+
+    except Exception as e:
+        st.error("模型建立失敗")
+        st.exception(e)
 
     # =========================
     # 切換股票 / 資料來源 / 模擬模式時清空
@@ -408,11 +446,34 @@ def main():
         vwap=vwap,
     )
 
+
     signal = ai.get("signal", "WAIT")
     score = ai.get("score", 0)
     risk = ai.get("risk", "監控中")
     state = ai.get("market_state", "資料累積中")
     rebound = ai.get("rebound_prob", 0)
+
+    intraday_model_package = None
+
+    if data_source == "真實盤" and api_key and stock_code:
+        try:
+            intraday_model_package = StockModelCache.get_or_build(
+                st=st,
+                api_key=api_key,
+                symbol=stock_code,
+                timeframe="1",
+                stop_pct=0.6,
+                take_pct=1.8,
+                max_hold_bars=25,
+                cost_pct=0.435,
+                force_rebuild=False,
+            )
+
+            ai["intraday_model_package"] = intraday_model_package
+
+        except Exception as e:
+            ai["intraday_model_package"] = None
+            st.sidebar.warning(f"股票模型建立失敗：{e}")    
 
     # =========================
     # Decision Engine
