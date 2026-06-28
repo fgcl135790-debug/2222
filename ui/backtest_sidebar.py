@@ -73,9 +73,10 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             )
 
             model_mode_label = st.selectbox(
-                "模型回測模式",
+                "AI 判斷模式",
                 options=[
-                    "Walk-forward 真實模式",
+                    "專業即時結構 AI（不訓練）",
+                    "Walk-forward 歷史校準",
                     "同區間模型 Debug",
                     "一般 AI 無模型",
                 ],
@@ -84,14 +85,15 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             )
 
             model_mode_map = {
-                "Walk-forward 真實模式": "walk_forward",
+                "專業即時結構 AI（不訓練）": "realtime_structure",
+                "Walk-forward 歷史校準": "walk_forward",
                 "同區間模型 Debug": "same_period",
                 "一般 AI 無模型": "classic",
             }
 
-            model_mode = model_mode_map.get(model_mode_label, "walk_forward")
+            model_mode = model_mode_map.get(model_mode_label, "realtime_structure")
 
-            st.caption("Walk-forward：測試日只使用該日前所有可用歷史 K，不設定訓練天數。")
+            st.caption("專業即時結構 AI：不訓練、不回頭挑候選，只用當下已知 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷。")
 
             scan_step_bars = st.slider(
                 "回測掃描間隔 K 數",
@@ -120,7 +122,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "最低 Score",
                 min_value=50,
                 max_value=95,
-                value=70,
+                value=65,
                 step=5,
                 key="bt_score_threshold",
             )
@@ -167,14 +169,14 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 key="bt_default_take_pct",
             )
 
-            st.caption("專業濾網：ORB / VWAP / 量能加速度 / 假突破 / 午盤風險 / 停損冷卻")
-            st.caption("目前版本：平衡濾網｜不再把 ORB / VWAP 未完全對齊直接封鎖，改成扣分；避免 0 交易。")
+            st.caption("專業訊號：ORB / VWAP / Tape Flow / 五檔壓力 / 盤勢分類 / 動態停損停利 / 停損冷卻")
+            st.caption("目前版本：專業即時結構判斷｜不靠訓練天數，不硬湊每日候選，提升當下判斷精準度。")
 
             max_trades_per_day = st.slider(
                 "每日最多交易",
                 min_value=1,
                 max_value=5,
-                value=2,
+                value=3,
                 step=1,
                 key="bt_max_trades_per_day",
                 help="避免同一段盤整反覆進出，專業當沖通常會限制每日出手次數。",
@@ -226,9 +228,14 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 + tax_rate_pct
             )
 
-            if model_mode == "walk_forward":
+            if model_mode == "realtime_structure":
                 st.caption(
-                    f"模式：Walk-forward 真實模式｜測試日前全部歷史資料建模｜"
+                    f"模式：專業即時結構 AI｜不訓練｜不偷看｜"
+                    f"掃描間隔 {scan_step_bars}K｜最長 {max_runtime_seconds} 秒｜每日最多 {max_trades_per_day} 筆"
+                )
+            elif model_mode == "walk_forward":
+                st.caption(
+                    f"模式：Walk-forward 歷史校準｜測試日前全部歷史資料建模｜"
                     f"掃描間隔 {scan_step_bars}K｜最長 {max_runtime_seconds} 秒｜每日最多 {max_trades_per_day} 筆"
                 )
             elif model_mode == "same_period":
@@ -425,8 +432,8 @@ def render_backtest_sidebar_panel(api_key, stock_code):
 
         if not trades:
             st.warning(
-                "這次沒有符合正期望條件的交易。這不是出手次數問題，而是目前 AI 在當下判斷的勝率 / 期望值 / 專業濾網還不夠精準；"
-                "系統不會用候選單或事後結果硬湊交易。"
+                "這次沒有符合條件的交易。系統不會用候選單或事後結果硬湊交易；"
+                "若使用即時結構 AI 仍過少，請先降低最低 Score 或檢查 Fugle 歷史 K 是否只有部分交易日。"
             )
             return
 

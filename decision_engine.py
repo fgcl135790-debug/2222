@@ -1,4 +1,5 @@
 from intraday_label_engine import IntradayLabelEngine
+from intraday_signal_engine import IntradaySignalEngine
 
 
 class DecisionEngine:
@@ -111,8 +112,15 @@ class DecisionEngine:
                 extra={"reasons": reasons, "rebound": rebound},
             )
 
-        stop_pct = DecisionEngine.DEFAULT_STOP_PCT
-        take_pct = DecisionEngine.DEFAULT_TAKE_PCT
+        risk_plan = signal.get("risk_plan", {}) or {}
+        stop_pct = DecisionEngine._safe_float(
+            signal.get("adaptive_stop_pct") or risk_plan.get("stop_pct"),
+            DecisionEngine.DEFAULT_STOP_PCT,
+        )
+        take_pct = DecisionEngine._safe_float(
+            signal.get("adaptive_take_pct") or risk_plan.get("take_pct"),
+            DecisionEngine.DEFAULT_TAKE_PCT,
+        )
         risk_reward = take_pct / max(stop_pct, 0.01)
 
         if action == "BUY":
@@ -149,6 +157,8 @@ class DecisionEngine:
             "take_profit": round(take_profit, 2),
             "risk_reward": round(risk_reward, 2),
             "rr": round(risk_reward, 2),
+            "adaptive_stop_pct": round(stop_pct, 3),
+            "adaptive_take_pct": round(take_pct, 3),
             "rebound": rebound,
             "multi_period_status": multi_period_status,
             "multi_period": {},
@@ -261,6 +271,85 @@ class DecisionEngine:
             "model_label_rows": model_package.get("label_rows", 0),
         }
 
+
+    @staticmethod
+    def _payload_from_realtime_signal(signal, price):
+        action = signal.get("decision", "WAIT")
+        chosen = signal.get("chosen", {}) or {}
+        risk_plan = signal.get("risk_plan", {}) or {}
+        stop_pct = DecisionEngine._safe_float(
+            signal.get("adaptive_stop_pct") or risk_plan.get("stop_pct"),
+            DecisionEngine.DEFAULT_STOP_PCT,
+        )
+        take_pct = DecisionEngine._safe_float(
+            signal.get("adaptive_take_pct") or risk_plan.get("take_pct"),
+            DecisionEngine.DEFAULT_TAKE_PCT,
+        )
+        risk_reward = take_pct / max(stop_pct, 0.01)
+
+        if action not in ["BUY", "SELL"]:
+            return DecisionEngine._base_wait(
+                price=price,
+                score=signal.get("score", 45),
+                title=signal.get("title", "即時結構觀望"),
+                reason=signal.get("reason", "當下量價結構尚未達到扣成本後正期望。"),
+                extra={
+                    "reasons": signal.get("reasons", []),
+                    "swing_prediction": signal,
+                    "risk_level": "HIGH",
+                    "expected_value": chosen.get("expected_value", 0),
+                    "predicted_win_rate": chosen.get("win_rate", 0),
+                    "required_win_rate": signal.get("required_win_rate", 0),
+                },
+            )
+
+        if action == "BUY":
+            stop_loss = price * (1 - stop_pct / 100)
+            take_profit = price * (1 + take_pct / 100)
+            status = "STRUCTURE_BULL"
+            rebound = 58
+            predicted_up_pct = take_pct
+            predicted_down_pct = 0
+        else:
+            stop_loss = price * (1 + stop_pct / 100)
+            take_profit = price * (1 - take_pct / 100)
+            status = "STRUCTURE_BEAR"
+            rebound = 42
+            predicted_up_pct = 0
+            predicted_down_pct = take_pct
+
+        return {
+            "action": action,
+            "score": int(max(0, min(100, signal.get("score", 0)))),
+            "title": signal.get("title", "即時結構 AI 訊號"),
+            "reason": signal.get("reason", ""),
+            "reasons": signal.get("reasons", []),
+            "entry_price": price,
+            "entry": round(price, 2),
+            "stop_loss": round(stop_loss, 2),
+            "take_profit": round(take_profit, 2),
+            "risk_reward": round(risk_reward, 2),
+            "rr": round(risk_reward, 2),
+            "adaptive_stop_pct": round(stop_pct, 3),
+            "adaptive_take_pct": round(take_pct, 3),
+            "rebound": rebound,
+            "multi_period_status": status,
+            "multi_period": {},
+            "swing_state": "即時結構 AI",
+            "swing_prediction": signal,
+            "predicted_up_pct": predicted_up_pct,
+            "predicted_down_pct": predicted_down_pct,
+            "long_rr": round(risk_reward, 2),
+            "short_rr": round(risk_reward, 2),
+            "risk_level": signal.get("risk_level", "NORMAL"),
+            "expected_value": chosen.get("expected_value", 0),
+            "predicted_win_rate": chosen.get("win_rate", 0),
+            "required_win_rate": signal.get("required_win_rate", 0),
+            "model_label_rows": 0,
+            "model_start_date": "即時結構",
+            "model_end_date": "不訓練",
+        }
+
     @staticmethod
     def generate(
         ai,
@@ -275,6 +364,13 @@ class DecisionEngine:
         bid_ratio,
         prices,
         volumes,
+        opens=None,
+        highs=None,
+        lows=None,
+        vwap_values=None,
+        time_values=None,
+        bids=None,
+        asks=None,
     ):
         ai = ai or {}
         price = DecisionEngine._safe_float(price)
@@ -289,13 +385,54 @@ class DecisionEngine:
 
         prices = prices or []
         volumes = volumes or []
+        opens = opens or prices
+        highs = highs or prices
+        lows = lows or prices
+        vwap_values = vwap_values or []
+        time_values = time_values or []
         model_package = ai.get("intraday_model_package")
 
         if not model_package:
+            signal = IntradaySignalEngine.analyze(
+                prices=prices,
+                volumes=volumes,
+                opens=opens,
+                highs=highs,
+                lows=lows,
+                vwap_values=vwap_values,
+                time_values=time_values,
+                bids=bids,
+                asks=asks,
+                stop_pct=DecisionEngine.DEFAULT_STOP_PCT,
+                take_pct=DecisionEngine.DEFAULT_TAKE_PCT,
+                cost_pct=DecisionEngine.COST_PCT,
+                min_score=64,
+                min_expected_value=0.02,
+            )
+            if signal.get("decision") in ["BUY", "SELL"]:
+                return DecisionEngine._payload_from_realtime_signal(signal, price)
             return DecisionEngine._fallback_from_ai(ai=ai, price=price, prices=prices, volumes=volumes)
 
         model = model_package.get("model")
         if model is None:
+            signal = IntradaySignalEngine.analyze(
+                prices=prices,
+                volumes=volumes,
+                opens=opens,
+                highs=highs,
+                lows=lows,
+                vwap_values=vwap_values,
+                time_values=time_values,
+                bids=bids,
+                asks=asks,
+                stop_pct=DecisionEngine.DEFAULT_STOP_PCT,
+                take_pct=DecisionEngine.DEFAULT_TAKE_PCT,
+                cost_pct=DecisionEngine.COST_PCT,
+                min_score=64,
+                min_expected_value=0.02,
+            )
+            if signal.get("decision") in ["BUY", "SELL"]:
+                return DecisionEngine._payload_from_realtime_signal(signal, price)
             return DecisionEngine._fallback_from_ai(ai=ai, price=price, prices=prices, volumes=volumes)
 
         if len(prices) < 20:
@@ -354,6 +491,27 @@ class DecisionEngine:
                 prediction=prediction,
                 model_package=model_package,
             )
+
+        realtime_signal = IntradaySignalEngine.analyze(
+            prices=prices,
+            volumes=volumes,
+            opens=opens,
+            highs=highs,
+            lows=lows,
+            vwap_values=vwap_values,
+            time_values=time_values,
+            bids=bids,
+            asks=asks,
+            stop_pct=stop_pct,
+            take_pct=take_pct,
+            cost_pct=cost_pct,
+            min_score=66,
+            min_expected_value=0.02,
+        )
+        if realtime_signal.get("decision") in ["BUY", "SELL"]:
+            payload = DecisionEngine._payload_from_realtime_signal(realtime_signal, price)
+            payload["reasons"] = ["歷史相似模型未放行，但即時結構 AI 達標。"] + payload.get("reasons", [])[:6]
+            return payload
 
         wait_reasons = [
             f"BUY 校準勝率 {buy.get('win_rate', 0)}%，原始 {buy.get('raw_win_rate', 0)}%，EV {buy.get('expected_value', 0)}%",
