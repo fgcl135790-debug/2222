@@ -4,13 +4,13 @@ import numpy as np
 
 class IntradayProfitModel:
     """
-    用歷史標籤資料做相似情境預測。
+    成本感知的相似 K 線當沖模型。
 
-    不是機器學習套件，先用穩定的相似樣本法：
-    1. 先找同方向 BUY / SELL
-    2. 優先找同時間區間、同 VWAP 區、同斜率區
-    3. 再用數值特徵距離找最像的樣本
-    4. 算勝率、平均報酬、期望值
+    核心概念：
+    - 先用歷史 1 分 K 依照固定停損 / 停利 / 持有 K 數做標籤。
+    - 盤中把當下特徵拿去找相似樣本。
+    - 不只看勝率，也看扣完成本後的期望報酬 expected_value。
+    - 若扣成本後期望值 <= 0，或勝率低於該停損停利組合的損益兩平勝率，就回傳 WAIT。
     """
 
     FEATURE_COLS = [
@@ -62,7 +62,8 @@ class IntradayProfitModel:
 
         return stats
 
-    def _safe_float(self, value, default=0.0):
+    @staticmethod
+    def _safe_float(value, default=0.0):
         try:
             if value is None:
                 return default
@@ -72,25 +73,52 @@ class IntradayProfitModel:
         except Exception:
             return default
 
+    @staticmethod
+    def _clamp(value, low, high):
+        return max(low, min(high, value))
+
+    @staticmethod
+    def required_win_rate_pct(stop_pct=0.6, take_pct=2.0, cost_pct=0.435, safety_margin=4.0):
+        """
+        計算扣成本後的最低損益兩平勝率。
+        win_net  = 停利% - 成本%
+        loss_net = 停損% + 成本%
+        break_even = loss_net / (win_net + loss_net)
+        """
+        stop_pct = IntradayProfitModel._safe_float(stop_pct, 0.6)
+        take_pct = IntradayProfitModel._safe_float(take_pct, 2.0)
+        cost_pct = IntradayProfitModel._safe_float(cost_pct, 0.435)
+        safety_margin = IntradayProfitModel._safe_float(safety_margin, 4.0)
+
+        win_net = take_pct - cost_pct
+        loss_net = stop_pct + cost_pct
+
+        if win_net <= 0:
+            return 99.0
+
+        breakeven = loss_net / max(win_net + loss_net, 0.000001) * 100
+        return round(min(95.0, breakeven + safety_margin), 2)
+
     def _distance_score(self, df, feature):
         dist = pd.Series(0.0, index=df.index)
 
+        # 越重要的特徵權重越高。重點放在「剛起動」與「離 VWAP / 高低點的位置」。
         weights = {
-            "vwap_gap": 1.4,
-            "ema_gap": 1.0,
-            "rsi": 0.8,
-            "macd_hist": 1.1,
-            "slope_3": 1.4,
-            "slope_5": 1.2,
-            "slope_10": 1.3,
-            "slope_20": 0.8,
-            "volume_ratio": 0.8,
-            "distance_to_high_30": 1.1,
-            "distance_to_low_30": 1.1,
-            "distance_to_high_60": 0.7,
-            "distance_to_low_60": 0.7,
-            "open_gap": 0.8,
-            "day_range_pct": 0.7,
+            "vwap_gap": 1.45,
+            "ema_gap": 1.05,
+            "rsi": 0.85,
+            "macd_hist": 1.15,
+            "slope_3": 1.50,
+            "slope_5": 1.30,
+            "slope_10": 1.35,
+            "slope_20": 0.90,
+            "volume_ratio": 0.85,
+            "distance_to_high_30": 1.20,
+            "distance_to_low_30": 1.20,
+            "distance_to_high_60": 0.75,
+            "distance_to_low_60": 0.75,
+            "open_gap": 0.90,
+            "day_range_pct": 0.75,
         }
 
         for col in self.FEATURE_COLS:
@@ -98,11 +126,11 @@ class IntradayProfitModel:
                 continue
 
             stat = self.feature_stats.get(col, {"std": 1.0})
-            std = stat.get("std", 1.0)
+            std = max(stat.get("std", 1.0), 0.000001)
             weight = weights.get(col, 1.0)
             target = self._safe_float(feature.get(col), 0.0)
 
-            dist += ((df[col] - target).abs() / max(std, 0.000001)) * weight
+            dist += ((df[col] - target).abs() / std) * weight
 
         return dist
 
@@ -113,23 +141,30 @@ class IntradayProfitModel:
                 "level": level,
                 "sample_count": 0,
                 "win_rate": 0.0,
-                "avg_pnl_pct": -999,
-                "median_pnl_pct": -999,
-                "expected_value": -999,
+                "loss_rate": 0.0,
+                "time_rate": 0.0,
+                "avg_pnl_pct": -999.0,
+                "median_pnl_pct": -999.0,
+                "expected_value": -999.0,
                 "profit_factor": 0.0,
                 "best_time_bucket": "",
                 "reason": "沒有相似樣本",
             }
 
+        sample = sample.copy()
         wins = sample[sample["pnl_pct"] > 0]
         losses = sample[sample["pnl_pct"] <= 0]
+        time_exits = sample[sample.get("exit_reason", "") == "時間出場"] if "exit_reason" in sample.columns else pd.DataFrame()
 
         win_rate = len(wins) / len(sample) * 100
+        loss_rate = len(losses) / len(sample) * 100
+        time_rate = len(time_exits) / len(sample) * 100 if len(sample) else 0
+
         avg_pnl = float(sample["pnl_pct"].mean())
         median_pnl = float(sample["pnl_pct"].median())
 
-        gross_win = wins["pnl_pct"].sum() if not wins.empty else 0.0
-        gross_loss = abs(losses["pnl_pct"].sum()) if not losses.empty else 0.0
+        gross_win = float(wins["pnl_pct"].sum()) if not wins.empty else 0.0
+        gross_loss = abs(float(losses["pnl_pct"].sum())) if not losses.empty else 0.0
 
         if gross_loss <= 0:
             profit_factor = 99.0 if gross_win > 0 else 0.0
@@ -139,7 +174,7 @@ class IntradayProfitModel:
         reason = (
             f"{level} 相似樣本 {len(sample)} 筆，"
             f"勝率 {win_rate:.1f}%，"
-            f"平均報酬 {avg_pnl:.3f}%"
+            f"扣成本期望 {avg_pnl:.3f}%"
         )
 
         return {
@@ -147,6 +182,8 @@ class IntradayProfitModel:
             "level": level,
             "sample_count": int(len(sample)),
             "win_rate": round(win_rate, 2),
+            "loss_rate": round(loss_rate, 2),
+            "time_rate": round(time_rate, 2),
             "avg_pnl_pct": round(avg_pnl, 3),
             "median_pnl_pct": round(median_pnl, 3),
             "expected_value": round(avg_pnl, 3),
@@ -187,9 +224,7 @@ class IntradayProfitModel:
                 candidate = medium
                 level = "MEDIUM"
             else:
-                loose = df[
-                    (df["time_bucket"] == time_bucket)
-                ].copy()
+                loose = df[df["time_bucket"] == time_bucket].copy()
 
                 if len(loose) >= 50:
                     candidate = loose
@@ -206,37 +241,64 @@ class IntradayProfitModel:
 
         return self._summarize(sample, action, feature, level)
 
-    def predict(self, feature, min_expected_value=0.05, min_win_rate=45.0):
+    def predict(
+        self,
+        feature,
+        min_expected_value=0.10,
+        min_win_rate=None,
+        min_sample_count=25,
+        stop_pct=0.6,
+        take_pct=2.0,
+        cost_pct=0.435,
+        safety_margin=4.0,
+    ):
         buy = self.predict_action(feature, "BUY")
         sell = self.predict_action(feature, "SELL")
 
+        required_win_rate = self.required_win_rate_pct(
+            stop_pct=stop_pct,
+            take_pct=take_pct,
+            cost_pct=cost_pct,
+            safety_margin=safety_margin,
+        )
+
+        if min_win_rate is not None:
+            required_win_rate = max(required_win_rate, self._safe_float(min_win_rate, required_win_rate))
+
+        # edge 是排序用；是否放行仍以「扣成本期望 > 0」與「勝率高於損益兩平」為主。
         buy_edge = (
-            buy["expected_value"] * 12
-            + buy["win_rate"] * 0.45
+            buy["expected_value"] * 20
+            + (buy["win_rate"] - required_win_rate) * 0.70
             + min(buy["sample_count"], 120) * 0.03
-            + buy["profit_factor"] * 2
+            + min(buy["profit_factor"], 5) * 3
         )
 
         sell_edge = (
-            sell["expected_value"] * 12
-            + sell["win_rate"] * 0.45
+            sell["expected_value"] * 20
+            + (sell["win_rate"] - required_win_rate) * 0.70
             + min(sell["sample_count"], 120) * 0.03
-            + sell["profit_factor"] * 2
+            + min(sell["profit_factor"], 5) * 3
         )
 
         buy["edge"] = round(buy_edge, 2)
         sell["edge"] = round(sell_edge, 2)
+        buy["required_win_rate"] = required_win_rate
+        sell["required_win_rate"] = required_win_rate
+        buy["min_expected_value"] = min_expected_value
+        sell["min_expected_value"] = min_expected_value
 
         allow_buy = (
             buy["expected_value"] >= min_expected_value
-            and buy["win_rate"] >= min_win_rate
-            and buy["sample_count"] >= 20
+            and buy["win_rate"] >= required_win_rate
+            and buy["sample_count"] >= min_sample_count
+            and buy["profit_factor"] >= 1.05
         )
 
         allow_sell = (
             sell["expected_value"] >= min_expected_value
-            and sell["win_rate"] >= min_win_rate
-            and sell["sample_count"] >= 20
+            and sell["win_rate"] >= required_win_rate
+            and sell["sample_count"] >= min_sample_count
+            and sell["profit_factor"] >= 1.05
         )
 
         if allow_buy and buy_edge >= sell_edge:
@@ -249,17 +311,23 @@ class IntradayProfitModel:
             decision = "WAIT"
             chosen = buy if buy_edge >= sell_edge else sell
 
-        score = 50
-
-        if decision != "WAIT":
-            score = (
-                50
-                + max(0, chosen["expected_value"]) * 12
-                + max(0, chosen["win_rate"] - 45) * 0.8
-                + min(chosen["profit_factor"], 3) * 5
+        if decision == "WAIT":
+            risk_level = "HIGH"
+            reason = (
+                "扣成本後期望值不足，或勝率未高於此停損停利組合的損益兩平勝率，"
+                "此筆交易風險高，暫不出手。"
             )
-
-        score = int(max(0, min(100, score)))
+            score = max(0, min(70, int(45 + max(buy_edge, sell_edge) * 0.5)))
+        else:
+            risk_level = "NORMAL"
+            reason = chosen.get("reason", "")
+            score = (
+                55
+                + max(0, chosen["expected_value"]) * 18
+                + max(0, chosen["win_rate"] - required_win_rate) * 0.75
+                + min(chosen["profit_factor"], 3) * 4
+            )
+            score = int(self._clamp(score, 50, 100))
 
         return {
             "decision": decision,
@@ -267,5 +335,11 @@ class IntradayProfitModel:
             "buy": buy,
             "sell": sell,
             "chosen": chosen,
-            "reason": chosen.get("reason", ""),
+            "reason": reason,
+            "risk_level": risk_level,
+            "required_win_rate": required_win_rate,
+            "min_expected_value": min_expected_value,
+            "stop_pct": round(self._safe_float(stop_pct, 0.6), 3),
+            "take_pct": round(self._safe_float(take_pct, 2.0), 3),
+            "cost_pct": round(self._safe_float(cost_pct, 0.435), 3),
         }

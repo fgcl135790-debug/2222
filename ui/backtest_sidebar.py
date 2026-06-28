@@ -76,14 +76,14 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "最低 Score",
                 min_value=50,
                 max_value=95,
-                value=75,
+                value=60,
                 step=5,
                 key="bt_score_threshold",
             )
 
             require_resonance = st.checkbox(
                 "只測多週期共振",
-                value=True,
+                value=False,
                 key="bt_require_resonance",
             )
 
@@ -118,7 +118,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "回測停利 %",
                 min_value=0.3,
                 max_value=5.0,
-                value=1.0,
+                value=2.0,
                 step=0.1,
                 key="bt_default_take_pct",
             )

@@ -182,8 +182,8 @@ class IntradayLabelEngine:
         entry_idx,
         action,
         stop_pct=0.6,
-        take_pct=1.8,
-        max_hold_bars=25,
+        take_pct=2.0,
+        max_hold_bars=50,
         cost_pct=0.435,
     ):
         entry_row = day.iloc[entry_idx]
@@ -295,8 +295,8 @@ class IntradayLabelEngine:
     def build_labels(
         kline_df,
         stop_pct=0.6,
-        take_pct=1.8,
-        max_hold_bars=25,
+        take_pct=2.0,
+        max_hold_bars=50,
         cost_pct=0.435,
         start_minute=15,
         end_minute=250,

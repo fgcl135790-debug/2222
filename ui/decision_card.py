@@ -39,10 +39,14 @@ def render_decision_card(decision):
     score = _safe_int(decision.get("score", 50))
     score = max(0, min(100, score))
 
-    entry = escape(_fmt(decision.get("entry", "-")))
+    entry = escape(_fmt(decision.get("entry", decision.get("entry_price", "-"))))
     stop = escape(_fmt(decision.get("stop_loss", "-")))
     target = escape(_fmt(decision.get("take_profit", "-")))
-    rr = escape(_fmt(decision.get("rr", "-")))
+    rr = escape(_fmt(decision.get("rr", decision.get("risk_reward", "-"))))
+
+    expected_value = decision.get("expected_value", None)
+    predicted_win_rate = decision.get("predicted_win_rate", None)
+    required_win_rate = decision.get("required_win_rate", None)
 
     reasons = decision.get("reasons", [])
 
@@ -428,6 +432,16 @@ def render_decision_card(decision):
                     <div class="v rr">{rr}</div>
                 </div>
 
+                <div class="row">
+                    <div class="k">扣成本期望</div>
+                    <div class="v rr">{escape(_fmt(expected_value))}%</div>
+                </div>
+
+                <div class="row">
+                    <div class="k">預測勝率 / 需求</div>
+                    <div class="v">{escape(_fmt(predicted_win_rate))}% / {escape(_fmt(required_win_rate))}%</div>
+                </div>
+
             </div>
 
             <div class="score-ring">
@@ -482,6 +496,6 @@ def render_decision_card(decision):
 
     components.html(
         html,
-        height=380,
+        height=430,
         scrolling=False,
     )

@@ -3,18 +3,20 @@ from intraday_label_engine import IntradayLabelEngine
 
 class DecisionEngine:
     """
-    決策引擎 V7.5 修正版
+    成本感知決策引擎。
 
-    設計重點：
-    1. 有建立「近 30 日當沖模型」時，優先使用模型判斷。
-    2. 尚未建立模型時，不讓系統整個只剩 WAIT，而是回退到原本 AIPredictor 訊號。
-    3. 回傳格式固定，避免 Header、回測、多週期、勝率統計讀不到欄位。
+    重點：
+    1. 有建立近 30 日當沖模型時，優先使用模型。
+    2. 模型必須預測「扣成本後期望值 > 0」才放行。
+    3. 勝率必須高於該停損 / 停利 / 成本組合的損益兩平勝率。
+    4. 沒有模型時才回退一般 AI，但一般 AI 會更保守。
     """
 
     COST_PCT = 0.435
     DEFAULT_STOP_PCT = 0.6
-    DEFAULT_TAKE_PCT = 1.8
-    DEFAULT_MAX_HOLD_BARS = 25
+    DEFAULT_TAKE_PCT = 2.0
+    DEFAULT_MAX_HOLD_BARS = 50
+    MIN_EXPECTED_VALUE = 0.10
 
     @staticmethod
     def _safe_float(value, default=0.0):
@@ -43,9 +45,11 @@ class DecisionEngine:
             "reason": reason,
             "reasons": [reason],
             "entry_price": price,
+            "entry": price,
             "stop_loss": 0,
             "take_profit": 0,
             "risk_reward": 0,
+            "rr": 0,
             "rebound": 50,
             "multi_period_status": "WAIT",
             "multi_period": {},
@@ -55,6 +59,10 @@ class DecisionEngine:
             "predicted_down_pct": 0,
             "long_rr": 0,
             "short_rr": 0,
+            "risk_level": "HIGH",
+            "expected_value": 0,
+            "predicted_win_rate": 0,
+            "required_win_rate": 0,
         }
 
         if extra:
@@ -64,12 +72,6 @@ class DecisionEngine:
 
     @staticmethod
     def _fallback_from_ai(ai, price, prices, volumes):
-        """
-        沒有建立近 30 日模型時，使用原本 AIPredictor 的 BUY / SELL / WAIT。
-        這是為了避免：
-        - 主畫面尚未建立模型時完全不動
-        - 回測引擎沒有傳入模型時全部 0 筆交易
-        """
         ai = ai or {}
         action = str(ai.get("signal", "WAIT") or "WAIT").upper()
         score = DecisionEngine._safe_int(ai.get("score", 0), 0)
@@ -80,14 +82,14 @@ class DecisionEngine:
             reasons = [reasons]
 
         if not reasons:
-            reasons = ["使用一般 AI 訊號，尚未套用近 30 日當沖模型。"]
+            reasons = ["尚未建立近 30 日當沖模型，使用一般 AI 備援。"]
 
-        if len(prices or []) < 30:
+        if len(prices or []) < 35:
             return DecisionEngine._base_wait(
                 price=price,
                 score=min(score, 35),
                 title="等待盤中資料",
-                reason="至少需要 30 根盤中資料才能做一般 AI 判斷。",
+                reason="至少需要 35 根盤中資料才能判斷。",
             )
 
         if action not in ["BUY", "SELL"]:
@@ -96,33 +98,28 @@ class DecisionEngine:
                 score=score,
                 title="一般 AI 觀望",
                 reason="一般 AI 尚未出現明確多空訊號。",
-                extra={
-                    "reasons": reasons,
-                    "rebound": rebound,
-                },
+                extra={"reasons": reasons, "rebound": rebound},
             )
 
-        # 太低分的舊 AI 訊號先不放行，避免亂槍打鳥。
-        if score < 50:
+        # 沒有模型時，分數要更高才允許，避免尚未成本感知就亂出手。
+        if score < 75:
             return DecisionEngine._base_wait(
                 price=price,
                 score=score,
-                title="AI 分數不足",
-                reason="一般 AI 有方向，但分數低於 50，暫不進場。",
-                extra={
-                    "reasons": reasons,
-                    "rebound": rebound,
-                },
+                title="備援訊號風險偏高",
+                reason="尚未建立成本感知模型，且一般 AI 分數低於 75，暫不出手。",
+                extra={"reasons": reasons, "rebound": rebound},
             )
 
         stop_pct = DecisionEngine.DEFAULT_STOP_PCT
         take_pct = DecisionEngine.DEFAULT_TAKE_PCT
+        risk_reward = take_pct / max(stop_pct, 0.01)
 
         if action == "BUY":
             stop_loss = price * (1 - stop_pct / 100)
             take_profit = price * (1 + take_pct / 100)
             title = "一般 AI 做多"
-            reason = "尚未建立當沖模型，先使用一般 AI 多方訊號。"
+            reason = "尚未建立當沖模型，僅使用高分一般 AI 多方訊號。"
             multi_period_status = "BULL_STRONG"
             predicted_up_pct = take_pct
             predicted_down_pct = 0
@@ -130,12 +127,15 @@ class DecisionEngine:
             stop_loss = price * (1 + stop_pct / 100)
             take_profit = price * (1 - take_pct / 100)
             title = "一般 AI 做空"
-            reason = "尚未建立當沖模型，先使用一般 AI 空方訊號。"
+            reason = "尚未建立當沖模型，僅使用高分一般 AI 空方訊號。"
             multi_period_status = "BEAR_STRONG"
             predicted_up_pct = 0
             predicted_down_pct = take_pct
 
-        risk_reward = take_pct / max(stop_pct, 0.01)
+        reasons = [
+            "備援模式：尚未套用近 30 日相似 K 線模型。",
+            "建議先在左側建立當沖模型，再以成本感知訊號為主。",
+        ] + reasons[:5]
 
         return {
             "action": action,
@@ -144,9 +144,11 @@ class DecisionEngine:
             "reason": reason,
             "reasons": reasons,
             "entry_price": price,
+            "entry": round(price, 2),
             "stop_loss": round(stop_loss, 2),
             "take_profit": round(take_profit, 2),
             "risk_reward": round(risk_reward, 2),
+            "rr": round(risk_reward, 2),
             "rebound": rebound,
             "multi_period_status": multi_period_status,
             "multi_period": {},
@@ -155,69 +157,73 @@ class DecisionEngine:
                 "mode": "fallback_ai",
                 "ai_signal": action,
                 "ai_score": score,
-                "note": "尚未建立近 30 日模型，或回測未傳入模型。",
+                "note": "尚未建立近 30 日模型，風險較高。",
             },
             "predicted_up_pct": predicted_up_pct,
             "predicted_down_pct": predicted_down_pct,
             "long_rr": round(risk_reward, 2),
             "short_rr": round(risk_reward, 2),
+            "risk_level": "MEDIUM",
+            "expected_value": 0,
+            "predicted_win_rate": 0,
+            "required_win_rate": 0,
             "model_label_rows": 0,
         }
 
     @staticmethod
-    def _build_trade_payload(
-        action,
-        price,
-        score,
-        prediction,
-        model_package,
-    ):
+    def _build_trade_payload(action, price, score, prediction, model_package):
         stop_pct = float(model_package.get("stop_pct", DecisionEngine.DEFAULT_STOP_PCT))
         take_pct = float(model_package.get("take_pct", DecisionEngine.DEFAULT_TAKE_PCT))
+        cost_pct = float(model_package.get("cost_pct", DecisionEngine.COST_PCT))
+
+        chosen = prediction.get("chosen", {}) or {}
+        buy = prediction.get("buy", {}) or {}
+        sell = prediction.get("sell", {}) or {}
+
+        expected_value = DecisionEngine._safe_float(chosen.get("expected_value"), 0)
+        predicted_win_rate = DecisionEngine._safe_float(chosen.get("win_rate"), 0)
+        required_win_rate = DecisionEngine._safe_float(prediction.get("required_win_rate"), 0)
+        sample_count = DecisionEngine._safe_int(chosen.get("sample_count"), 0)
+        profit_factor = DecisionEngine._safe_float(chosen.get("profit_factor"), 0)
 
         if action == "BUY":
             stop_loss = price * (1 - stop_pct / 100)
             take_profit = price * (1 + take_pct / 100)
             risk_reward = take_pct / max(stop_pct, 0.01)
-
-            title = "模型預測做多"
+            title = "成本感知模型做多"
             reason = (
-                f"BUY 相似情境勝率 {prediction['buy']['win_rate']}%，"
-                f"期望報酬 {prediction['buy']['expected_value']}%。"
+                f"BUY 相似勝率 {predicted_win_rate:.1f}% ≥ 需求 {required_win_rate:.1f}%，"
+                f"扣成本期望 {expected_value:.3f}%。"
             )
-
             reasons = [
-                prediction["buy"].get("reason", ""),
-                f"SELL 期望報酬 {prediction['sell']['expected_value']}%",
-                f"BUY 樣本數 {prediction['buy']['sample_count']}",
+                buy.get("reason", ""),
+                f"SELL 扣成本期望 {sell.get('expected_value', 0)}%",
+                f"BUY 樣本數 {sample_count}，Profit Factor {profit_factor:.2f}",
+                f"停損 {stop_pct:.1f}%｜停利 {take_pct:.1f}%｜成本約 {cost_pct:.3f}%",
                 f"模型區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}",
             ]
-
-            multi_period_status = "BULL_STRONG"
-            swing_state = "資料模型偏多"
+            multi_period_status = "MODEL_BULL"
+            swing_state = "正期望偏多"
             predicted_up_pct = take_pct
             predicted_down_pct = 0
-
         else:
             stop_loss = price * (1 + stop_pct / 100)
             take_profit = price * (1 - take_pct / 100)
             risk_reward = take_pct / max(stop_pct, 0.01)
-
-            title = "模型預測做空"
+            title = "成本感知模型做空"
             reason = (
-                f"SELL 相似情境勝率 {prediction['sell']['win_rate']}%，"
-                f"期望報酬 {prediction['sell']['expected_value']}%。"
+                f"SELL 相似勝率 {predicted_win_rate:.1f}% ≥ 需求 {required_win_rate:.1f}%，"
+                f"扣成本期望 {expected_value:.3f}%。"
             )
-
             reasons = [
-                prediction["sell"].get("reason", ""),
-                f"BUY 期望報酬 {prediction['buy']['expected_value']}%",
-                f"SELL 樣本數 {prediction['sell']['sample_count']}",
+                sell.get("reason", ""),
+                f"BUY 扣成本期望 {buy.get('expected_value', 0)}%",
+                f"SELL 樣本數 {sample_count}，Profit Factor {profit_factor:.2f}",
+                f"停損 {stop_pct:.1f}%｜停利 {take_pct:.1f}%｜成本約 {cost_pct:.3f}%",
                 f"模型區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}",
             ]
-
-            multi_period_status = "BEAR_STRONG"
-            swing_state = "資料模型偏空"
+            multi_period_status = "MODEL_BEAR"
+            swing_state = "正期望偏空"
             predicted_up_pct = 0
             predicted_down_pct = take_pct
 
@@ -226,11 +232,13 @@ class DecisionEngine:
             "score": int(max(0, min(100, score))),
             "title": title,
             "reason": reason,
-            "reasons": reasons,
+            "reasons": [r for r in reasons if r],
             "entry_price": price,
+            "entry": round(price, 2),
             "stop_loss": round(stop_loss, 2),
             "take_profit": round(take_profit, 2),
             "risk_reward": round(risk_reward, 2),
+            "rr": round(risk_reward, 2),
             "rebound": 55 if action == "BUY" else 45,
             "multi_period_status": multi_period_status,
             "multi_period": {},
@@ -240,6 +248,10 @@ class DecisionEngine:
             "predicted_down_pct": predicted_down_pct,
             "long_rr": round(risk_reward, 2),
             "short_rr": round(risk_reward, 2),
+            "risk_level": prediction.get("risk_level", "NORMAL"),
+            "expected_value": round(expected_value, 3),
+            "predicted_win_rate": round(predicted_win_rate, 2),
+            "required_win_rate": round(required_win_rate, 2),
             "model_start_date": model_package.get("start_date", ""),
             "model_end_date": model_package.get("end_date", ""),
             "model_label_rows": model_package.get("label_rows", 0),
@@ -273,27 +285,14 @@ class DecisionEngine:
 
         prices = prices or []
         volumes = volumes or []
-
         model_package = ai.get("intraday_model_package")
 
-        # 沒有模型時，回退到一般 AI，不再直接 WAIT。
         if not model_package:
-            return DecisionEngine._fallback_from_ai(
-                ai=ai,
-                price=price,
-                prices=prices,
-                volumes=volumes,
-            )
+            return DecisionEngine._fallback_from_ai(ai=ai, price=price, prices=prices, volumes=volumes)
 
         model = model_package.get("model")
-
         if model is None:
-            return DecisionEngine._fallback_from_ai(
-                ai=ai,
-                price=price,
-                prices=prices,
-                volumes=volumes,
-            )
+            return DecisionEngine._fallback_from_ai(ai=ai, price=price, prices=prices, volumes=volumes)
 
         if len(prices) < 35:
             return DecisionEngine._base_wait(
@@ -308,30 +307,30 @@ class DecisionEngine:
                 },
             )
 
-        feature = IntradayLabelEngine.extract_current_features(
-            prices=prices,
-            volumes=volumes,
-        )
-
+        feature = IntradayLabelEngine.extract_current_features(prices=prices, volumes=volumes)
         if feature is None:
-            return DecisionEngine._fallback_from_ai(
-                ai=ai,
-                price=price,
-                prices=prices,
-                volumes=volumes,
-            )
+            return DecisionEngine._fallback_from_ai(ai=ai, price=price, prices=prices, volumes=volumes)
+
+        stop_pct = DecisionEngine._safe_float(model_package.get("stop_pct"), DecisionEngine.DEFAULT_STOP_PCT)
+        take_pct = DecisionEngine._safe_float(model_package.get("take_pct"), DecisionEngine.DEFAULT_TAKE_PCT)
+        cost_pct = DecisionEngine._safe_float(model_package.get("cost_pct"), DecisionEngine.COST_PCT)
 
         prediction = model.predict(
             feature=feature,
-            min_expected_value=0.03,
-            min_win_rate=43.0,
+            min_expected_value=DecisionEngine.MIN_EXPECTED_VALUE,
+            min_win_rate=None,
+            min_sample_count=25,
+            stop_pct=stop_pct,
+            take_pct=take_pct,
+            cost_pct=cost_pct,
+            safety_margin=4.0,
         )
 
         decision = prediction.get("decision", "WAIT")
         score = int(prediction.get("score", 50))
-
-        buy = prediction.get("buy", {})
-        sell = prediction.get("sell", {})
+        buy = prediction.get("buy", {}) or {}
+        sell = prediction.get("sell", {}) or {}
+        chosen = prediction.get("chosen", {}) or {}
 
         if decision == "BUY":
             return DecisionEngine._build_trade_payload(
@@ -352,21 +351,25 @@ class DecisionEngine:
             )
 
         wait_reasons = [
-            f"BUY 勝率 {buy.get('win_rate', 0)}%，期望 {buy.get('expected_value', 0)}%",
-            f"SELL 勝率 {sell.get('win_rate', 0)}%，期望 {sell.get('expected_value', 0)}%",
-            f"BUY 樣本 {buy.get('sample_count', 0)} 筆",
-            f"SELL 樣本 {sell.get('sample_count', 0)} 筆",
-            f"模型區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}",
+            f"BUY 勝率 {buy.get('win_rate', 0)}%，扣成本期望 {buy.get('expected_value', 0)}%",
+            f"SELL 勝率 {sell.get('win_rate', 0)}%，扣成本期望 {sell.get('expected_value', 0)}%",
+            f"需求勝率 {prediction.get('required_win_rate', 0)}%，最低期望 {prediction.get('min_expected_value', 0)}%",
+            f"目前最佳方向 {chosen.get('action', '無')}，但仍不足以覆蓋成本與風險",
+            "判斷：此次交易風險高，不出手。",
         ]
 
         return DecisionEngine._base_wait(
             price=price,
             score=score,
-            title="等待正期望訊號",
-            reason="BUY / SELL 目前期望值尚未明顯為正。",
+            title="成本後不具正期望",
+            reason="模型預測扣除成本後期望值不足，或勝率未高於損益兩平門檻，暫不出手。",
             extra={
                 "reasons": wait_reasons,
                 "swing_prediction": prediction,
+                "risk_level": "HIGH",
+                "expected_value": chosen.get("expected_value", 0),
+                "predicted_win_rate": chosen.get("win_rate", 0),
+                "required_win_rate": prediction.get("required_win_rate", 0),
                 "model_start_date": model_package.get("start_date", ""),
                 "model_end_date": model_package.get("end_date", ""),
                 "model_label_rows": model_package.get("label_rows", 0),

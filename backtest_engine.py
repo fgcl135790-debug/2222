@@ -3,10 +3,17 @@ import requests
 from datetime import datetime
 from collections import defaultdict
 
+import pandas as pd
+
 from market_analyzer import MarketAnalyzer
 from ai_predictor import AIPredictor
 from decision_engine import DecisionEngine
 from multi_period_engine import MultiPeriodEngine
+
+try:
+    from stock_model_cache import StockModelCache
+except Exception:
+    StockModelCache = None
 
 
 class BacktestEngine:
@@ -39,34 +46,21 @@ class BacktestEngine:
     @staticmethod
     def fetch_historical_candles(api_key, symbol, timeframe="1"):
         url = f"{BacktestEngine.BASE_URL}/historical/candles/{symbol}"
-
-        headers = {
-            "X-API-KEY": api_key,
-        }
-
+        headers = {"X-API-KEY": api_key}
         params = {
             "timeframe": str(timeframe),
             "fields": "open,high,low,close,volume",
             "sort": "asc",
         }
 
-        response = requests.get(
-            url,
-            headers=headers,
-            params=params,
-            timeout=25,
-        )
+        response = requests.get(url, headers=headers, params=params, timeout=25)
 
         if response.status_code == 401:
             raise RuntimeError("API KEY 無效或權限不足。")
-
         if response.status_code == 429:
             raise RuntimeError("API 請求過多，請稍後再試。")
-
         if response.status_code >= 400:
-            raise RuntimeError(
-                f"Fugle historical candles error: {response.status_code}"
-            )
+            raise RuntimeError(f"Fugle historical candles error: {response.status_code}")
 
         payload = response.json()
         raw_data = payload.get("data", [])
@@ -75,10 +69,8 @@ class BacktestEngine:
             raise RuntimeError("Fugle 回傳格式異常：data 不是 list。")
 
         candles = []
-
         for item in raw_data:
             dt = BacktestEngine._to_datetime(item.get("date"))
-
             if dt is None:
                 continue
 
@@ -103,47 +95,46 @@ class BacktestEngine:
                 }
             )
 
-        candles = sorted(
-            candles,
-            key=lambda x: x["time"],
-        )
+        return sorted(candles, key=lambda x: x["time"])
 
-        return candles
+    @staticmethod
+    def _candles_to_dataframe(candles):
+        rows = []
+        for c in candles:
+            rows.append(
+                {
+                    "date": c.get("time"),
+                    "open": c.get("open"),
+                    "high": c.get("high"),
+                    "low": c.get("low"),
+                    "close": c.get("close"),
+                    "volume": c.get("volume"),
+                }
+            )
+        return pd.DataFrame(rows)
 
     @staticmethod
     def _group_by_day(candles):
         days = defaultdict(list)
-
         for candle in candles:
             days[candle["date"]].append(candle)
-
         return dict(days)
 
     @staticmethod
     def _select_days(days, day_scope):
         valid_days = []
-
         for day in sorted(days.keys()):
             day_candles = days[day]
-
-            # 太少 K 線通常不是完整交易日，先跳過
             if len(day_candles) >= 60:
-                valid_days.append(
-                    {
-                        "date": day,
-                        "candles": day_candles,
-                    }
-                )
+                valid_days.append({"date": day, "candles": day_candles})
 
         if not valid_days:
             return []
 
         if day_scope == "last_open_day":
             return [valid_days[-1]]
-
         if day_scope == "recent_5_days":
             return valid_days[-5:]
-
         return valid_days
 
     @staticmethod
@@ -152,19 +143,15 @@ class BacktestEngine:
         volumes = []
         vwaps = []
         times = []
-
         cum_amount = 0.0
         cum_volume = 0.0
 
         for c in candles:
             price = BacktestEngine._safe_float(c.get("close"))
             volume = BacktestEngine._safe_float(c.get("volume"))
-
             cum_amount += price * volume
             cum_volume += volume
-
             vwap = cum_amount / max(cum_volume, 1)
-
             prices.append(price)
             volumes.append(volume)
             vwaps.append(vwap)
@@ -173,7 +160,7 @@ class BacktestEngine:
         return prices, volumes, vwaps, times
 
     @staticmethod
-    def _make_decision(candles):
+    def _make_decision(candles, model_package=None):
         prices, volumes, vwaps, times = BacktestEngine._build_series(candles)
 
         if len(prices) < 30:
@@ -185,12 +172,9 @@ class BacktestEngine:
         ema5 = MarketAnalyzer.calculate_ema(prices, 5)
         ema20 = MarketAnalyzer.calculate_ema(prices, 20)
         ema60 = MarketAnalyzer.calculate_ema(prices, 60)
-
         rsi = MarketAnalyzer.calculate_rsi(prices)
         macd, macd_signal, _ = MarketAnalyzer.calculate_macd(prices)
         momentum = MarketAnalyzer.momentum(prices)
-
-        # 歷史 K 沒有五檔，回測先用中性值
         bid_ratio = 1.0
 
         ai = AIPredictor.predict_trade(
@@ -206,6 +190,9 @@ class BacktestEngine:
             bid_ratio=bid_ratio,
             vwap=vwap,
         )
+
+        if model_package is not None:
+            ai["intraday_model_package"] = model_package
 
         decision = DecisionEngine.generate(
             ai=ai,
@@ -229,10 +216,21 @@ class BacktestEngine:
             time_values=times,
         )
 
-        decision = MultiPeriodEngine.apply_to_decision(
-            decision=decision,
-            multi_period=multi_period,
+        # 成本感知模型的正期望訊號，不再被多週期共振直接改成 WAIT。
+        # 多週期只作為參考欄位保留。
+        model_signal_active = (
+            decision.get("action") in ["BUY", "SELL"]
+            and decision.get("model_label_rows", 0)
         )
+
+        if model_signal_active:
+            decision["multi_period"] = multi_period
+            decision["multi_period_reference_status"] = multi_period.get("status", "")
+            reasons = list(decision.get("reasons", []))
+            reasons.insert(0, f"多週期參考：{multi_period.get('status', '未知')}｜模型以扣成本期望為主")
+            decision["reasons"] = reasons[:8]
+        else:
+            decision = MultiPeriodEngine.apply_to_decision(decision=decision, multi_period=multi_period)
 
         return decision
 
@@ -243,55 +241,33 @@ class BacktestEngine:
         entry_index,
         day_candles,
         decision,
-        max_hold_bars=45,
-        default_stop_pct=0.8,
-        default_take_pct=1.7,
+        max_hold_bars=50,
+        default_stop_pct=0.6,
+        default_take_pct=2.0,
         commission_rate_pct=0.1425,
         commission_discount=1.0,
         tax_rate_pct=0.15,
     ):
-        default_stop_pct = BacktestEngine._safe_float(default_stop_pct, 0.8)
-        default_take_pct = BacktestEngine._safe_float(default_take_pct, 1.7)
-
-        commission_rate_pct = BacktestEngine._safe_float(
-            commission_rate_pct,
-            0.1425,
-        )
-
-        commission_discount = BacktestEngine._safe_float(
-            commission_discount,
-            1.0,
-        )
-
-        tax_rate_pct = BacktestEngine._safe_float(
-            tax_rate_pct,
-            0.15,
-        )
-
+        default_stop_pct = BacktestEngine._safe_float(default_stop_pct, 0.6)
+        default_take_pct = BacktestEngine._safe_float(default_take_pct, 2.0)
+        commission_rate_pct = BacktestEngine._safe_float(commission_rate_pct, 0.1425)
+        commission_discount = BacktestEngine._safe_float(commission_discount, 1.0)
+        tax_rate_pct = BacktestEngine._safe_float(tax_rate_pct, 0.15)
         effective_commission_pct = commission_rate_pct * commission_discount
 
         stop_rate = default_stop_pct / 100
         take_rate = default_take_pct / 100
 
-        # =========================
-        # 停損 / 停利只用股價計算
-        # 不包含手續費與證交稅
-        # =========================
-
         if action == "BUY":
             stop_loss = entry_price * (1 - stop_rate)
             take_profit = entry_price * (1 + take_rate)
-
             stop_loss_pct = default_stop_pct
             take_profit_pct = default_take_pct
-
         elif action == "SELL":
             stop_loss = entry_price * (1 + stop_rate)
             take_profit = entry_price * (1 - take_rate)
-
             stop_loss_pct = default_stop_pct
             take_profit_pct = default_take_pct
-
         else:
             stop_loss = entry_price
             take_profit = entry_price
@@ -300,16 +276,8 @@ class BacktestEngine:
 
         exit_price = entry_price
         exit_reason = "時間出場"
-
-        exit_index = min(
-            len(day_candles) - 1,
-            entry_index + max_hold_bars,
-        )
-
-        end_index = min(
-            len(day_candles) - 1,
-            entry_index + max_hold_bars,
-        )
+        exit_index = min(len(day_candles) - 1, entry_index + max_hold_bars)
+        end_index = min(len(day_candles) - 1, entry_index + max_hold_bars)
 
         for i in range(entry_index + 1, end_index + 1):
             c = day_candles[i]
@@ -323,117 +291,17 @@ class BacktestEngine:
                     exit_reason = "停損"
                     exit_index = i
                     break
-
                 if high >= take_profit:
                     exit_price = take_profit
                     exit_reason = "停利"
                     exit_index = i
                     break
-
             elif action == "SELL":
                 if high >= stop_loss:
                     exit_price = stop_loss
                     exit_reason = "停損"
                     exit_index = i
                     break
-
-                if low <= take_profit:
-                    exit_price = take_profit
-                    exit_reason = "停利"
-                    exit_index = i
-                    break
-
-            exit_price = close
-            exit_index = i
-
-        # =========================
-        # 報酬計算
-        # gross_pnl_pct：只看股價
-        # cost_pct：交易成本
-        # pnl_pct：扣完成本後
-        # =========================
-
-        if action == "BUY":
-            gross_pnl_pct = (exit_price - entry_price) / entry_price * 100
-
-            buy_commission_pct = effective_commission_pct
-            sell_commission_pct = effective_commission_pct * (exit_price / entry_price)
-            sell_tax_pct = tax_rate_pct * (exit_price / entry_price)
-
-            cost_pct = (
-                buy_commission_pct
-                + sell_commission_pct
-                + sell_tax_pct
-            )
-
-        else:
-            gross_pnl_pct = (entry_price - exit_price) / entry_price * 100
-
-            sell_commission_pct = effective_commission_pct
-            sell_tax_pct = tax_rate_pct
-            buyback_commission_pct = effective_commission_pct * (exit_price / entry_price)
-
-            cost_pct = (
-                sell_commission_pct
-                + sell_tax_pct
-                + buyback_commission_pct
-            )
-
-        net_pnl_pct = gross_pnl_pct - cost_pct
-
-        result = "WIN" if net_pnl_pct > 0 else "LOSS"
-
-        if abs(net_pnl_pct) < 0.03:
-            result = "FLAT"
-
-        hold_bars = max(0, exit_index - entry_index)
-
-        return {
-            "exit_price": exit_price,
-            "exit_reason": exit_reason,
-            "exit_index": exit_index,
-            "gross_pnl_pct": gross_pnl_pct,
-            "cost_pct": cost_pct,
-            "pnl_pct": net_pnl_pct,
-            "result": result,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-            "stop_loss_pct": stop_loss_pct,
-            "take_profit_pct": take_profit_pct,
-            "commission_rate_pct": commission_rate_pct,
-            "commission_discount": commission_discount,
-            "effective_commission_pct": effective_commission_pct,
-            "tax_rate_pct": tax_rate_pct,
-            "hold_bars": hold_bars,
-            "max_hold_bars": max_hold_bars,
-        }
-
-        for i in range(entry_index + 1, end_index + 1):
-            c = day_candles[i]
-            high = BacktestEngine._safe_float(c.get("high"))
-            low = BacktestEngine._safe_float(c.get("low"))
-            close = BacktestEngine._safe_float(c.get("close"))
-
-            if action == "BUY":
-                if low <= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "停損"
-                    exit_index = i
-                    break
-
-                if high >= take_profit:
-                    exit_price = take_profit
-                    exit_reason = "停利"
-                    exit_index = i
-                    break
-
-            elif action == "SELL":
-                if high >= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "停損"
-                    exit_index = i
-                    break
-
                 if low <= take_profit:
                     exit_price = take_profit
                     exit_reason = "停利"
@@ -445,26 +313,19 @@ class BacktestEngine:
 
         if action == "BUY":
             gross_pnl_pct = (exit_price - entry_price) / entry_price * 100
-
             buy_commission_pct = effective_commission_pct
             sell_commission_pct = effective_commission_pct * (exit_price / entry_price)
             sell_tax_pct = tax_rate_pct * (exit_price / entry_price)
-
             cost_pct = buy_commission_pct + sell_commission_pct + sell_tax_pct
-
         else:
             gross_pnl_pct = (entry_price - exit_price) / entry_price * 100
-
             sell_commission_pct = effective_commission_pct
             sell_tax_pct = tax_rate_pct
             buyback_commission_pct = effective_commission_pct * (exit_price / entry_price)
-
             cost_pct = sell_commission_pct + sell_tax_pct + buyback_commission_pct
 
         net_pnl_pct = gross_pnl_pct - cost_pct
-
         result = "WIN" if net_pnl_pct > 0 else "LOSS"
-
         if abs(net_pnl_pct) < 0.03:
             result = "FLAT"
 
@@ -488,155 +349,23 @@ class BacktestEngine:
             "tax_rate_pct": tax_rate_pct,
             "hold_bars": hold_bars,
             "max_hold_bars": max_hold_bars,
-        }
-
-        for i in range(entry_index + 1, end_index + 1):
-            c = day_candles[i]
-            high = BacktestEngine._safe_float(c.get("high"))
-            low = BacktestEngine._safe_float(c.get("low"))
-            close = BacktestEngine._safe_float(c.get("close"))
-
-            if action == "BUY":
-                # 同一根同時碰停損停利時，保守視為先停損
-                if low <= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "停損"
-                    exit_index = i
-                    break
-
-                if high >= take_profit:
-                    exit_price = take_profit
-                    exit_reason = "停利"
-                    exit_index = i
-                    break
-
-            elif action == "SELL":
-                if high >= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "停損"
-                    exit_index = i
-                    break
-
-                if low <= take_profit:
-                    exit_price = take_profit
-                    exit_reason = "停利"
-                    exit_index = i
-                    break
-
-            exit_price = close
-            exit_index = i
-
-        if action == "BUY":
-            pnl_pct = (exit_price - entry_price) / entry_price * 100
-        else:
-            pnl_pct = (entry_price - exit_price) / entry_price * 100
-
-        result = "WIN" if pnl_pct > 0 else "LOSS"
-
-        if abs(pnl_pct) < 0.03:
-            result = "FLAT"
-
-        hold_bars = max(0, exit_index - entry_index)
-
-        return {
-            "exit_price": exit_price,
-            "exit_reason": exit_reason,
-            "exit_index": exit_index,
-            "pnl_pct": pnl_pct,
-            "result": result,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-            "stop_loss_pct": stop_loss_pct,
-            "take_profit_pct": take_profit_pct,
-            "hold_bars": hold_bars,
-            "max_hold_bars": max_hold_bars,
-        }
-
-        end_index = min(
-            len(day_candles) - 1,
-            entry_index + max_hold_bars,
-        )
-
-        for i in range(entry_index + 1, end_index + 1):
-            c = day_candles[i]
-            high = BacktestEngine._safe_float(c.get("high"))
-            low = BacktestEngine._safe_float(c.get("low"))
-            close = BacktestEngine._safe_float(c.get("close"))
-
-            if action == "BUY":
-                # 同一根同時碰停損停利時，保守視為先停損
-                if low <= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "停損"
-                    exit_index = i
-                    break
-
-                if high >= take_profit:
-                    exit_price = take_profit
-                    exit_reason = "停利"
-                    exit_index = i
-                    break
-
-            elif action == "SELL":
-                if high >= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "停損"
-                    exit_index = i
-                    break
-
-                if low <= take_profit:
-                    exit_price = take_profit
-                    exit_reason = "停利"
-                    exit_index = i
-                    break
-
-            exit_price = close
-            exit_index = i
-
-        if action == "BUY":
-            pnl_pct = (exit_price - entry_price) / entry_price * 100
-        else:
-            pnl_pct = (entry_price - exit_price) / entry_price * 100
-
-        result = "WIN" if pnl_pct > 0 else "LOSS"
-
-        if abs(pnl_pct) < 0.03:
-            result = "FLAT"
-
-        return {
-            "exit_price": exit_price,
-            "exit_reason": exit_reason,
-            "exit_index": exit_index,
-            "pnl_pct": pnl_pct,
-            "result": result,
         }
 
     @staticmethod
     def _summarize(trades):
         total = len(trades)
-
         wins = len([t for t in trades if t["result"] == "WIN"])
         losses = len([t for t in trades if t["result"] == "LOSS"])
         flats = len([t for t in trades if t["result"] == "FLAT"])
-
         win_rate = wins / total * 100 if total else 0
 
         total_pnl = sum(t["pnl_pct"] for t in trades)
         avg_pnl = total_pnl / total if total else 0
+        gross_total_pnl = sum(t.get("gross_pnl_pct", t.get("pnl_pct", 0)) for t in trades)
+        total_cost_pct = sum(t.get("cost_pct", 0) for t in trades)
 
-        gross_profit = sum(
-            t["pnl_pct"]
-            for t in trades
-            if t["pnl_pct"] > 0
-        )
-
-        gross_loss = abs(
-            sum(
-                t["pnl_pct"]
-                for t in trades
-                if t["pnl_pct"] < 0
-            )
-        )
+        gross_profit = sum(t["pnl_pct"] for t in trades if t["pnl_pct"] > 0)
+        gross_loss = abs(sum(t["pnl_pct"] for t in trades if t["pnl_pct"] < 0))
 
         if gross_loss > 0:
             profit_factor = gross_profit / gross_loss
@@ -648,7 +377,6 @@ class BacktestEngine:
         equity = 0
         peak = 0
         max_drawdown = 0
-
         max_consecutive_loss = 0
         current_loss_streak = 0
 
@@ -660,30 +388,19 @@ class BacktestEngine:
 
             if t["result"] == "LOSS":
                 current_loss_streak += 1
-                max_consecutive_loss = max(
-                    max_consecutive_loss,
-                    current_loss_streak,
-                )
+                max_consecutive_loss = max(max_consecutive_loss, current_loss_streak)
             else:
                 current_loss_streak = 0
 
         buy_trades = [t for t in trades if t["action"] == "BUY"]
         sell_trades = [t for t in trades if t["action"] == "SELL"]
-
         buy_wins = len([t for t in buy_trades if t["result"] == "WIN"])
         sell_wins = len([t for t in sell_trades if t["result"] == "WIN"])
+        buy_win_rate = buy_wins / len(buy_trades) * 100 if buy_trades else 0
+        sell_win_rate = sell_wins / len(sell_trades) * 100 if sell_trades else 0
 
-        buy_win_rate = (
-            buy_wins / len(buy_trades) * 100
-            if buy_trades
-            else 0
-        )
-
-        sell_win_rate = (
-            sell_wins / len(sell_trades) * 100
-            if sell_trades
-            else 0
-        )
+        predicted_ev_values = [t.get("predicted_expected_value") for t in trades if t.get("predicted_expected_value") is not None]
+        avg_predicted_ev = sum(predicted_ev_values) / len(predicted_ev_values) if predicted_ev_values else 0
 
         return {
             "total": total,
@@ -697,24 +414,37 @@ class BacktestEngine:
             "sell_win_rate": sell_win_rate,
             "total_pnl": total_pnl,
             "avg_pnl": avg_pnl,
+            "gross_total_pnl": gross_total_pnl,
+            "total_cost_pct": total_cost_pct,
+            "net_total_pnl": total_pnl,
             "profit_factor": profit_factor,
             "max_drawdown": max_drawdown,
             "max_consecutive_loss": max_consecutive_loss,
+            "avg_predicted_ev": avg_predicted_ev,
         }
+
+    @staticmethod
+    def _get_prediction_value(decision, path, default=None):
+        cur = decision
+        for key in path:
+            if not isinstance(cur, dict) or key not in cur:
+                return default
+            cur = cur[key]
+        return cur
 
     @staticmethod
     def run(
         api_key,
         symbol,
         timeframe="1",
-        score_threshold=75,
-        require_resonance=True,
+        score_threshold=60,
+        require_resonance=False,
         avoid_open_minutes=15,
         cooldown_bars=5,
-        max_hold_bars=45,
+        max_hold_bars=50,
         day_scope="last_open_day",
         default_stop_pct=0.6,
-        default_take_pct=1.0,
+        default_take_pct=2.0,
         commission_rate_pct=0.1425,
         commission_discount=1.0,
         tax_rate_pct=0.15,
@@ -726,18 +456,10 @@ class BacktestEngine:
         )
 
         if not candles:
-            return {
-                "ok": False,
-                "message": "沒有取得歷史 K 線資料。",
-                "summary": {},
-                "trades": [],
-            }
+            return {"ok": False, "message": "沒有取得歷史 K 線資料。", "summary": {}, "trades": []}
 
         days = BacktestEngine._group_by_day(candles)
-        selected_days = BacktestEngine._select_days(
-            days=days,
-            day_scope=day_scope,
-        )
+        selected_days = BacktestEngine._select_days(days=days, day_scope=day_scope)
 
         if not selected_days:
             return {
@@ -749,6 +471,31 @@ class BacktestEngine:
                 "days": len(days),
             }
 
+        effective_commission_pct = commission_rate_pct * commission_discount
+        estimated_cost_pct = effective_commission_pct + effective_commission_pct + tax_rate_pct
+
+        model_package = None
+        model_message = "未建立模型，使用一般 AI 備援。"
+
+        if StockModelCache is not None:
+            try:
+                model_package = StockModelCache.build_model_package(
+                    kline_df=BacktestEngine._candles_to_dataframe(candles),
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    stop_pct=default_stop_pct,
+                    take_pct=default_take_pct,
+                    max_hold_bars=max_hold_bars,
+                    cost_pct=estimated_cost_pct,
+                )
+                model_message = (
+                    f"已建立成本感知模型：標籤 {model_package.get('label_rows', 0)} 筆，"
+                    f"區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}。"
+                )
+            except Exception as e:
+                model_package = None
+                model_message = f"模型建立失敗，改用一般 AI 備援：{type(e).__name__}"
+
         trades = []
 
         try:
@@ -756,23 +503,19 @@ class BacktestEngine:
         except Exception:
             timeframe_int = 1
 
-        avoid_bars = max(
-            0,
-            math.ceil(avoid_open_minutes / timeframe_int),
-        )
+        avoid_bars = max(0, math.ceil(avoid_open_minutes / timeframe_int))
 
         for day_item in selected_days:
             day = day_item["date"]
             day_candles = day_item["candles"]
-
             if len(day_candles) < 60:
                 continue
 
-            i = max(30, avoid_bars)
+            i = max(35, avoid_bars)
 
             while i < len(day_candles) - 2:
                 current_candles = day_candles[: i + 1]
-                decision = BacktestEngine._make_decision(current_candles)
+                decision = BacktestEngine._make_decision(current_candles, model_package=model_package)
 
                 if not decision:
                     i += 1
@@ -792,23 +535,21 @@ class BacktestEngine:
                     i += 1
                     continue
 
+                # 成本感知模型已經用 EV / 勝率濾掉風險，預設不再要求多週期共振。
                 if require_resonance:
                     if action == "BUY" and resonance not in ["BULL", "BULL_STRONG"]:
                         i += 1
                         continue
-
                     if action == "SELL" and resonance not in ["BEAR", "BEAR_STRONG"]:
                         i += 1
                         continue
 
                 entry_index = i + 1
-
                 if entry_index >= len(day_candles):
                     break
 
                 entry_candle = day_candles[entry_index]
                 entry_price = BacktestEngine._safe_float(entry_candle["open"])
-
                 if entry_price <= 0:
                     entry_price = BacktestEngine._safe_float(entry_candle["close"])
 
@@ -825,9 +566,13 @@ class BacktestEngine:
                     commission_discount=commission_discount,
                     tax_rate_pct=tax_rate_pct,
                 )
-                
+
                 exit_index = exit_data["exit_index"]
                 exit_candle = day_candles[exit_index]
+                swing_prediction = decision.get("swing_prediction", {}) or {}
+                chosen = swing_prediction.get("chosen", {}) or {}
+                buy_pred = swing_prediction.get("buy", {}) or {}
+                sell_pred = swing_prediction.get("sell", {}) or {}
 
                 trades.append(
                     {
@@ -854,6 +599,13 @@ class BacktestEngine:
                         "commission_discount": round(exit_data["commission_discount"], 2),
                         "effective_commission_pct": round(exit_data["effective_commission_pct"], 4),
                         "tax_rate_pct": round(exit_data["tax_rate_pct"], 3),
+                        "predicted_expected_value": chosen.get("expected_value"),
+                        "predicted_win_rate": chosen.get("win_rate"),
+                        "required_win_rate": swing_prediction.get("required_win_rate"),
+                        "predicted_sample_count": chosen.get("sample_count"),
+                        "buy_expected_value": buy_pred.get("expected_value"),
+                        "sell_expected_value": sell_pred.get("expected_value"),
+                        "risk_level": decision.get("risk_level"),
                         "result": exit_data["result"],
                     }
                 )
@@ -862,11 +614,10 @@ class BacktestEngine:
 
         summary = BacktestEngine._summarize(trades)
         selected_day_names = [d["date"] for d in selected_days]
-
-        message = "回測完成"
+        message = "回測完成｜" + model_message
 
         if not trades:
-            message = "回測完成，但沒有符合條件的交易。可以降低 Score 或取消多週期共振。"
+            message = "回測完成，但沒有符合正期望條件的交易。模型判斷扣成本後風險偏高。｜" + model_message
 
         return {
             "ok": True,
@@ -877,6 +628,8 @@ class BacktestEngine:
             "all_days": len(days),
             "days": len(selected_days),
             "selected_days": selected_day_names,
+            "model_message": model_message,
+            "model_label_rows": model_package.get("label_rows", 0) if model_package else 0,
             "summary": summary,
             "trades": trades,
         }

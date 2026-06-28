@@ -47,7 +47,7 @@ class WinRateEngine:
         entry_price,
         decision,
         default_stop_pct=0.6,
-        default_take_pct=1.0,
+        default_take_pct=2.0,
     ):
         stop_loss = WinRateEngine._safe_float(
             decision.get("stop_loss"),
@@ -60,7 +60,7 @@ class WinRateEngine:
         )
 
         default_stop_pct = WinRateEngine._safe_float(default_stop_pct, 0.6)
-        default_take_pct = WinRateEngine._safe_float(default_take_pct, 1.0)
+        default_take_pct = WinRateEngine._safe_float(default_take_pct, 2.0)
 
         stop_rate = default_stop_pct / 100
         take_rate = default_take_pct / 100
@@ -103,7 +103,7 @@ class WinRateEngine:
         min_score=75,
         max_hold_bars=50,
         default_stop_pct=0.6,
-        default_take_pct=1.0,
+        default_take_pct=2.0,
     ):
         action = decision.get("action", "WAIT")
         score = WinRateEngine._safe_int(decision.get("score", 0))

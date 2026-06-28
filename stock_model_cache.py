@@ -83,8 +83,8 @@ class StockModelCache:
         symbol,
         timeframe="1",
         stop_pct=0.6,
-        take_pct=1.8,
-        max_hold_bars=25,
+        take_pct=2.0,
+        max_hold_bars=50,
         cost_pct=0.435,
     ):
         enriched_df, labels_df = IntradayLabelEngine.build_labels(
@@ -149,8 +149,8 @@ class StockModelCache:
         symbol,
         timeframe="1",
         stop_pct=0.6,
-        take_pct=1.8,
-        max_hold_bars=25,
+        take_pct=2.0,
+        max_hold_bars=50,
         cost_pct=0.435,
         force_rebuild=False,
     ):

@@ -254,8 +254,8 @@ def _render_intraday_model_sidebar(api_key, stock_code, data_source):
                         symbol=stock_code,
                         timeframe="1",
                         stop_pct=0.6,
-                        take_pct=1.8,
-                        max_hold_bars=25,
+                        take_pct=2.0,
+                        max_hold_bars=50,
                         cost_pct=0.435,
                         force_rebuild=True,
                     )
@@ -568,10 +568,24 @@ def main():
         time_values=times,
     )
 
-    decision = MultiPeriodEngine.apply_to_decision(
-        decision=decision,
-        multi_period=multi_period,
+    # 成本感知模型訊號以「扣成本後正期望」為主，
+    # 多週期只當參考，不再直接把正期望模型訊號改成 WAIT。
+    model_signal_active = (
+        decision.get("action") in ["BUY", "SELL"]
+        and decision.get("model_label_rows", 0)
     )
+
+    if model_signal_active:
+        decision["multi_period"] = multi_period
+        decision["multi_period_reference_status"] = multi_period.get("status", "")
+        reasons = list(decision.get("reasons", []))
+        reasons.insert(0, f"多週期參考：{multi_period.get('status', '未知')}｜模型仍以扣成本期望為主")
+        decision["reasons"] = reasons[:8]
+    else:
+        decision = MultiPeriodEngine.apply_to_decision(
+            decision=decision,
+            multi_period=multi_period,
+        )
 
     # =========================
     # Header 同步最終決策結果
