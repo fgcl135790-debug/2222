@@ -134,7 +134,12 @@ try:
     from alert_engine import AlertEngine
     from market_flow_engine import MarketFlowEngine
     from win_rate_engine import WinRateEngine
-    from stock_model_cache import StockModelCache
+
+    # 當沖模型是加值功能：缺檔時不讓主畫面整個掛掉
+    try:
+        from stock_model_cache import StockModelCache
+    except Exception:
+        StockModelCache = None
 
     from ui.header import render_header
     from ui.chart_panel import render_chart
@@ -167,6 +172,102 @@ def _safe_float(value, default=0.0):
         return float(value)
     except Exception:
         return default
+
+
+def _resolve_api_key(api_key):
+    """
+    統一從 sidebar 回傳值與 session_state 讀取 Fugle API Key。
+    這可以避免畫面上有密碼點點，但主程式拿到空值的問題。
+    """
+    return (
+        api_key
+        or st.session_state.get("runtime_fugle_api_key")
+        or st.session_state.get("fugle_api_key")
+        or ""
+    ).strip()
+
+
+def _get_loaded_model_package(stock_code):
+    """
+    只讀取已建立的模型，不自動抓 30 天 K 線。
+    避免 Streamlit 每次刷新時卡住主畫面。
+    """
+    package = st.session_state.get("current_intraday_model_package")
+
+    if not package:
+        return None
+
+    if str(package.get("symbol", "")) != str(stock_code):
+        return None
+
+    return package
+
+
+def _render_intraday_model_sidebar(api_key, stock_code, data_source):
+    """
+    當沖模型改成手動建立。
+    主畫面行情先能穩定運作，使用者需要模型時再按鈕建立。
+    """
+    with st.sidebar.expander("🧠 當沖模型", expanded=False):
+        if StockModelCache is None:
+            st.warning("stock_model_cache.py 尚未載入，暫時無法建立模型。")
+            return
+
+        if data_source != "真實盤":
+            st.info("當沖模型只在真實盤使用。")
+            return
+
+        if not api_key:
+            st.warning("請先輸入 Fugle API KEY。")
+            return
+
+        package = _get_loaded_model_package(stock_code)
+
+        if package:
+            st.success("模型已建立")
+            st.caption(f"股票：{package.get('symbol')}")
+            st.caption(
+                f"區間：{package.get('start_date')} ~ "
+                f"{package.get('end_date')}"
+            )
+            st.caption(f"交易日：{package.get('trading_days')}")
+            st.caption(f"K線：{package.get('kline_rows')} 根")
+            st.caption(f"候選標籤：{package.get('label_rows')} 筆")
+            st.caption(f"BUY 全樣本勝率：{package.get('buy_win_rate_all')}%")
+            st.caption(f"SELL 全樣本勝率：{package.get('sell_win_rate_all')}%")
+        else:
+            st.info("尚未建立目前股票模型。主畫面會先用一般 AI 監控。")
+
+        build_clicked = st.button(
+            "建立 / 重建目前股票模型",
+            use_container_width=True,
+            key="build_intraday_model",
+        )
+
+        if build_clicked:
+            try:
+                with st.spinner("正在抓取近 30 日 K 線並建立模型..."):
+                    StockModelCache.clear_symbol(st, stock_code)
+                    package = StockModelCache.get_or_build(
+                        st=st,
+                        api_key=api_key,
+                        symbol=stock_code,
+                        timeframe="1",
+                        stop_pct=0.6,
+                        take_pct=1.8,
+                        max_hold_bars=25,
+                        cost_pct=0.435,
+                        force_rebuild=True,
+                    )
+
+                    st.session_state.current_intraday_model_package = package
+
+                st.success("模型建立完成")
+                st.rerun()
+
+            except Exception as e:
+                st.error("模型建立失敗")
+                st.exception(e)
 
 
 def reset_state():
@@ -210,12 +311,7 @@ def main():
         refresh_sec,
     ) = render_sidebar(reset_state)
 
-    api_key = (
-        api_key
-        or st.session_state.get("runtime_fugle_api_key")
-        or st.session_state.get("fugle_api_key")
-        or ""
-    ).strip()
+    api_key = _resolve_api_key(api_key)
 
     st.sidebar.caption(
         f"主程式 API KEY：已讀取，長度 {len(api_key)}"
@@ -235,52 +331,11 @@ def main():
         stock_code=stock_code,
     )
 
-    # with st.sidebar.expander("🧠 當沖模型", expanded=False):
-    #     model_package = None
-    
-    #     try:
-    #         if data_source == "真實盤" and api_key and stock_code:
-    #             model_package = StockModelCache.get_or_build(
-    #                 st=st,
-    #                 api_key=api_key,
-    #                 symbol=stock_code,
-    #                 timeframe="1",
-    #                 stop_pct=0.6,
-    #                 take_pct=1.8,
-    #                 max_hold_bars=25,
-    #                 cost_pct=0.435,
-    #                 force_rebuild=False,
-    #             )
-    
-    #         if model_package:
-    #             st.success("模型已建立")
-    #             st.caption(f"股票：{model_package.get('symbol')}")
-    #             st.caption(
-    #                 f"區間：{model_package.get('start_date')} ~ "
-    #                 f"{model_package.get('end_date')}"
-    #             )
-    #             st.caption(f"交易日：{model_package.get('trading_days')}")
-    #             st.caption(f"K線：{model_package.get('kline_rows')} 根")
-    #             st.caption(f"候選標籤：{model_package.get('label_rows')} 筆")
-    #             st.caption(f"BUY 全樣本勝率：{model_package.get('buy_win_rate_all')}%")
-    #             st.caption(f"SELL 全樣本勝率：{model_package.get('sell_win_rate_all')}%")
-    
-    #             rebuild_clicked = st.button(
-    #                 "重建目前股票模型",
-    #                 use_container_width=True,
-    #                 key="rebuild_intraday_model",
-    #             )
-    
-    #             if rebuild_clicked:
-    #                 StockModelCache.clear_symbol(st, stock_code)
-    #                 st.rerun()
-    
-    #         else:
-    #             st.info("真實盤輸入 API KEY 後會自動建立模型。")
-    
-    #     except Exception as e:
-    #         st.error("模型建立失敗")
-    #         st.exception(e)
+    _render_intraday_model_sidebar(
+        api_key=api_key,
+        stock_code=stock_code,
+        data_source=data_source,
+    )
 
     # =========================
     # 切換股票 / 資料來源 / 模擬模式時清空
@@ -303,7 +358,7 @@ def main():
             st.session_state.sim_run_id = random.randint(100000, 999999)
 
         WinRateEngine.reset(st)
-            
+
     # =========================
     # Auto Refresh
     # =========================
@@ -320,28 +375,16 @@ def main():
         st.info("圖表全屏檢視中，自動刷新已暫停。按圖表工具列的「返回」恢復。")
     elif backtest_running:
         st.info("回測執行中，自動刷新已暫停。")
-        
+
     # =========================
     # 取得資料
     # =========================
 
-    api_key_runtime = (
-        api_key
-        or st.session_state.get("fugle_api_key")
-        or ""
-    ).strip()
+    api_key = _resolve_api_key(api_key)
 
-    st.sidebar.caption(
-        f"主程式 API KEY：已讀取，長度 {len(api_key_runtime)}"
-        if api_key_runtime
-        else "主程式 API KEY：未讀取"
-    )
-
-    if data_source == "真實盤" and not api_key_runtime:
+    if data_source == "真實盤" and not api_key:
         st.warning("請輸入 API KEY，或先切換到模擬盤測試 UI。")
         st.stop()
-
-    api_key = api_key_runtime
 
     try:
         with st.spinner("取得行情資料中..."):
@@ -483,34 +526,17 @@ def main():
         vwap=vwap,
     )
 
-
     signal = ai.get("signal", "WAIT")
     score = ai.get("score", 0)
     risk = ai.get("risk", "監控中")
     state = ai.get("market_state", "資料累積中")
     rebound = ai.get("rebound_prob", 0)
 
-    intraday_model_package = None
+    # 當沖模型只使用「已手動建立」的模型，不在每次刷新時自動抓 30 日 K 線。
+    intraday_model_package = _get_loaded_model_package(stock_code)
 
-    if data_source == "真實盤" and api_key and stock_code:
-        try:
-            intraday_model_package = StockModelCache.get_or_build(
-                st=st,
-                api_key=api_key,
-                symbol=stock_code,
-                timeframe="1",
-                stop_pct=0.6,
-                take_pct=1.8,
-                max_hold_bars=25,
-                cost_pct=0.435,
-                force_rebuild=False,
-            )
-
-            ai["intraday_model_package"] = intraday_model_package
-
-        except Exception as e:
-            ai["intraday_model_package"] = None
-            st.sidebar.warning(f"股票模型建立失敗：{e}")    
+    if intraday_model_package is not None:
+        ai["intraday_model_package"] = intraday_model_package
 
     # =========================
     # Decision Engine
@@ -593,7 +619,7 @@ def main():
         decision=decision,
         price=price,
     )
-    
+
     WinRateEngine.update_live(
         st=st,
         stock_code=stock_code,
