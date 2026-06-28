@@ -82,8 +82,8 @@ class StockModelCache:
         kline_df,
         symbol,
         timeframe="1",
-        stop_pct=0.6,
-        take_pct=2.0,
+        stop_pct=0.7,
+        take_pct=1.8,
         max_hold_bars=50,
         cost_pct=0.435,
     ):
@@ -148,8 +148,8 @@ class StockModelCache:
         api_key,
         symbol,
         timeframe="1",
-        stop_pct=0.6,
-        take_pct=2.0,
+        stop_pct=0.7,
+        take_pct=1.8,
         max_hold_bars=50,
         cost_pct=0.435,
         force_rebuild=False,
@@ -203,3 +203,55 @@ class StockModelCache:
 
         for key in remove_keys:
             del st.session_state.stock_model_cache[key]
+
+# Compatibility helper for fast walk-forward backtests.
+def _stock_model_cache_build_from_prebuilt(enriched_df, labels_df, symbol, timeframe="1", stop_pct=0.7, take_pct=1.8, max_hold_bars=50, cost_pct=0.435):
+    from intraday_profit_model import IntradayProfitModel
+
+    enriched_df = enriched_df.copy() if enriched_df is not None else pd.DataFrame()
+    labels_df = labels_df.copy() if labels_df is not None else pd.DataFrame()
+
+    model = IntradayProfitModel(labels_df)
+
+    if enriched_df.empty:
+        start_date = ""
+        end_date = ""
+        trading_days = 0
+        rows = 0
+    else:
+        start_date = str(enriched_df["trade_date"].min()) if "trade_date" in enriched_df.columns else ""
+        end_date = str(enriched_df["trade_date"].max()) if "trade_date" in enriched_df.columns else ""
+        trading_days = int(enriched_df["trade_date"].nunique()) if "trade_date" in enriched_df.columns else 0
+        rows = int(len(enriched_df))
+
+    if labels_df.empty:
+        label_rows = 0
+        buy_win_rate = 0
+        sell_win_rate = 0
+    else:
+        label_rows = int(len(labels_df))
+        buy_df = labels_df[labels_df["action"] == "BUY"]
+        sell_df = labels_df[labels_df["action"] == "SELL"]
+        buy_win_rate = float((buy_df["pnl_pct"] > 0).mean() * 100) if not buy_df.empty else 0
+        sell_win_rate = float((sell_df["pnl_pct"] > 0).mean() * 100) if not sell_df.empty else 0
+
+    return {
+        "symbol": str(symbol),
+        "timeframe": str(timeframe),
+        "stop_pct": float(stop_pct),
+        "take_pct": float(take_pct),
+        "max_hold_bars": int(max_hold_bars),
+        "cost_pct": float(cost_pct),
+        "start_date": start_date,
+        "end_date": end_date,
+        "trading_days": trading_days,
+        "kline_rows": rows,
+        "label_rows": label_rows,
+        "buy_win_rate_all": round(buy_win_rate, 2),
+        "sell_win_rate_all": round(sell_win_rate, 2),
+        "model": model,
+        "labels": labels_df,
+        "kline": enriched_df,
+    }
+
+StockModelCache.build_model_package_from_prebuilt = staticmethod(_stock_model_cache_build_from_prebuilt)

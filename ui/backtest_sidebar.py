@@ -95,7 +95,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "Walk-forward 訓練天數",
                 min_value=3,
                 max_value=20,
-                value=5,
+                value=15,
                 step=1,
                 key="bt_walk_forward_train_days",
                 help="真實模式下，測某一天時只使用前 N 個交易日建立模型，不偷看當天與未來資料。",
@@ -105,7 +105,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "回測掃描間隔 K 數",
                 min_value=1,
                 max_value=5,
-                value=1,
+                value=2,
                 step=1,
                 key="bt_scan_step_bars",
                 help="1 最精準；2~5 比較快但可能跳過部分進場點。",
@@ -115,7 +115,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "回測最長秒數",
                 min_value=20,
                 max_value=120,
-                value=55,
+                value=90,
                 step=5,
                 key="bt_max_runtime_seconds",
                 help="避免 Streamlit Cloud 長時間卡住。超過時間會先輸出已完成結果。",
@@ -125,7 +125,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "最低 Score",
                 min_value=50,
                 max_value=95,
-                value=60,
+                value=80,
                 step=5,
                 key="bt_score_threshold",
             )
@@ -158,7 +158,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "回測停損 %",
                 min_value=0.2,
                 max_value=3.0,
-                value=0.6,
+                value=0.7,
                 step=0.1,
                 key="bt_default_stop_pct",
             )
@@ -167,9 +167,40 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "回測停利 %",
                 min_value=0.3,
                 max_value=5.0,
-                value=2.0,
+                value=1.8,
                 step=0.1,
                 key="bt_default_take_pct",
+            )
+
+            st.caption("專業濾網：ORB / VWAP / 量能加速度 / 假突破 / 午盤風險 / 停損冷卻")
+
+            max_trades_per_day = st.slider(
+                "每日最多交易",
+                min_value=1,
+                max_value=5,
+                value=2,
+                step=1,
+                key="bt_max_trades_per_day",
+                help="避免同一段盤整反覆進出，專業當沖通常會限制每日出手次數。",
+            )
+
+            loss_cooldown_bars = st.slider(
+                "停損後冷卻 K 數",
+                min_value=0,
+                max_value=80,
+                value=30,
+                step=5,
+                key="bt_loss_cooldown_bars",
+                help="剛停損後等待新結構出現，避免同方向連續被洗。",
+            )
+
+            stop_after_losses = st.slider(
+                "連續虧損幾筆後停手",
+                min_value=1,
+                max_value=4,
+                value=2,
+                step=1,
+                key="bt_stop_after_losses",
             )
 
             commission_discount = st.slider(
@@ -202,7 +233,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             if model_mode == "walk_forward":
                 st.caption(
                     f"模式：Walk-forward 真實模式｜只用過去 {walk_forward_train_days} 日建模｜"
-                    f"掃描間隔 {scan_step_bars}K｜最長 {max_runtime_seconds} 秒"
+                    f"掃描間隔 {scan_step_bars}K｜最長 {max_runtime_seconds} 秒｜每日最多 {max_trades_per_day} 筆"
                 )
             elif model_mode == "same_period":
                 st.caption("模式：同區間模型 Debug｜⚠️ 有資料洩漏，不代表真實能力")
@@ -212,7 +243,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             st.caption(
                 f"股價目標：停損 {default_stop_pct:.1f}%｜"
                 f"停利 {default_take_pct:.1f}%｜"
-                f"最多持有 {max_hold_bars} 根K"
+                f"最多持有 {max_hold_bars} 根K｜停損冷卻 {loss_cooldown_bars}K"
             )
 
             st.caption(
@@ -269,6 +300,9 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                         walk_forward_train_days=walk_forward_train_days,
                         scan_step_bars=scan_step_bars,
                         max_runtime_seconds=max_runtime_seconds,
+                        max_trades_per_day=max_trades_per_day,
+                        loss_cooldown_bars=loss_cooldown_bars,
+                        stop_after_losses=stop_after_losses,
                         progress_callback=_on_backtest_progress,
                     )
 
@@ -440,6 +474,12 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             "predicted_win_rate",
             "predicted_expected_value",
             "required_win_rate",
+            "setup_type",
+            "raw_win_rate",
+            "calibrated_win_rate",
+            "filter_penalty",
+            "professional_filters",
+            "hard_fail_reasons",
             "model_train_start",
             "model_train_end",
             "result",

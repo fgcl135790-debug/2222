@@ -13,10 +13,10 @@ class DecisionEngine:
     """
 
     COST_PCT = 0.435
-    DEFAULT_STOP_PCT = 0.6
-    DEFAULT_TAKE_PCT = 2.0
+    DEFAULT_STOP_PCT = 0.7
+    DEFAULT_TAKE_PCT = 1.8
     DEFAULT_MAX_HOLD_BARS = 50
-    MIN_EXPECTED_VALUE = 0.10
+    MIN_EXPECTED_VALUE = 0.12
 
     @staticmethod
     def _safe_float(value, default=0.0):
@@ -84,12 +84,12 @@ class DecisionEngine:
         if not reasons:
             reasons = ["尚未建立近 30 日當沖模型，使用一般 AI 備援。"]
 
-        if len(prices or []) < 35:
+        if len(prices or []) < 20:
             return DecisionEngine._base_wait(
                 price=price,
                 score=min(score, 35),
                 title="等待盤中資料",
-                reason="至少需要 35 根盤中資料才能判斷。",
+                reason="至少需要 20 根盤中資料才能判斷。",
             )
 
         if action not in ["BUY", "SELL"]:
@@ -192,13 +192,15 @@ class DecisionEngine:
             risk_reward = take_pct / max(stop_pct, 0.01)
             title = "成本感知模型做多"
             reason = (
-                f"BUY 相似勝率 {predicted_win_rate:.1f}% ≥ 需求 {required_win_rate:.1f}%，"
+                f"BUY 校準後勝率 {predicted_win_rate:.1f}% ≥ 需求 {required_win_rate:.1f}%，"
                 f"扣成本期望 {expected_value:.3f}%。"
             )
             reasons = [
                 buy.get("reason", ""),
                 f"SELL 扣成本期望 {sell.get('expected_value', 0)}%",
                 f"BUY 樣本數 {sample_count}，Profit Factor {profit_factor:.2f}",
+                f"型態：{chosen.get('setup_type', '未分類')}｜濾網折扣 {chosen.get('filter_penalty', 0)}%",
+                *(chosen.get("professional_filters", [])[:3]),
                 f"停損 {stop_pct:.1f}%｜停利 {take_pct:.1f}%｜成本約 {cost_pct:.3f}%",
                 f"模型區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}",
             ]
@@ -212,13 +214,15 @@ class DecisionEngine:
             risk_reward = take_pct / max(stop_pct, 0.01)
             title = "成本感知模型做空"
             reason = (
-                f"SELL 相似勝率 {predicted_win_rate:.1f}% ≥ 需求 {required_win_rate:.1f}%，"
+                f"SELL 校準後勝率 {predicted_win_rate:.1f}% ≥ 需求 {required_win_rate:.1f}%，"
                 f"扣成本期望 {expected_value:.3f}%。"
             )
             reasons = [
                 sell.get("reason", ""),
                 f"BUY 扣成本期望 {buy.get('expected_value', 0)}%",
                 f"SELL 樣本數 {sample_count}，Profit Factor {profit_factor:.2f}",
+                f"型態：{chosen.get('setup_type', '未分類')}｜濾網折扣 {chosen.get('filter_penalty', 0)}%",
+                *(chosen.get("professional_filters", [])[:3]),
                 f"停損 {stop_pct:.1f}%｜停利 {take_pct:.1f}%｜成本約 {cost_pct:.3f}%",
                 f"模型區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}",
             ]
@@ -294,12 +298,12 @@ class DecisionEngine:
         if model is None:
             return DecisionEngine._fallback_from_ai(ai=ai, price=price, prices=prices, volumes=volumes)
 
-        if len(prices) < 35:
+        if len(prices) < 20:
             return DecisionEngine._base_wait(
                 price=price,
                 score=30,
                 title="等待盤中資料",
-                reason="模型模式至少需要 35 根盤中資料才能比對相似情境。",
+                reason="模型模式至少需要 20 根盤中資料才能比對相似情境。",
                 extra={
                     "model_start_date": model_package.get("start_date", ""),
                     "model_end_date": model_package.get("end_date", ""),
@@ -319,11 +323,12 @@ class DecisionEngine:
             feature=feature,
             min_expected_value=DecisionEngine.MIN_EXPECTED_VALUE,
             min_win_rate=None,
-            min_sample_count=25,
+            min_sample_count=30,
             stop_pct=stop_pct,
             take_pct=take_pct,
             cost_pct=cost_pct,
-            safety_margin=4.0,
+            safety_margin=5.0,
+            use_professional_filters=True,
         )
 
         decision = prediction.get("decision", "WAIT")
@@ -351,18 +356,20 @@ class DecisionEngine:
             )
 
         wait_reasons = [
-            f"BUY 勝率 {buy.get('win_rate', 0)}%，扣成本期望 {buy.get('expected_value', 0)}%",
-            f"SELL 勝率 {sell.get('win_rate', 0)}%，扣成本期望 {sell.get('expected_value', 0)}%",
+            f"BUY 校準勝率 {buy.get('win_rate', 0)}%，原始 {buy.get('raw_win_rate', 0)}%，EV {buy.get('expected_value', 0)}%",
+            f"SELL 校準勝率 {sell.get('win_rate', 0)}%，原始 {sell.get('raw_win_rate', 0)}%，EV {sell.get('expected_value', 0)}%",
             f"需求勝率 {prediction.get('required_win_rate', 0)}%，最低期望 {prediction.get('min_expected_value', 0)}%",
-            f"目前最佳方向 {chosen.get('action', '無')}，但仍不足以覆蓋成本與風險",
+            f"目前最佳方向 {chosen.get('action', '無')}，型態 {chosen.get('setup_type', '未分類')}，濾網折扣 {chosen.get('filter_penalty', 0)}%",
+            *(chosen.get("hard_fail_reasons", [])[:3]),
+            *(chosen.get("professional_filters", [])[:3]),
             "判斷：此次交易風險高，不出手。",
         ]
 
         return DecisionEngine._base_wait(
             price=price,
             score=score,
-            title="成本後不具正期望",
-            reason="模型預測扣除成本後期望值不足，或勝率未高於損益兩平門檻，暫不出手。",
+            title="專業濾網未通過",
+            reason="扣成本後期望值、校準勝率或 ORB / VWAP / 量能濾網不足，暫不出手。",
             extra={
                 "reasons": wait_reasons,
                 "swing_prediction": prediction,

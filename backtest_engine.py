@@ -10,6 +10,7 @@ from market_analyzer import MarketAnalyzer
 from ai_predictor import AIPredictor
 from decision_engine import DecisionEngine
 from multi_period_engine import MultiPeriodEngine
+from intraday_label_engine import IntradayLabelEngine
 
 try:
     from stock_model_cache import StockModelCache
@@ -202,7 +203,7 @@ class BacktestEngine:
         這不會偷看未來，因為傳入的 prices/volumes 仍然只到目前這一根 K。
         """
 
-        if len(prices) < 30:
+        if len(prices) < 20:
             return None
 
         price = prices[-1]
@@ -308,8 +309,8 @@ class BacktestEngine:
         day_candles,
         decision,
         max_hold_bars=50,
-        default_stop_pct=0.6,
-        default_take_pct=2.0,
+        default_stop_pct=0.7,
+        default_take_pct=1.8,
         commission_rate_pct=0.1425,
         commission_discount=1.0,
         tax_rate_pct=0.15,
@@ -556,15 +557,19 @@ class BacktestEngine:
         cooldown_bars=5,
         max_hold_bars=50,
         day_scope="last_open_day",
-        default_stop_pct=0.6,
-        default_take_pct=2.0,
+        default_stop_pct=0.7,
+        default_take_pct=1.8,
         commission_rate_pct=0.1425,
         commission_discount=1.0,
         tax_rate_pct=0.15,
         model_mode="walk_forward",
-        walk_forward_train_days=5,
-        scan_step_bars=1,
-        max_runtime_seconds=55,
+        walk_forward_train_days=15,
+        scan_step_bars=2,
+        max_runtime_seconds=90,
+        pro_filters_enabled=True,
+        max_trades_per_day=2,
+        loss_cooldown_bars=30,
+        stop_after_losses=2,
         progress_callback=None,
     ):
         """
@@ -624,7 +629,10 @@ class BacktestEngine:
             timeframe_int = 1
 
         avoid_bars = max(0, math.ceil(avoid_open_minutes / timeframe_int))
-        walk_forward_train_days = max(1, BacktestEngine._safe_int(walk_forward_train_days, 5))
+        walk_forward_train_days = max(1, BacktestEngine._safe_int(walk_forward_train_days, 15))
+        max_trades_per_day = max(1, BacktestEngine._safe_int(max_trades_per_day, 2))
+        loss_cooldown_bars = max(0, BacktestEngine._safe_int(loss_cooldown_bars, 30))
+        stop_after_losses = max(1, BacktestEngine._safe_int(stop_after_losses, 2))
 
         effective_commission_pct = commission_rate_pct * commission_discount
         estimated_cost_pct = effective_commission_pct + effective_commission_pct + tax_rate_pct
@@ -635,21 +643,53 @@ class BacktestEngine:
 
         shared_model_package = None
         shared_model_message = ""
+        prebuilt_enriched_df = None
+        prebuilt_labels_df = None
 
         _progress(f"已取得 {len(candles)} 根 K 線，準備回測 {len(selected_days)} 個交易日...", 8)
 
+        if model_mode in ["walk_forward", "same_period"]:
+            _progress("正在建立全區間標籤快取，之後每天只切過去資料，不重複重建模型...", 10)
+            try:
+                prebuilt_enriched_df, prebuilt_labels_df = IntradayLabelEngine.build_labels(
+                    kline_df=BacktestEngine._candles_to_dataframe(candles),
+                    stop_pct=default_stop_pct,
+                    take_pct=default_take_pct,
+                    max_hold_bars=max_hold_bars,
+                    cost_pct=estimated_cost_pct,
+                    start_minute=15,
+                    end_minute=250,
+                )
+            except Exception as e:
+                prebuilt_enriched_df = None
+                prebuilt_labels_df = None
+                skipped_days.append({"date": "PREBUILD", "reason": f"標籤快取建立失敗：{type(e).__name__}"})
+
         if model_mode == "same_period":
             _progress("正在建立同區間 Debug 模型...", 12)
-            shared_model_package, shared_model_message = BacktestEngine._build_model_package_from_candles(
-                candles=candles,
-                symbol=symbol,
-                timeframe=timeframe,
-                default_stop_pct=default_stop_pct,
-                default_take_pct=default_take_pct,
-                max_hold_bars=max_hold_bars,
-                estimated_cost_pct=estimated_cost_pct,
-            )
-            shared_model_message = "同區間模型（有資料洩漏，只能 Debug）：" + shared_model_message
+            if prebuilt_enriched_df is not None and prebuilt_labels_df is not None and not prebuilt_labels_df.empty:
+                shared_model_package = StockModelCache.build_model_package_from_prebuilt(
+                    enriched_df=prebuilt_enriched_df,
+                    labels_df=prebuilt_labels_df,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    stop_pct=default_stop_pct,
+                    take_pct=default_take_pct,
+                    max_hold_bars=max_hold_bars,
+                    cost_pct=estimated_cost_pct,
+                )
+                shared_model_message = f"同區間模型（有資料洩漏，只能 Debug）：標籤 {shared_model_package.get('label_rows', 0)} 筆。"
+            else:
+                shared_model_package, shared_model_message = BacktestEngine._build_model_package_from_candles(
+                    candles=candles,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    default_stop_pct=default_stop_pct,
+                    default_take_pct=default_take_pct,
+                    max_hold_bars=max_hold_bars,
+                    estimated_cost_pct=estimated_cost_pct,
+                )
+                shared_model_message = "同區間模型（有資料洩漏，只能 Debug）：" + shared_model_message
 
         elif model_mode == "classic":
             shared_model_message = "一般 AI 模式：未使用近 30 日相似 K 線模型。"
@@ -659,6 +699,7 @@ class BacktestEngine:
             shared_model_message = (
                 f"Walk-forward 真實模式：每個測試日只用前 {walk_forward_train_days} 個交易日建模，"
                 "不使用測試日與未來資料。"
+                f"｜專業濾網：ORB / VWAP / 量能 / 時段 / 假突破｜每日最多 {max_trades_per_day} 筆"
             )
 
         for day_pos, day_item in enumerate(selected_days, start=1):
@@ -712,19 +753,40 @@ class BacktestEngine:
                     continue
 
                 train_candles = BacktestEngine._flatten_day_items(train_day_items)
-                _progress(f"{day}：使用前 {model_train_days} 日建立模型...", min(base_percent + 2, 95))
-                model_package, model_message = BacktestEngine._build_model_package_from_candles(
-                    candles=train_candles,
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    default_stop_pct=default_stop_pct,
-                    default_take_pct=default_take_pct,
-                    max_hold_bars=max_hold_bars,
-                    estimated_cost_pct=estimated_cost_pct,
-                )
-
                 model_train_start = train_day_items[0]["date"] if train_day_items else ""
                 model_train_end = train_day_items[-1]["date"] if train_day_items else ""
+                _progress(f"{day}：使用前 {model_train_days} 日切換模型樣本...", min(base_percent + 2, 95))
+
+                if prebuilt_enriched_df is not None and prebuilt_labels_df is not None and not prebuilt_labels_df.empty:
+                    train_dates = [x["date"] for x in train_day_items]
+                    train_enriched = prebuilt_enriched_df[prebuilt_enriched_df["trade_date"].isin(train_dates)].copy()
+                    train_labels = prebuilt_labels_df[prebuilt_labels_df["trade_date"].isin(train_dates)].copy()
+                    if train_labels.empty:
+                        model_package = None
+                        model_message = "訓練標籤為 0，無法使用模型。"
+                    else:
+                        model_package = StockModelCache.build_model_package_from_prebuilt(
+                            enriched_df=train_enriched,
+                            labels_df=train_labels,
+                            symbol=symbol,
+                            timeframe=timeframe,
+                            stop_pct=default_stop_pct,
+                            take_pct=default_take_pct,
+                            max_hold_bars=max_hold_bars,
+                            cost_pct=estimated_cost_pct,
+                        )
+                        model_message = f"快取模型區間 {model_train_start} ~ {model_train_end}，標籤 {model_package.get('label_rows', 0)} 筆。"
+                else:
+                    model_package, model_message = BacktestEngine._build_model_package_from_candles(
+                        candles=train_candles,
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        default_stop_pct=default_stop_pct,
+                        default_take_pct=default_take_pct,
+                        max_hold_bars=max_hold_bars,
+                        estimated_cost_pct=estimated_cost_pct,
+                    )
+
                 day_model_messages.append(f"{day}: {model_message}")
 
                 if model_package is None:
@@ -732,9 +794,19 @@ class BacktestEngine:
                     continue
 
             day_prices, day_volumes, day_vwaps, day_times = BacktestEngine._build_series(day_candles)
-            i = max(35, avoid_bars)
+            i = max(20, avoid_bars)
+            day_trade_count = 0
+            day_loss_streak = 0
+            next_allowed_index = i
 
             while i < len(day_candles) - 2:
+                if day_trade_count >= max_trades_per_day:
+                    skipped_days.append({"date": day, "reason": f"已達每日最多 {max_trades_per_day} 筆"})
+                    break
+
+                if i < next_allowed_index:
+                    i = next_allowed_index
+                    continue
                 if time.time() - start_time > max_runtime_seconds:
                     skipped_days.append({"date": day, "reason": f"超過 {max_runtime_seconds} 秒，提前停止"})
                     break
@@ -845,11 +917,30 @@ class BacktestEngine:
                         "buy_win_rate": buy_pred.get("win_rate"),
                         "sell_win_rate": sell_pred.get("win_rate"),
                         "risk_level": decision.get("risk_level"),
+                        "setup_type": chosen.get("setup_type"),
+                        "raw_win_rate": chosen.get("raw_win_rate"),
+                        "calibrated_win_rate": chosen.get("calibrated_win_rate", chosen.get("win_rate")),
+                        "raw_expected_value": chosen.get("raw_expected_value"),
+                        "calibrated_expected_value": chosen.get("calibrated_expected_value", chosen.get("expected_value")),
+                        "filter_penalty": chosen.get("filter_penalty"),
+                        "professional_pass": chosen.get("professional_pass"),
+                        "professional_filters": " | ".join(chosen.get("professional_filters", [])[:5]) if isinstance(chosen.get("professional_filters"), list) else chosen.get("professional_filters"),
+                        "hard_fail_reasons": " | ".join(chosen.get("hard_fail_reasons", [])[:5]) if isinstance(chosen.get("hard_fail_reasons"), list) else chosen.get("hard_fail_reasons"),
                         "result": exit_data["result"],
                     }
                 )
 
-                i = exit_index + cooldown_bars
+                day_trade_count += 1
+
+                if exit_data["result"] == "LOSS":
+                    day_loss_streak += 1
+                    i = exit_index + max(cooldown_bars, loss_cooldown_bars)
+                    if day_loss_streak >= stop_after_losses:
+                        skipped_days.append({"date": day, "reason": f"連續虧損 {day_loss_streak} 筆，當日停止交易"})
+                        break
+                else:
+                    day_loss_streak = 0
+                    i = exit_index + cooldown_bars
 
         summary = BacktestEngine._summarize(trades)
         summary["skipped_days"] = len(skipped_days)
@@ -882,6 +973,10 @@ class BacktestEngine:
             "model_mode": model_mode,
             "walk_forward_train_days": walk_forward_train_days,
             "scan_step_bars": scan_step_bars,
+            "max_trades_per_day": max_trades_per_day,
+            "loss_cooldown_bars": loss_cooldown_bars,
+            "stop_after_losses": stop_after_losses,
+            "pro_filters_enabled": pro_filters_enabled,
             "elapsed_seconds": elapsed_seconds,
             "leak_warning": leak_warning,
             "model_message": shared_model_message,
