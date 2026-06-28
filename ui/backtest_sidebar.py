@@ -72,6 +72,35 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 "recent_5_days",
             )
 
+            model_mode_label = st.selectbox(
+                "模型回測模式",
+                options=[
+                    "Walk-forward 真實模式",
+                    "同區間模型 Debug",
+                    "一般 AI 無模型",
+                ],
+                index=0,
+                key="bt_model_mode_label",
+            )
+
+            model_mode_map = {
+                "Walk-forward 真實模式": "walk_forward",
+                "同區間模型 Debug": "same_period",
+                "一般 AI 無模型": "classic",
+            }
+
+            model_mode = model_mode_map.get(model_mode_label, "walk_forward")
+
+            walk_forward_train_days = st.slider(
+                "Walk-forward 訓練天數",
+                min_value=3,
+                max_value=20,
+                value=5,
+                step=1,
+                key="bt_walk_forward_train_days",
+                help="真實模式下，測某一天時只使用前 N 個交易日建立模型，不偷看當天與未來資料。",
+            )
+
             score_threshold = st.slider(
                 "最低 Score",
                 min_value=50,
@@ -150,6 +179,15 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 + tax_rate_pct
             )
 
+            if model_mode == "walk_forward":
+                st.caption(
+                    f"模式：Walk-forward 真實模式｜只用過去 {walk_forward_train_days} 日建模"
+                )
+            elif model_mode == "same_period":
+                st.caption("模式：同區間模型 Debug｜⚠️ 有資料洩漏，不代表真實能力")
+            else:
+                st.caption("模式：一般 AI 無模型｜不使用相似 K 線成本模型")
+
             st.caption(
                 f"股價目標：停損 {default_stop_pct:.1f}%｜"
                 f"停利 {default_take_pct:.1f}%｜"
@@ -195,6 +233,8 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                         commission_rate_pct=commission_rate_pct,
                         commission_discount=commission_discount,
                         tax_rate_pct=tax_rate_pct,
+                        model_mode=model_mode,
+                        walk_forward_train_days=walk_forward_train_days,
                     )
 
                 st.session_state.backtest_result = result
@@ -251,6 +291,21 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             f"回測 {result.get('days')} 日｜來源 {result.get('all_days')} 日｜"
             f"{result.get('candles')} 根K"
         )
+
+        leak_warning = result.get("leak_warning")
+        if leak_warning:
+            if result.get("model_mode") == "same_period":
+                st.warning(leak_warning)
+            else:
+                st.info(leak_warning)
+
+        skipped_days = result.get("skipped_days", []) or []
+        if skipped_days:
+            st.caption(
+                "略過日期：" + "、".join(
+                    [f"{x.get('date')}({x.get('reason')})" for x in skipped_days[-5:]]
+                )
+            )
 
         if selected_days:
             st.info(
@@ -345,6 +400,11 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             "gross_pnl_pct",
             "cost_pct",
             "pnl_pct",
+            "predicted_win_rate",
+            "predicted_expected_value",
+            "required_win_rate",
+            "model_train_start",
+            "model_train_end",
             "result",
         ]
 

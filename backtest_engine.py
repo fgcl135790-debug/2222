@@ -433,6 +433,53 @@ class BacktestEngine:
         return cur
 
     @staticmethod
+    def _flatten_day_items(day_items):
+        out = []
+        for item in day_items:
+            out.extend(item.get("candles", []))
+        return out
+
+    @staticmethod
+    def _build_model_package_from_candles(
+        candles,
+        symbol,
+        timeframe,
+        default_stop_pct,
+        default_take_pct,
+        max_hold_bars,
+        estimated_cost_pct,
+    ):
+        if StockModelCache is None:
+            return None, "StockModelCache 未載入，無法建立模型。"
+
+        if not candles:
+            return None, "訓練資料不足，無法建立模型。"
+
+        try:
+            model_package = StockModelCache.build_model_package(
+                kline_df=BacktestEngine._candles_to_dataframe(candles),
+                symbol=symbol,
+                timeframe=timeframe,
+                stop_pct=default_stop_pct,
+                take_pct=default_take_pct,
+                max_hold_bars=max_hold_bars,
+                cost_pct=estimated_cost_pct,
+            )
+
+            label_rows = int(model_package.get("label_rows", 0) or 0)
+
+            if label_rows <= 0:
+                return None, "模型標籤數為 0，無法使用模型判斷。"
+
+            return model_package, (
+                f"模型區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}，"
+                f"標籤 {label_rows} 筆。"
+            )
+
+        except Exception as e:
+            return None, f"模型建立失敗：{type(e).__name__}"
+
+    @staticmethod
     def run(
         api_key,
         symbol,
@@ -448,7 +495,16 @@ class BacktestEngine:
         commission_rate_pct=0.1425,
         commission_discount=1.0,
         tax_rate_pct=0.15,
+        model_mode="walk_forward",
+        walk_forward_train_days=5,
     ):
+        """
+        model_mode:
+        - walk_forward：真實模式。測某一天時，只用該日以前的資料建立模型。
+        - same_period：Debug 模式。用同一段資料建立模型再回測，會有資料洩漏。
+        - classic：不使用近 30 日模型，只跑一般 AI 備援。
+        """
+
         candles = BacktestEngine.fetch_historical_candles(
             api_key=api_key,
             symbol=symbol,
@@ -461,6 +517,14 @@ class BacktestEngine:
         days = BacktestEngine._group_by_day(candles)
         selected_days = BacktestEngine._select_days(days=days, day_scope=day_scope)
 
+        valid_days = []
+        for day in sorted(days.keys()):
+            day_candles = days[day]
+            if len(day_candles) >= 60:
+                valid_days.append({"date": day, "candles": day_candles})
+
+        valid_day_index = {item["date"]: idx for idx, item in enumerate(valid_days)}
+
         if not selected_days:
             return {
                 "ok": False,
@@ -471,45 +535,107 @@ class BacktestEngine:
                 "days": len(days),
             }
 
-        effective_commission_pct = commission_rate_pct * commission_discount
-        estimated_cost_pct = effective_commission_pct + effective_commission_pct + tax_rate_pct
-
-        model_package = None
-        model_message = "未建立模型，使用一般 AI 備援。"
-
-        if StockModelCache is not None:
-            try:
-                model_package = StockModelCache.build_model_package(
-                    kline_df=BacktestEngine._candles_to_dataframe(candles),
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    stop_pct=default_stop_pct,
-                    take_pct=default_take_pct,
-                    max_hold_bars=max_hold_bars,
-                    cost_pct=estimated_cost_pct,
-                )
-                model_message = (
-                    f"已建立成本感知模型：標籤 {model_package.get('label_rows', 0)} 筆，"
-                    f"區間 {model_package.get('start_date')} ~ {model_package.get('end_date')}。"
-                )
-            except Exception as e:
-                model_package = None
-                model_message = f"模型建立失敗，改用一般 AI 備援：{type(e).__name__}"
-
-        trades = []
-
         try:
             timeframe_int = max(1, int(timeframe))
         except Exception:
             timeframe_int = 1
 
         avoid_bars = max(0, math.ceil(avoid_open_minutes / timeframe_int))
+        walk_forward_train_days = max(1, BacktestEngine._safe_int(walk_forward_train_days, 5))
+
+        effective_commission_pct = commission_rate_pct * commission_discount
+        estimated_cost_pct = effective_commission_pct + effective_commission_pct + tax_rate_pct
+
+        trades = []
+        skipped_days = []
+        day_model_messages = []
+
+        shared_model_package = None
+        shared_model_message = ""
+
+        if model_mode == "same_period":
+            shared_model_package, shared_model_message = BacktestEngine._build_model_package_from_candles(
+                candles=candles,
+                symbol=symbol,
+                timeframe=timeframe,
+                default_stop_pct=default_stop_pct,
+                default_take_pct=default_take_pct,
+                max_hold_bars=max_hold_bars,
+                estimated_cost_pct=estimated_cost_pct,
+            )
+            shared_model_message = "同區間模型（有資料洩漏，只能 Debug）：" + shared_model_message
+
+        elif model_mode == "classic":
+            shared_model_message = "一般 AI 模式：未使用近 30 日相似 K 線模型。"
+
+        else:
+            model_mode = "walk_forward"
+            shared_model_message = (
+                f"Walk-forward 真實模式：每個測試日只用前 {walk_forward_train_days} 個交易日建模，"
+                "不使用測試日與未來資料。"
+            )
 
         for day_item in selected_days:
             day = day_item["date"]
             day_candles = day_item["candles"]
+
             if len(day_candles) < 60:
                 continue
+
+            model_package = None
+            model_message = ""
+            model_train_start = ""
+            model_train_end = ""
+            model_train_days = 0
+
+            if model_mode == "same_period":
+                model_package = shared_model_package
+                model_message = shared_model_message
+                if model_package:
+                    model_train_start = model_package.get("start_date", "")
+                    model_train_end = model_package.get("end_date", "")
+                    model_train_days = int(model_package.get("trading_days", 0) or 0)
+
+            elif model_mode == "classic":
+                model_package = None
+                model_message = shared_model_message
+
+            else:
+                idx = valid_day_index.get(day, -1)
+
+                if idx <= 0:
+                    skipped_days.append({"date": day, "reason": "沒有更早交易日可建模"})
+                    continue
+
+                train_start_idx = max(0, idx - walk_forward_train_days)
+                train_day_items = valid_days[train_start_idx:idx]
+                model_train_days = len(train_day_items)
+
+                if model_train_days < max(3, min(walk_forward_train_days, 5)):
+                    skipped_days.append({
+                        "date": day,
+                        "reason": f"訓練日不足：{model_train_days} 日",
+                    })
+                    continue
+
+                train_candles = BacktestEngine._flatten_day_items(train_day_items)
+                model_package, model_message = BacktestEngine._build_model_package_from_candles(
+                    candles=train_candles,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    default_stop_pct=default_stop_pct,
+                    default_take_pct=default_take_pct,
+                    max_hold_bars=max_hold_bars,
+                    estimated_cost_pct=estimated_cost_pct,
+                )
+
+                model_train_start = train_day_items[0]["date"] if train_day_items else ""
+                model_train_end = train_day_items[-1]["date"] if train_day_items else ""
+                day_model_messages.append(f"{day}: {model_message}")
+
+                if model_package is None:
+                    skipped_days.append({"date": day, "reason": model_message})
+                    continue
 
             i = max(35, avoid_bars)
 
@@ -535,7 +661,6 @@ class BacktestEngine:
                     i += 1
                     continue
 
-                # 成本感知模型已經用 EV / 勝率濾掉風險，預設不再要求多週期共振。
                 if require_resonance:
                     if action == "BUY" and resonance not in ["BULL", "BULL_STRONG"]:
                         i += 1
@@ -577,6 +702,11 @@ class BacktestEngine:
                 trades.append(
                     {
                         "date": day,
+                        "model_mode": model_mode,
+                        "model_train_start": model_train_start,
+                        "model_train_end": model_train_end,
+                        "model_train_days": model_train_days,
+                        "model_label_rows": model_package.get("label_rows", 0) if model_package else 0,
                         "action": action,
                         "score": score,
                         "multi_status": multi_status,
@@ -605,6 +735,8 @@ class BacktestEngine:
                         "predicted_sample_count": chosen.get("sample_count"),
                         "buy_expected_value": buy_pred.get("expected_value"),
                         "sell_expected_value": sell_pred.get("expected_value"),
+                        "buy_win_rate": buy_pred.get("win_rate"),
+                        "sell_win_rate": sell_pred.get("win_rate"),
                         "risk_level": decision.get("risk_level"),
                         "result": exit_data["result"],
                     }
@@ -613,11 +745,20 @@ class BacktestEngine:
                 i = exit_index + cooldown_bars
 
         summary = BacktestEngine._summarize(trades)
+        summary["skipped_days"] = len(skipped_days)
+        summary["model_mode"] = model_mode
         selected_day_names = [d["date"] for d in selected_days]
-        message = "回測完成｜" + model_message
 
+        if model_mode == "same_period":
+            leak_warning = "同區間模型有資料洩漏風險，不代表真實 AI 能力。"
+        elif model_mode == "walk_forward":
+            leak_warning = "Walk-forward：測試日只使用過去資料建模，較接近真實能力。"
+        else:
+            leak_warning = "一般 AI：未使用相似 K 線成本模型。"
+
+        message = f"回測完成｜{leak_warning}｜{shared_model_message}"
         if not trades:
-            message = "回測完成，但沒有符合正期望條件的交易。模型判斷扣成本後風險偏高。｜" + model_message
+            message = f"回測完成，但沒有符合正期望條件的交易。｜{leak_warning}｜{shared_model_message}"
 
         return {
             "ok": True,
@@ -628,8 +769,13 @@ class BacktestEngine:
             "all_days": len(days),
             "days": len(selected_days),
             "selected_days": selected_day_names,
-            "model_message": model_message,
-            "model_label_rows": model_package.get("label_rows", 0) if model_package else 0,
+            "model_mode": model_mode,
+            "walk_forward_train_days": walk_forward_train_days,
+            "leak_warning": leak_warning,
+            "model_message": shared_model_message,
+            "skipped_days": skipped_days,
+            "day_model_messages": day_model_messages[-8:],
+            "model_label_rows": shared_model_package.get("label_rows", 0) if shared_model_package else 0,
             "summary": summary,
             "trades": trades,
         }
