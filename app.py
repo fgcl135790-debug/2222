@@ -555,6 +555,10 @@ def main():
         bid_ratio=bid_ratio,
         prices=prices,
         volumes=volumes,
+        vwap_values=vwaps,
+        time_values=times,
+        bids=bids,
+        asks=asks,
     )
 
     # =========================

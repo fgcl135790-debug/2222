@@ -11,6 +11,7 @@ from ai_predictor import AIPredictor
 from decision_engine import DecisionEngine
 from multi_period_engine import MultiPeriodEngine
 from intraday_label_engine import IntradayLabelEngine
+from intraday_signal_engine import IntradaySignalEngine
 
 try:
     from stock_model_cache import StockModelCache
@@ -127,7 +128,7 @@ class BacktestEngine:
         valid_days = []
         for day in sorted(days.keys()):
             day_candles = days[day]
-            if len(day_candles) >= 60:
+            if len(day_candles) >= 40:
                 valid_days.append({"date": day, "candles": day_candles})
 
         if not valid_days:
@@ -162,6 +163,37 @@ class BacktestEngine:
         return prices, volumes, vwaps, times
 
     @staticmethod
+    def _build_ohlcv_series(candles):
+        opens = []
+        highs = []
+        lows = []
+        prices = []
+        volumes = []
+        vwaps = []
+        times = []
+        cum_amount = 0.0
+        cum_volume = 0.0
+
+        for c in candles:
+            open_price = BacktestEngine._safe_float(c.get("open"))
+            high_price = BacktestEngine._safe_float(c.get("high"))
+            low_price = BacktestEngine._safe_float(c.get("low"))
+            close_price = BacktestEngine._safe_float(c.get("close"))
+            volume = BacktestEngine._safe_float(c.get("volume"))
+            cum_amount += close_price * volume
+            cum_volume += volume
+            vwap = cum_amount / max(cum_volume, 1)
+            opens.append(open_price if open_price > 0 else close_price)
+            highs.append(high_price if high_price > 0 else close_price)
+            lows.append(low_price if low_price > 0 else close_price)
+            prices.append(close_price)
+            volumes.append(volume)
+            vwaps.append(vwap)
+            times.append(c.get("time"))
+
+        return opens, highs, lows, prices, volumes, vwaps, times
+
+    @staticmethod
     def _make_decision(
         candles,
         model_package=None,
@@ -188,6 +220,13 @@ class BacktestEngine:
         model_package=None,
         use_multi_period=False,
         require_resonance=False,
+        use_realtime_signal=False,
+        opens=None,
+        highs=None,
+        lows=None,
+        stop_pct=0.7,
+        take_pct=1.8,
+        cost_pct=0.435,
     ):
         """
         回測用快速決策。
@@ -208,6 +247,105 @@ class BacktestEngine:
 
         price = prices[-1]
         vwap = vwaps[-1] if vwaps else price
+
+        if use_realtime_signal:
+            signal = IntradaySignalEngine.analyze(
+                prices=prices,
+                volumes=volumes,
+                opens=opens,
+                highs=highs,
+                lows=lows,
+                vwap_values=vwaps,
+                time_values=times,
+                stop_pct=stop_pct,
+                take_pct=take_pct,
+                cost_pct=cost_pct,
+                min_score=60,
+                min_expected_value=0.00,
+            )
+            action = signal.get("decision", "WAIT")
+            chosen = signal.get("chosen", {}) or {}
+            risk_plan = signal.get("risk_plan", {}) or {}
+            eff_stop_pct = BacktestEngine._safe_float(signal.get("adaptive_stop_pct") or risk_plan.get("stop_pct"), stop_pct)
+            eff_take_pct = BacktestEngine._safe_float(signal.get("adaptive_take_pct") or risk_plan.get("take_pct"), take_pct)
+            if action in ["BUY", "SELL"]:
+                stop_rate = eff_stop_pct / 100
+                take_rate = eff_take_pct / 100
+                if action == "BUY":
+                    stop_loss = price * (1 - stop_rate)
+                    take_profit = price * (1 + take_rate)
+                    status = "STRUCTURE_BULL"
+                else:
+                    stop_loss = price * (1 + stop_rate)
+                    take_profit = price * (1 - take_rate)
+                    status = "STRUCTURE_BEAR"
+                return {
+                    "action": action,
+                    "score": signal.get("score", 0),
+                    "title": signal.get("title", "即時結構 AI 訊號"),
+                    "reason": signal.get("reason", ""),
+                    "reasons": signal.get("reasons", []),
+                    "entry_price": price,
+                    "entry": round(price, 2),
+                    "stop_loss": round(stop_loss, 2),
+                    "take_profit": round(take_profit, 2),
+                    "risk_reward": round(eff_take_pct / max(eff_stop_pct, 0.01), 2),
+                    "rr": round(eff_take_pct / max(eff_stop_pct, 0.01), 2),
+                    "adaptive_stop_pct": round(eff_stop_pct, 3),
+                    "adaptive_take_pct": round(eff_take_pct, 3),
+                    "rebound": 55 if action == "BUY" else 45,
+                    "multi_period_status": status,
+                    "multi_period": {},
+                    "swing_state": "即時結構 AI",
+                    "swing_prediction": {
+                        "mode": "realtime_structure_no_training",
+                        "buy": signal.get("buy", {}),
+                        "sell": signal.get("sell", {}),
+                        "chosen": chosen,
+                        "required_win_rate": signal.get("required_win_rate", 0),
+                        "risk_plan": risk_plan,
+                        "tape_flow": signal.get("tape_flow", {}),
+                        "orderbook_flow": signal.get("orderbook_flow", {}),
+                        "market_context": signal.get("market_context", {}),
+                    },
+                    "predicted_up_pct": eff_take_pct if action == "BUY" else 0,
+                    "predicted_down_pct": eff_take_pct if action == "SELL" else 0,
+                    "long_rr": round(eff_take_pct / max(eff_stop_pct, 0.01), 2),
+                    "short_rr": round(eff_take_pct / max(eff_stop_pct, 0.01), 2),
+                    "risk_level": signal.get("risk_level", "NORMAL"),
+                    "expected_value": chosen.get("expected_value", 0),
+                    "predicted_win_rate": chosen.get("win_rate", 0),
+                    "required_win_rate": signal.get("required_win_rate", 0),
+                    "model_label_rows": 0,
+                }
+            return {
+                "action": "WAIT",
+                "score": signal.get("score", 0),
+                "title": signal.get("title", "即時結構未達出手標準"),
+                "reason": signal.get("reason", ""),
+                "reasons": signal.get("reasons", []),
+                "entry_price": price,
+                "entry": round(price, 2),
+                "stop_loss": 0,
+                "take_profit": 0,
+                "risk_reward": 0,
+                "rr": 0,
+                "rebound": 50,
+                "multi_period_status": "WAIT",
+                "multi_period": {},
+                "swing_state": "即時結構觀望",
+                "swing_prediction": {
+                    "mode": "realtime_structure_no_training",
+                    "buy": signal.get("buy", {}),
+                    "sell": signal.get("sell", {}),
+                    "chosen": signal.get("chosen", {}),
+                    "required_win_rate": signal.get("required_win_rate", 0),
+                },
+                "risk_level": "HIGH",
+                "expected_value": (signal.get("chosen", {}) or {}).get("expected_value", 0),
+                "predicted_win_rate": (signal.get("chosen", {}) or {}).get("win_rate", 0),
+                "required_win_rate": signal.get("required_win_rate", 0),
+            }
 
         # 成本感知模型模式：直接讓 DecisionEngine 用模型判斷，避免每根 K 都跑一般 AI。
         if model_package is not None:
@@ -232,6 +370,11 @@ class BacktestEngine:
                 bid_ratio=1.0,
                 prices=prices,
                 volumes=volumes,
+                opens=opens,
+                highs=highs,
+                lows=lows,
+                vwap_values=vwaps,
+                time_values=times,
             )
 
             if not use_multi_period and not require_resonance:
@@ -322,19 +465,23 @@ class BacktestEngine:
         tax_rate_pct = BacktestEngine._safe_float(tax_rate_pct, 0.15)
         effective_commission_pct = commission_rate_pct * commission_discount
 
-        stop_rate = default_stop_pct / 100
-        take_rate = default_take_pct / 100
+        decision = decision or {}
+        stop_loss_pct = BacktestEngine._safe_float(decision.get("adaptive_stop_pct"), default_stop_pct)
+        take_profit_pct = BacktestEngine._safe_float(decision.get("adaptive_take_pct"), default_take_pct)
+        if stop_loss_pct <= 0:
+            stop_loss_pct = default_stop_pct
+        if take_profit_pct <= 0:
+            take_profit_pct = default_take_pct
+
+        stop_rate = stop_loss_pct / 100
+        take_rate = take_profit_pct / 100
 
         if action == "BUY":
             stop_loss = entry_price * (1 - stop_rate)
             take_profit = entry_price * (1 + take_rate)
-            stop_loss_pct = default_stop_pct
-            take_profit_pct = default_take_pct
         elif action == "SELL":
             stop_loss = entry_price * (1 + stop_rate)
             take_profit = entry_price * (1 - take_rate)
-            stop_loss_pct = default_stop_pct
-            take_profit_pct = default_take_pct
         else:
             stop_loss = entry_price
             take_profit = entry_price
@@ -552,7 +699,7 @@ class BacktestEngine:
         api_key,
         symbol,
         timeframe="1",
-        score_threshold=70,
+        score_threshold=65,
         require_resonance=False,
         avoid_open_minutes=15,
         cooldown_bars=5,
@@ -563,18 +710,19 @@ class BacktestEngine:
         commission_rate_pct=0.1425,
         commission_discount=1.0,
         tax_rate_pct=0.15,
-        model_mode="walk_forward",
+        model_mode="realtime_structure",
         scan_step_bars=1,
         max_runtime_seconds=120,
         pro_filters_enabled=True,
-        max_trades_per_day=2,
+        max_trades_per_day=3,
         loss_cooldown_bars=30,
         stop_after_losses=2,
         progress_callback=None,
     ):
         """
         model_mode:
-        - walk_forward：真實模式。測某一天時，只用該日以前「全部可用歷史資料」建立模型，不設定訓練天數。
+        - realtime_structure：即時結構 AI，不訓練、不用歷史標籤，只看當下盤中量價。
+        - walk_forward：歷史校準模式。測某一天時，只用該日以前「全部可用歷史資料」建立模型。
         - same_period：Debug 模式。用同一段資料建立模型再回測，會有資料洩漏。
         - classic：不使用近 30 日模型，只跑一般 AI 備援。
         """
@@ -608,7 +756,7 @@ class BacktestEngine:
         valid_days = []
         for day in sorted(days.keys()):
             day_candles = days[day]
-            if len(day_candles) >= 60:
+            if len(day_candles) >= 40:
                 valid_days.append({"date": day, "candles": day_candles})
 
         valid_day_index = {item["date"]: idx for idx, item in enumerate(valid_days)}
@@ -697,12 +845,21 @@ class BacktestEngine:
         elif model_mode == "classic":
             shared_model_message = "一般 AI 模式：未使用近 30 日相似 K 線模型。"
 
-        else:
-            model_mode = "walk_forward"
+        elif model_mode == "realtime_structure":
             shared_model_message = (
-                "Walk-forward 真實模式：每個測試日只使用該日前所有可用歷史交易日建模，"
-                "不使用測試日當天與未來資料，也不設定訓練天數。"
-                f"｜專業濾網：ORB / VWAP / 量能 / 時段 / 假突破｜每日最多 {max_trades_per_day} 筆"
+                "即時結構 AI：不訓練、不使用事後結果、不設定訓練天數；"
+                "每一根 K 只用當下以前的 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷；"
+                "每日最多交易=取當天第一個達標訊號，不是回頭挑最佳點。"
+                f"｜每日最多 {max_trades_per_day} 筆"
+            )
+
+        else:
+            model_mode = "realtime_structure"
+            shared_model_message = (
+                "即時結構 AI：不訓練、不使用事後結果、不設定訓練天數；"
+                "每一根 K 只用當下以前的 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷；"
+                "每日最多交易=取當天第一個達標訊號，不是回頭挑最佳點。"
+                f"｜每日最多 {max_trades_per_day} 筆"
             )
 
         for day_pos, day_item in enumerate(selected_days, start=1):
@@ -713,11 +870,11 @@ class BacktestEngine:
             day = day_item["date"]
             day_candles = day_item["candles"]
 
-            if len(day_candles) < 60:
+            if len(day_candles) < 40:
                 continue
 
             base_percent = 10 + int((day_pos - 1) / max(len(selected_days), 1) * 85)
-            _progress(f"Walk-forward 回測中：{day}（{day_pos}/{len(selected_days)}）", base_percent)
+            _progress(f"即時結構回測中：{day}（{day_pos}/{len(selected_days)}）", base_percent)
 
             model_package = None
             model_message = ""
@@ -725,7 +882,11 @@ class BacktestEngine:
             model_train_end = ""
             model_train_days = 0
 
-            if model_mode == "same_period":
+            if model_mode == "realtime_structure":
+                model_package = None
+                model_message = shared_model_message
+
+            elif model_mode == "same_period":
                 model_package = shared_model_package
                 model_message = shared_model_message
                 if model_package:
@@ -797,7 +958,7 @@ class BacktestEngine:
                     skipped_days.append({"date": day, "reason": model_message})
                     continue
 
-            day_prices, day_volumes, day_vwaps, day_times = BacktestEngine._build_series(day_candles)
+            day_opens, day_highs, day_lows, day_prices, day_volumes, day_vwaps, day_times = BacktestEngine._build_ohlcv_series(day_candles)
             i = max(20, avoid_bars)
             day_trade_count = 0
             day_loss_streak = 0
@@ -824,6 +985,13 @@ class BacktestEngine:
                     model_package=model_package,
                     use_multi_period=False,
                     require_resonance=require_resonance,
+                    use_realtime_signal=(model_mode == "realtime_structure"),
+                    opens=day_opens[: i + 1],
+                    highs=day_highs[: i + 1],
+                    lows=day_lows[: i + 1],
+                    stop_pct=default_stop_pct,
+                    take_pct=default_take_pct,
+                    cost_pct=estimated_cost_pct,
                 )
 
                 if not decision:
@@ -933,6 +1101,13 @@ class BacktestEngine:
                         "professional_pass": chosen.get("professional_pass"),
                         "professional_filters": " | ".join(chosen.get("professional_filters", [])[:5]) if isinstance(chosen.get("professional_filters"), list) else chosen.get("professional_filters"),
                         "hard_fail_reasons": " | ".join(chosen.get("hard_fail_reasons", [])[:5]) if isinstance(chosen.get("hard_fail_reasons"), list) else chosen.get("hard_fail_reasons"),
+                        "tape_buy_pressure": (swing_prediction.get("tape_flow", {}) or {}).get("buy_pressure"),
+                        "tape_sell_pressure": (swing_prediction.get("tape_flow", {}) or {}).get("sell_pressure"),
+                        "orderbook_imbalance": (swing_prediction.get("orderbook_flow", {}) or {}).get("imbalance"),
+                        "market_regime": (swing_prediction.get("market_context", {}) or {}).get("regime"),
+                        "market_quality": (swing_prediction.get("market_context", {}) or {}).get("quality"),
+                        "adaptive_stop_pct": decision.get("adaptive_stop_pct"),
+                        "adaptive_take_pct": decision.get("adaptive_take_pct"),
                         "result": exit_data["result"],
                     }
                 )
@@ -958,6 +1133,8 @@ class BacktestEngine:
             leak_warning = "同區間模型有資料洩漏風險，不代表真實 AI 能力。"
         elif model_mode == "walk_forward":
             leak_warning = "Walk-forward：測試日只使用該日前所有歷史資料建模，不偷看未來。"
+        elif model_mode == "realtime_structure":
+            leak_warning = "專業即時結構 AI：只使用當下以前的盤中資料，不訓練、不偷看未來；每日最多交易代表當天第一個達標訊號，不是事後候選。"
         else:
             leak_warning = "一般 AI：未使用相似 K 線成本模型。"
 
@@ -978,7 +1155,7 @@ class BacktestEngine:
             "days": len(selected_days),
             "selected_days": selected_day_names,
             "model_mode": model_mode,
-            "history_mode": "expanding_past_only",
+            "history_mode": "realtime_structure" if model_mode == "realtime_structure" else "expanding_past_only",
             "scan_step_bars": scan_step_bars,
             "max_trades_per_day": max_trades_per_day,
             "loss_cooldown_bars": loss_cooldown_bars,
