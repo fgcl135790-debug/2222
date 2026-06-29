@@ -259,7 +259,7 @@ class IntradaySignalEngine:
         }
 
     @staticmethod
-    def _direction_score(feature, action, tape, orderbook, market_context):
+    def _direction_score(feature, action, tape, orderbook, market_context, rest_microstructure=None):
         f = feature
         score = 42.0
         reasons = []
@@ -288,6 +288,15 @@ class IntradaySignalEngine:
         tape_sell = tape.get("sell_pressure", 50)
         ob_buy = orderbook.get("buy_pressure", 50)
         ob_sell = orderbook.get("sell_pressure", 50)
+        rest_microstructure = rest_microstructure or {}
+        rest_available = bool(rest_microstructure.get("available", False))
+        rest_buy = rest_microstructure.get("buy_pressure", 50)
+        rest_sell = rest_microstructure.get("sell_pressure", 50)
+        rest_exec_risk = rest_microstructure.get("execution_risk", "")
+        rest_fake_bid = rest_microstructure.get("fake_bid_wall_risk", 0)
+        rest_fake_ask = rest_microstructure.get("fake_ask_wall_risk", 0)
+        rest_slip_buy = rest_microstructure.get("estimated_slippage_pct_buy", 0)
+        rest_slip_sell = rest_microstructure.get("estimated_slippage_pct_sell", 0)
         context_trend = market_context.get("trend", "WAIT")
         context_quality = market_context.get("quality", 50)
         regime = market_context.get("regime", "MIXED")
@@ -348,6 +357,20 @@ class IntradaySignalEngine:
             # Tape / Orderbook：有方向就加，反向就扣。
             score += (tape_buy - 50) * 0.22
             score += (ob_buy - 50) * 0.10
+            if rest_available:
+                score += (rest_buy - 50) * 0.14
+                score -= rest_fake_bid * 0.35
+                score -= max(0, rest_slip_buy - 0.12) * 18
+                if rest_buy >= 60:
+                    reasons.append("REST 五檔序列偏多：委買深度/補單速度改善。")
+                if rest_fake_bid >= 8:
+                    penalties.append("REST 偵測疑似假買牆，做多降低信心。")
+                if rest_exec_risk == "HIGH":
+                    score -= 8
+                    penalties.append("REST 估計成交難度高，做多滑價風險增加。")
+                elif rest_exec_risk == "MEDIUM":
+                    score -= 3
+                    penalties.append("REST 估計成交難度中等，需注意滑價。")
             if tape_buy >= 60:
                 reasons.append("成交流偏主動買。")
             if orderbook.get("available") and ob_buy >= 60:
@@ -414,6 +437,20 @@ class IntradaySignalEngine:
 
             score += (tape_sell - 50) * 0.22
             score += (ob_sell - 50) * 0.10
+            if rest_available:
+                score += (rest_sell - 50) * 0.14
+                score -= rest_fake_ask * 0.35
+                score -= max(0, rest_slip_sell - 0.12) * 18
+                if rest_sell >= 60:
+                    reasons.append("REST 五檔序列偏空：委賣深度/壓力增加。")
+                if rest_fake_ask >= 8:
+                    penalties.append("REST 偵測疑似假賣牆，做空降低信心。")
+                if rest_exec_risk == "HIGH":
+                    score -= 8
+                    penalties.append("REST 估計成交難度高，做空滑價風險增加。")
+                elif rest_exec_risk == "MEDIUM":
+                    score -= 3
+                    penalties.append("REST 估計成交難度中等，需注意滑價。")
             if tape_sell >= 60:
                 reasons.append("成交流偏主動賣。")
             if orderbook.get("available") and ob_sell >= 60:
@@ -528,6 +565,7 @@ class IntradaySignalEngine:
         time_values=None,
         bids=None,
         asks=None,
+        rest_microstructure=None,
         stop_pct=0.7,
         take_pct=1.8,
         cost_pct=0.435,
@@ -549,6 +587,12 @@ class IntradaySignalEngine:
 
         tape = TapeFlowEngine.analyze(prices=prices, volumes=volumes)
         orderbook = OrderBookFlowEngine.analyze(bids=bids, asks=asks, price=feature.get("price"))
+        rest_microstructure = rest_microstructure or {}
+        if rest_microstructure.get("available"):
+            # REST 序列比單次五檔快照更可靠，混合進五檔壓力。
+            orderbook["buy_pressure"] = round((orderbook.get("buy_pressure", 50) * 0.45) + (rest_microstructure.get("buy_pressure", 50) * 0.55), 2)
+            orderbook["sell_pressure"] = round((orderbook.get("sell_pressure", 50) * 0.45) + (rest_microstructure.get("sell_pressure", 50) * 0.55), 2)
+            orderbook["rest_sequence_available"] = True
         market_context = MarketContextEngine.analyze(
             prices=prices,
             volumes=volumes,
@@ -574,20 +618,22 @@ class IntradaySignalEngine:
 
         eff_stop = risk_plan.get("stop_pct", stop_pct)
         eff_take = risk_plan.get("take_pct", take_pct)
-        required = IntradaySignalEngine.required_win_rate_pct(eff_stop, eff_take, cost_pct, safety_margin=0.0)
+        rest_cost_add = IntradaySignalEngine._safe_float(rest_microstructure.get("effective_cost_add_pct", 0), 0) if rest_microstructure else 0
+        effective_cost_pct = cost_pct + min(max(rest_cost_add, 0), 0.35)
+        required = IntradaySignalEngine.required_win_rate_pct(eff_stop, eff_take, effective_cost_pct, safety_margin=0.0)
 
         buy_score, buy_reasons, buy_penalties = IntradaySignalEngine._direction_score(
-            feature, "BUY", tape=tape, orderbook=orderbook, market_context=market_context
+            feature, "BUY", tape=tape, orderbook=orderbook, market_context=market_context, rest_microstructure=rest_microstructure
         )
         sell_score, sell_reasons, sell_penalties = IntradaySignalEngine._direction_score(
-            feature, "SELL", tape=tape, orderbook=orderbook, market_context=market_context
+            feature, "SELL", tape=tape, orderbook=orderbook, market_context=market_context, rest_microstructure=rest_microstructure
         )
 
         context_quality = market_context.get("quality", 50)
         buy_wr = IntradaySignalEngine._score_to_win_rate(buy_score, required, context_quality=context_quality)
         sell_wr = IntradaySignalEngine._score_to_win_rate(sell_score, required, context_quality=context_quality)
-        buy_ev = IntradaySignalEngine.estimate_ev(buy_wr, eff_stop, eff_take, cost_pct)
-        sell_ev = IntradaySignalEngine.estimate_ev(sell_wr, eff_stop, eff_take, cost_pct)
+        buy_ev = IntradaySignalEngine.estimate_ev(buy_wr, eff_stop, eff_take, effective_cost_pct)
+        sell_ev = IntradaySignalEngine.estimate_ev(sell_wr, eff_stop, eff_take, effective_cost_pct)
 
         buy = {
             "action": "BUY",
@@ -628,6 +674,8 @@ class IntradaySignalEngine:
         common_reasons.extend(tape.get("reasons", [])[:2])
         if orderbook.get("available"):
             common_reasons.extend(orderbook.get("reasons", [])[:2])
+        if rest_microstructure.get("available"):
+            common_reasons.extend(rest_microstructure.get("reasons", [])[:3])
         common_reasons.extend(risk_plan.get("reasons", [])[:2])
 
         base_payload = {
@@ -638,6 +686,10 @@ class IntradaySignalEngine:
             "risk_plan": risk_plan,
             "tape_flow": tape,
             "orderbook_flow": orderbook,
+            "rest_microstructure": rest_microstructure,
+            "estimated_slippage_pct": round(rest_cost_add, 3),
+            "execution_risk": rest_microstructure.get("execution_risk", ""),
+            "effective_cost_pct": round(effective_cost_pct, 3),
             "market_context": market_context,
             "feature": feature,
             "adaptive_stop_pct": eff_stop,
@@ -655,7 +707,7 @@ class IntradaySignalEngine:
                 "reasons": [
                     f"BUY 分數 {buy['score']}｜勝率估 {buy['win_rate']}%｜EV {buy['expected_value']}%",
                     f"SELL 分數 {sell['score']}｜勝率估 {sell['win_rate']}%｜EV {sell['expected_value']}%",
-                    f"需求勝率 {required}%｜最低 EV {min_expected_value}%｜最低 Score {min_score}",
+                    f"需求勝率 {required}%｜最低 EV {min_expected_value}%｜最低 Score {min_score}｜有效成本 {effective_cost_pct:.3f}%",
                     *(common_reasons[:5]),
                     *(chosen.get("penalties", [])[:3]),
                 ],

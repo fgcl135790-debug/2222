@@ -111,17 +111,9 @@ class DecisionEngine:
                 reason="尚未建立成本感知模型，且一般 AI 分數低於 75，暫不出手。",
                 extra={"reasons": reasons, "rebound": rebound},
             )
-        signal = ai if isinstance(ai, dict) else {}
-     
-        risk_plan = signal.get("risk_plan", {}) or {}
-        stop_pct = DecisionEngine._safe_float(
-            signal.get("adaptive_stop_pct") or risk_plan.get("stop_pct"),
-            DecisionEngine.DEFAULT_STOP_PCT,
-        )
-        take_pct = DecisionEngine._safe_float(
-            signal.get("adaptive_take_pct") or risk_plan.get("take_pct"),
-            DecisionEngine.DEFAULT_TAKE_PCT,
-        )
+
+        stop_pct = DecisionEngine.DEFAULT_STOP_PCT
+        take_pct = DecisionEngine.DEFAULT_TAKE_PCT
         risk_reward = take_pct / max(stop_pct, 0.01)
 
         if action == "BUY":
@@ -277,15 +269,8 @@ class DecisionEngine:
     def _payload_from_realtime_signal(signal, price):
         action = signal.get("decision", "WAIT")
         chosen = signal.get("chosen", {}) or {}
-        risk_plan = signal.get("risk_plan", {}) or {}
-        stop_pct = DecisionEngine._safe_float(
-            signal.get("adaptive_stop_pct") or risk_plan.get("stop_pct"),
-            DecisionEngine.DEFAULT_STOP_PCT,
-        )
-        take_pct = DecisionEngine._safe_float(
-            signal.get("adaptive_take_pct") or risk_plan.get("take_pct"),
-            DecisionEngine.DEFAULT_TAKE_PCT,
-        )
+        stop_pct = DecisionEngine.DEFAULT_STOP_PCT
+        take_pct = DecisionEngine.DEFAULT_TAKE_PCT
         risk_reward = take_pct / max(stop_pct, 0.01)
 
         if action not in ["BUY", "SELL"]:
@@ -346,6 +331,9 @@ class DecisionEngine:
             "expected_value": chosen.get("expected_value", 0),
             "predicted_win_rate": chosen.get("win_rate", 0),
             "required_win_rate": signal.get("required_win_rate", 0),
+            "rest_microstructure": signal.get("rest_microstructure", {}),
+            "estimated_slippage_pct": signal.get("estimated_slippage_pct", 0),
+            "execution_risk": signal.get("execution_risk", ""),
             "model_label_rows": 0,
             "model_start_date": "即時結構",
             "model_end_date": "不訓練",
@@ -372,6 +360,7 @@ class DecisionEngine:
         time_values=None,
         bids=None,
         asks=None,
+        rest_microstructure=None,
     ):
         ai = ai or {}
         price = DecisionEngine._safe_float(price)
@@ -404,6 +393,7 @@ class DecisionEngine:
                 time_values=time_values,
                 bids=bids,
                 asks=asks,
+                rest_microstructure=rest_microstructure,
                 stop_pct=DecisionEngine.DEFAULT_STOP_PCT,
                 take_pct=DecisionEngine.DEFAULT_TAKE_PCT,
                 cost_pct=DecisionEngine.COST_PCT,
@@ -426,6 +416,7 @@ class DecisionEngine:
                 time_values=time_values,
                 bids=bids,
                 asks=asks,
+                rest_microstructure=rest_microstructure,
                 stop_pct=DecisionEngine.DEFAULT_STOP_PCT,
                 take_pct=DecisionEngine.DEFAULT_TAKE_PCT,
                 cost_pct=DecisionEngine.COST_PCT,
@@ -503,6 +494,7 @@ class DecisionEngine:
             time_values=time_values,
             bids=bids,
             asks=asks,
+            rest_microstructure=rest_microstructure,
             stop_pct=stop_pct,
             take_pct=take_pct,
             cost_pct=cost_pct,
