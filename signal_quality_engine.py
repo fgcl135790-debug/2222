@@ -53,6 +53,7 @@ class SignalQualityEngine:
         market_context=None,
         risk_plan=None,
         rest_microstructure=None,
+        streak_volume=None,
         stop_pct=0.7,
         take_pct=1.8,
         cost_pct=0.435,
@@ -67,6 +68,7 @@ class SignalQualityEngine:
         market_context = market_context or {}
         risk_plan = risk_plan or {}
         rest_microstructure = rest_microstructure or {}
+        streak_volume = streak_volume or {}
 
         if action not in ["BUY", "SELL"]:
             return {
@@ -108,6 +110,13 @@ class SignalQualityEngine:
         trend = str(market_context.get("trend", market_context.get("direction", "")) or "")
         execution_risk = str(rest_microstructure.get("execution_risk", "") or "")
         slippage_add = SignalQualityEngine._f(rest_microstructure.get("effective_cost_add_pct"), 0.0)
+        streak_available = bool(streak_volume.get("available", False))
+        buy_streak_count = SignalQualityEngine._f(streak_volume.get("buy_streak_count"), 0.0)
+        sell_streak_count = SignalQualityEngine._f(streak_volume.get("sell_streak_count"), 0.0)
+        streak_volume_ratio = SignalQualityEngine._f(streak_volume.get("streak_volume_ratio"), 1.0)
+        streak_follow = SignalQualityEngine._f(streak_volume.get("streak_follow_through"), 0.0)
+        streak_exhaustion = SignalQualityEngine._f(streak_volume.get("volume_exhaustion_risk"), 0.0)
+        streak_absorption = SignalQualityEngine._f(streak_volume.get("absorption_risk"), 0.0)
 
         # 已知「空間」：做多看上方空間，做空看下方空間。
         upside_room_pct = max(0.0, (day_high - price) / price * 100.0)
@@ -144,6 +153,16 @@ class SignalQualityEngine:
                 reasons.append("Tape 主動買壓優於賣壓")
             if ob_buy > ob_sell + 8:
                 reasons.append("五檔買盤支撐優於賣壓")
+            if streak_available:
+                if buy_streak_count >= 3 and streak_volume_ratio >= 1.15 and streak_follow >= 0.15:
+                    adjustment += 6
+                    reasons.append("買方連次連量且價格續強")
+                elif sell_streak_count >= 2:
+                    adjustment -= 5
+                    fails.append("反向賣方連次明顯")
+                if streak_exhaustion >= 8 or streak_absorption >= 8:
+                    adjustment -= 6
+                    fails.append("連量後推進不足，疑似末端爆量或吸收")
 
         else:
             direction_momentum = -(slope_3 * 0.35 + slope_5 * 0.35 + slope_10 * 0.30)
@@ -166,8 +185,18 @@ class SignalQualityEngine:
                 reasons.append("Tape 主動賣壓優於買壓")
             if ob_sell > ob_buy + 8:
                 reasons.append("五檔賣壓優於買盤")
+            if streak_available:
+                if sell_streak_count >= 3 and streak_volume_ratio >= 1.15 and streak_follow >= 0.15:
+                    adjustment += 6
+                    reasons.append("賣方連次連量且價格續弱")
+                elif buy_streak_count >= 2:
+                    adjustment -= 5
+                    fails.append("反向買方連次明顯")
+                if streak_exhaustion >= 8 or streak_absorption >= 8:
+                    adjustment -= 6
+                    fails.append("連量後推進不足，疑似恐慌末端或吸收")
 
-        # 時段品質：不是硬封鎖，只做合理加減分。
+        # 時段品質：不是硬封鎖，只做合理加減分.
         if 15 <= minute <= 35:
             adjustment += 4
             reasons.append("早盤主波段時段，允許較積極判斷")

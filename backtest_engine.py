@@ -306,6 +306,7 @@ class BacktestEngine:
                         "required_win_rate": signal.get("required_win_rate", 0),
                         "risk_plan": risk_plan,
                         "tape_flow": signal.get("tape_flow", {}),
+                        "streak_volume": signal.get("streak_volume", {}),
                         "orderbook_flow": signal.get("orderbook_flow", {}),
                         "market_context": signal.get("market_context", {}),
                         "feature": signal.get("feature", {}),
@@ -347,6 +348,7 @@ class BacktestEngine:
                     "sell": signal.get("sell", {}),
                     "chosen": signal.get("chosen", {}),
                     "required_win_rate": signal.get("required_win_rate", 0),
+                    "streak_volume": signal.get("streak_volume", {}),
                     "feature": signal.get("feature", {}),
                 },
                 "risk_level": "HIGH",
@@ -542,7 +544,6 @@ class BacktestEngine:
                 current_candle=c,
                 bars_held=max(0, i - entry_index),
                 best_favorable_pct=best_favorable_pct,
-                cost_pct=(effective_commission_pct * 2 + tax_rate_pct),
             )
             if management:
                 best_favorable_pct = management.get("best_favorable_pct", best_favorable_pct)
@@ -1090,6 +1091,7 @@ class BacktestEngine:
                 buy_pred = swing_prediction.get("buy", {}) or {}
                 sell_pred = swing_prediction.get("sell", {}) or {}
                 feature_pred = swing_prediction.get("feature", {}) or {}
+                streak_pred = swing_prediction.get("streak_volume", {}) or {}
 
                 trades.append(
                     {
@@ -1161,6 +1163,15 @@ class BacktestEngine:
                         "close_location": feature_pred.get("close_location"),
                         "volume_ratio_5": feature_pred.get("volume_ratio_5"),
                         "volume_acceleration": feature_pred.get("volume_acceleration"),
+                        "buy_streak_count": streak_pred.get("buy_streak_count"),
+                        "sell_streak_count": streak_pred.get("sell_streak_count"),
+                        "buy_streak_volume": streak_pred.get("buy_streak_volume"),
+                        "sell_streak_volume": streak_pred.get("sell_streak_volume"),
+                        "streak_volume_ratio": streak_pred.get("streak_volume_ratio"),
+                        "streak_follow_through": streak_pred.get("streak_follow_through"),
+                        "volume_exhaustion_risk": streak_pred.get("volume_exhaustion_risk"),
+                        "absorption_risk": streak_pred.get("absorption_risk"),
+                        "streak_reasons": " | ".join(streak_pred.get("reasons", [])[:5]) if isinstance(streak_pred.get("reasons"), list) else streak_pred.get("reasons"),
                         "result": exit_data["result"],
                     }
                 )

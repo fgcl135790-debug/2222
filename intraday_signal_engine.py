@@ -6,6 +6,7 @@ from orderbook_flow_engine import OrderBookFlowEngine
 from market_context_engine import MarketContextEngine
 from adaptive_risk_engine import AdaptiveRiskEngine
 from signal_quality_engine import SignalQualityEngine
+from streak_volume_engine import StreakVolumeEngine
 
 
 class IntradaySignalEngine:
@@ -260,7 +261,7 @@ class IntradaySignalEngine:
         }
 
     @staticmethod
-    def _direction_score(feature, action, tape, orderbook, market_context, rest_microstructure=None):
+    def _direction_score(feature, action, tape, orderbook, market_context, rest_microstructure=None, streak_volume=None):
         f = feature
         score = 42.0
         reasons = []
@@ -290,6 +291,8 @@ class IntradaySignalEngine:
         ob_buy = orderbook.get("buy_pressure", 50)
         ob_sell = orderbook.get("sell_pressure", 50)
         rest_microstructure = rest_microstructure or {}
+        streak_volume = streak_volume or {}
+        streak_available = bool(streak_volume.get("available", False))
         rest_available = bool(rest_microstructure.get("available", False))
         rest_buy = rest_microstructure.get("buy_pressure", 50)
         rest_sell = rest_microstructure.get("sell_pressure", 50)
@@ -354,6 +357,19 @@ class IntradaySignalEngine:
                 reasons.append("量能脈衝放大。")
             if vr5 >= 1.7 or vr20 >= 1.5:
                 score += 4
+
+            # 連次 / 連量：確認是不是連續攻擊，而不是單根爆量。
+            if streak_available:
+                adj = streak_volume.get("buy_score_adj", 0)
+                score += adj
+                if adj > 3:
+                    reasons.extend(streak_volume.get("reasons", [])[:2])
+                elif adj < -3:
+                    penalties.extend(streak_volume.get("reasons", [])[:2])
+                if streak_volume.get("buy_streak_count", 0) >= 3 and streak_volume.get("streak_follow_through", 0) >= 0.18:
+                    reasons.append("買方連次連量後價格續強。")
+                if streak_volume.get("sell_streak_count", 0) >= 2:
+                    penalties.append("當下賣方連次較明顯，做多降分。")
 
             # Tape / Orderbook：有方向就加，反向就扣。
             score += (tape_buy - 50) * 0.22
@@ -435,6 +451,19 @@ class IntradaySignalEngine:
                 reasons.append("量能脈衝放大。")
             if vr5 >= 1.7 or vr20 >= 1.5:
                 score += 4
+
+            # 連次 / 連量：確認是不是連續攻擊，而不是單根爆量。
+            if streak_available:
+                adj = streak_volume.get("sell_score_adj", 0)
+                score += adj
+                if adj > 3:
+                    reasons.extend(streak_volume.get("reasons", [])[:2])
+                elif adj < -3:
+                    penalties.extend(streak_volume.get("reasons", [])[:2])
+                if streak_volume.get("sell_streak_count", 0) >= 3 and streak_volume.get("streak_follow_through", 0) >= 0.18:
+                    reasons.append("賣方連次連量後價格續弱。")
+                if streak_volume.get("buy_streak_count", 0) >= 2:
+                    penalties.append("當下買方連次較明顯，做空降分。")
 
             score += (tape_sell - 50) * 0.22
             score += (ob_sell - 50) * 0.10
@@ -587,6 +616,14 @@ class IntradaySignalEngine:
             return IntradaySignalEngine._wait("盤中資料不足，至少需要 16 根 K。")
 
         tape = TapeFlowEngine.analyze(prices=prices, volumes=volumes)
+        streak_volume = StreakVolumeEngine.analyze(
+            prices=prices,
+            volumes=volumes,
+            opens=opens,
+            highs=highs,
+            lows=lows,
+            vwap_values=vwap_values,
+        )
         orderbook = OrderBookFlowEngine.analyze(bids=bids, asks=asks, price=feature.get("price"))
         rest_microstructure = rest_microstructure or {}
         if rest_microstructure.get("available"):
@@ -624,10 +661,10 @@ class IntradaySignalEngine:
         required = IntradaySignalEngine.required_win_rate_pct(eff_stop, eff_take, effective_cost_pct, safety_margin=0.0)
 
         buy_score, buy_reasons, buy_penalties = IntradaySignalEngine._direction_score(
-            feature, "BUY", tape=tape, orderbook=orderbook, market_context=market_context, rest_microstructure=rest_microstructure
+            feature, "BUY", tape=tape, orderbook=orderbook, market_context=market_context, rest_microstructure=rest_microstructure, streak_volume=streak_volume
         )
         sell_score, sell_reasons, sell_penalties = IntradaySignalEngine._direction_score(
-            feature, "SELL", tape=tape, orderbook=orderbook, market_context=market_context, rest_microstructure=rest_microstructure
+            feature, "SELL", tape=tape, orderbook=orderbook, market_context=market_context, rest_microstructure=rest_microstructure, streak_volume=streak_volume
         )
 
         context_quality = market_context.get("quality", 50)
@@ -678,6 +715,7 @@ class IntradaySignalEngine:
             market_context=market_context,
             risk_plan=risk_plan,
             rest_microstructure=rest_microstructure,
+            streak_volume=streak_volume,
             stop_pct=eff_stop,
             take_pct=eff_take,
             cost_pct=effective_cost_pct,
@@ -706,6 +744,7 @@ class IntradaySignalEngine:
         common_reasons = []
         common_reasons.extend(market_context.get("reasons", [])[:2])
         common_reasons.extend(tape.get("reasons", [])[:2])
+        common_reasons.extend(streak_volume.get("reasons", [])[:2])
         if orderbook.get("available"):
             common_reasons.extend(orderbook.get("reasons", [])[:2])
         if rest_microstructure.get("available"):
@@ -719,6 +758,7 @@ class IntradaySignalEngine:
             "required_win_rate": required,
             "risk_plan": risk_plan,
             "tape_flow": tape,
+            "streak_volume": streak_volume,
             "orderbook_flow": orderbook,
             "rest_microstructure": rest_microstructure,
             "estimated_slippage_pct": round(rest_cost_add, 3),
