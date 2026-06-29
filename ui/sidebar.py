@@ -54,19 +54,15 @@ def render_sidebar(reset_callback):
         )
 
         websocket_enabled = st.toggle(
-            "啟用 WebSocket 即時流",
+            "啟用 WebSocket",
             value=st.session_state.get("websocket_enabled", True),
             key="websocket_enabled",
-            help="使用 Fugle WebSocket 訂閱 trades/books/candles。若權限不足或連線失敗，會自動退回 REST。",
         )
 
-        st.divider()
-
         mobile_layout = st.toggle(
-            "手機版單欄排版",
+            "手機版單欄",
             value=st.session_state.get("mobile_layout", False),
             key="mobile_layout",
-            help="手機觀看請打開。會把左右欄改成單欄，並把圖表控制改成下拉式，避免畫面被撐寬。",
         )
 
         if st.button("重置股票", key="sidebar_reset_stock"):

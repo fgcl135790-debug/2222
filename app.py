@@ -386,19 +386,12 @@ def main():
         else "主程式 API KEY：未讀取"
     )
 
-    render_backtest_sidebar_panel(
-        api_key=api_key,
-        stock_code=stock_code,
-    )
+    # =========================
+    # Sidebar：只保留實戰看盤必要功能
+    # 已移除：回測、勝率統計、真實K線匯出、當沖模型介紹區塊
+    # =========================
 
-    render_win_rate_sidebar_panel()
-
-    render_kline_export_sidebar_panel(
-        api_key=api_key,
-        stock_code=stock_code,
-    )
-
-    with st.sidebar.expander("📡 WebSocket 即時流", expanded=False):
+    with st.sidebar.expander("📡 WebSocket 診斷", expanded=True):
         if data_source == "真實盤" and websocket_enabled and api_key:
             WebSocketLiveEngine.ensure_running(
                 api_key=api_key,
@@ -412,13 +405,6 @@ def main():
                 enabled=False,
             )
         WebSocketLiveEngine.render_sidebar_status(st)
-        st.caption("訂閱：trades / books / candles。失敗時主畫面會自動使用 REST 備援。")
-
-    _render_intraday_model_sidebar(
-        api_key=api_key,
-        stock_code=stock_code,
-        data_source=data_source,
-    )
 
     # =========================
     # 切換股票 / 資料來源 / 模擬模式時清空
