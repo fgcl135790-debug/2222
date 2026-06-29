@@ -12,6 +12,7 @@ from decision_engine import DecisionEngine
 from multi_period_engine import MultiPeriodEngine
 from intraday_label_engine import IntradayLabelEngine
 from intraday_signal_engine import IntradaySignalEngine
+from trade_management_engine import TradeManagementEngine
 
 try:
     from stock_model_cache import StockModelCache
@@ -317,6 +318,11 @@ class BacktestEngine:
                     "expected_value": chosen.get("expected_value", 0),
                     "predicted_win_rate": chosen.get("win_rate", 0),
                     "required_win_rate": signal.get("required_win_rate", 0),
+                    "estimated_mfe_pct": signal.get("estimated_mfe_pct", chosen.get("estimated_mfe_pct", 0)),
+                    "estimated_mae_pct": signal.get("estimated_mae_pct", chosen.get("estimated_mae_pct", 0)),
+                    "mfe_mae_ratio": signal.get("mfe_mae_ratio", chosen.get("mfe_mae_ratio", 0)),
+                    "ev_after_quality": signal.get("ev_after_quality", chosen.get("ev_after_quality", 0)),
+                    "signal_quality": signal.get("signal_quality", {}),
                     "model_label_rows": 0,
                 }
             return {
@@ -347,6 +353,10 @@ class BacktestEngine:
                 "expected_value": (signal.get("chosen", {}) or {}).get("expected_value", 0),
                 "predicted_win_rate": (signal.get("chosen", {}) or {}).get("win_rate", 0),
                 "required_win_rate": signal.get("required_win_rate", 0),
+                "estimated_mfe_pct": signal.get("estimated_mfe_pct", 0),
+                "estimated_mae_pct": signal.get("estimated_mae_pct", 0),
+                "mfe_mae_ratio": signal.get("mfe_mae_ratio", 0),
+                "ev_after_quality": signal.get("ev_after_quality", 0),
             }
 
         # 成本感知模型模式：直接讓 DecisionEngine 用模型判斷，避免每根 K 都跑一般 AI。
@@ -494,6 +504,7 @@ class BacktestEngine:
         exit_reason = "時間出場"
         exit_index = min(len(day_candles) - 1, entry_index + max_hold_bars)
         end_index = min(len(day_candles) - 1, entry_index + max_hold_bars)
+        best_favorable_pct = 0.0
 
         for i in range(entry_index + 1, end_index + 1):
             c = day_candles[i]
@@ -521,6 +532,22 @@ class BacktestEngine:
                 if low <= take_profit:
                     exit_price = take_profit
                     exit_reason = "停利"
+                    exit_index = i
+                    break
+
+            # 進場後管理：方向沒有推進、浮盈回吐、或反向K明顯時提前退出。
+            management = TradeManagementEngine.check_exit(
+                action=action,
+                entry_price=entry_price,
+                current_candle=c,
+                bars_held=max(0, i - entry_index),
+                best_favorable_pct=best_favorable_pct,
+            )
+            if management:
+                best_favorable_pct = management.get("best_favorable_pct", best_favorable_pct)
+                if management.get("exit"):
+                    exit_price = management.get("exit_price", close)
+                    exit_reason = management.get("reason", "進場後管理出場")
                     exit_index = i
                     break
 
@@ -565,6 +592,7 @@ class BacktestEngine:
             "tax_rate_pct": tax_rate_pct,
             "hold_bars": hold_bars,
             "max_hold_bars": max_hold_bars,
+            "best_favorable_pct": best_favorable_pct,
         }
 
     @staticmethod
@@ -1095,6 +1123,14 @@ class BacktestEngine:
                         "predicted_expected_value": chosen.get("expected_value"),
                         "predicted_win_rate": chosen.get("win_rate"),
                         "required_win_rate": swing_prediction.get("required_win_rate"),
+                        "estimated_mfe_pct": decision.get("estimated_mfe_pct", chosen.get("estimated_mfe_pct")),
+                        "estimated_mae_pct": decision.get("estimated_mae_pct", chosen.get("estimated_mae_pct")),
+                        "mfe_mae_ratio": decision.get("mfe_mae_ratio", chosen.get("mfe_mae_ratio")),
+                        "ev_after_quality": decision.get("ev_after_quality", chosen.get("ev_after_quality")),
+                        "quality_adjustment": chosen.get("quality_adjustment"),
+                        "quality_fail_reasons": " | ".join(chosen.get("quality_fail_reasons", [])[:5]) if isinstance(chosen.get("quality_fail_reasons"), list) else chosen.get("quality_fail_reasons"),
+                        "quality_reasons": " | ".join(chosen.get("quality_reasons", [])[:5]) if isinstance(chosen.get("quality_reasons"), list) else chosen.get("quality_reasons"),
+                        "best_favorable_pct": round(exit_data.get("best_favorable_pct", 0), 3),
                         "predicted_sample_count": chosen.get("sample_count"),
                         "buy_expected_value": buy_pred.get("expected_value"),
                         "sell_expected_value": sell_pred.get("expected_value"),

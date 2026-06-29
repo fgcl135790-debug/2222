@@ -5,6 +5,7 @@ from tape_flow_engine import TapeFlowEngine
 from orderbook_flow_engine import OrderBookFlowEngine
 from market_context_engine import MarketContextEngine
 from adaptive_risk_engine import AdaptiveRiskEngine
+from signal_quality_engine import SignalQualityEngine
 
 
 class IntradaySignalEngine:
@@ -663,10 +664,43 @@ class IntradaySignalEngine:
         sell_edge = sell_score + sell_ev * 20 + (tape.get("sell_pressure", 50) - 50) * 0.10
         chosen = buy if buy_edge >= sell_edge else sell
 
+        # =========================
+        # Signal Quality Gate v1
+        # - 用當下以前資料估 MFE / MAE
+        # - 避免方向看起來對，但停利空間不足、滑價過高、或不利波動太大的交易。
+        # =========================
+        quality = SignalQualityEngine.evaluate(
+            action=chosen.get("action"),
+            chosen=chosen,
+            feature=feature,
+            tape_flow=tape,
+            orderbook_flow=orderbook,
+            market_context=market_context,
+            risk_plan=risk_plan,
+            rest_microstructure=rest_microstructure,
+            stop_pct=eff_stop,
+            take_pct=eff_take,
+            cost_pct=effective_cost_pct,
+            min_quality_ev=max(min_expected_value, 0.04),
+            min_mfe_mae_ratio=1.12,
+        )
+
+        # 用品質後分數與 EV 取代原本只看結構分數。
+        chosen["raw_score_before_quality"] = chosen.get("score", 0)
+        chosen["score"] = round(max(chosen.get("score", 0), quality.get("quality_score", chosen.get("score", 0))), 2)
+        chosen["estimated_mfe_pct"] = quality.get("estimated_mfe_pct", 0)
+        chosen["estimated_mae_pct"] = quality.get("estimated_mae_pct", 0)
+        chosen["mfe_mae_ratio"] = quality.get("mfe_mae_ratio", 0)
+        chosen["ev_after_quality"] = quality.get("ev_after_quality", chosen.get("expected_value", 0))
+        chosen["quality_adjustment"] = quality.get("quality_adjustment", 0)
+        chosen["quality_reasons"] = quality.get("quality_reasons", [])
+        chosen["quality_fail_reasons"] = quality.get("quality_fail_reasons", [])
+
         can_trade = (
             chosen["score"] >= min_score
             and chosen["expected_value"] >= min_expected_value
             and chosen["win_rate"] >= required
+            and quality.get("pass_quality_gate", False)
         )
 
         common_reasons = []
@@ -692,6 +726,11 @@ class IntradaySignalEngine:
             "effective_cost_pct": round(effective_cost_pct, 3),
             "market_context": market_context,
             "feature": feature,
+            "signal_quality": quality,
+            "estimated_mfe_pct": quality.get("estimated_mfe_pct", 0),
+            "estimated_mae_pct": quality.get("estimated_mae_pct", 0),
+            "mfe_mae_ratio": quality.get("mfe_mae_ratio", 0),
+            "ev_after_quality": quality.get("ev_after_quality", 0),
             "adaptive_stop_pct": eff_stop,
             "adaptive_take_pct": eff_take,
         }
@@ -708,8 +747,10 @@ class IntradaySignalEngine:
                     f"BUY 分數 {buy['score']}｜勝率估 {buy['win_rate']}%｜EV {buy['expected_value']}%",
                     f"SELL 分數 {sell['score']}｜勝率估 {sell['win_rate']}%｜EV {sell['expected_value']}%",
                     f"需求勝率 {required}%｜最低 EV {min_expected_value}%｜最低 Score {min_score}｜有效成本 {effective_cost_pct:.3f}%",
-                    *(common_reasons[:5]),
-                    *(chosen.get("penalties", [])[:3]),
+                    f"品質閘門：MFE {quality.get('estimated_mfe_pct', 0)}%｜MAE {quality.get('estimated_mae_pct', 0)}%｜比值 {quality.get('mfe_mae_ratio', 0)}｜品質EV {quality.get('ev_after_quality', 0)}%",
+                    *(quality.get("quality_fail_reasons", [])[:4]),
+                    *(common_reasons[:4]),
+                    *(chosen.get("penalties", [])[:2]),
                 ],
                 "risk_level": "HIGH",
                 "model": "professional_realtime_flow_ai",
@@ -724,10 +765,12 @@ class IntradaySignalEngine:
             "reason": f"{chosen['action']} 分數 {chosen['score']}，扣成本期望 {chosen['expected_value']}%。",
             "reasons": [
                 f"{chosen['action']} 結構分數 {chosen['score']}，估計勝率 {chosen['win_rate']}%，需求 {required}%",
-                f"扣成本後期望 {chosen['expected_value']}%｜動態停損 {eff_stop}%｜動態停利 {eff_take}%",
-                *(chosen.get("reasons", [])[:4]),
-                *(common_reasons[:5]),
-                *(chosen.get("penalties", [])[:3]),
+                f"扣成本後期望 {chosen['expected_value']}%｜品質後EV {quality.get('ev_after_quality', 0)}%｜動態停損 {eff_stop}%｜動態停利 {eff_take}%",
+                f"MFE/MAE 預估：{quality.get('estimated_mfe_pct', 0)}% / {quality.get('estimated_mae_pct', 0)}%｜比值 {quality.get('mfe_mae_ratio', 0)}",
+                *(quality.get("quality_reasons", [])[:4]),
+                *(chosen.get("reasons", [])[:3]),
+                *(common_reasons[:4]),
+                *(chosen.get("penalties", [])[:2]),
             ],
             "risk_level": "NORMAL",
             "model": "professional_realtime_flow_ai",

@@ -26,6 +26,12 @@ except Exception:  # pragma: no cover
 
 WS_URL = "wss://api.fugle.tw/marketdata/v1.0/stock/streaming"
 CHANNELS = ["trades", "books", "candles"]
+MAX_CONN_COOLDOWN_SEC = 300
+
+
+def _is_max_connection_error(message: Any) -> bool:
+    text = str(message or "").lower()
+    return "maximum number of connections" in text or "connection limit" in text or "too many connections" in text
 
 
 class _Safe:
@@ -91,6 +97,8 @@ class _WSState:
     last_error: str = ""
     last_message_ts: float = 0.0
     started_ts: float = 0.0
+    cooldown_until_ts: float = 0.0
+    cooldown_reason: str = ""
 
     subscribed: Dict[str, str] = field(default_factory=dict)
     channel_status: Dict[str, str] = field(default_factory=lambda: {ch: "not_sent" for ch in CHANNELS})
@@ -164,12 +172,16 @@ class _FugleWSWorker:
             )
             self.wsapp.run_forever(ping_interval=20, ping_timeout=10, reconnect=0)
         except Exception as e:
+            msg = f"WebSocket 執行失敗：{type(e).__name__}: {e}"
             with _LOCK:
-                _STATE.last_error = f"WebSocket 執行失敗：{type(e).__name__}: {e}"
+                _STATE.last_error = msg
                 _STATE.connected = False
                 _STATE.authenticated = False
                 _STATE.auth_status = "failed"
                 _STATE.last_event = "error"
+                if _is_max_connection_error(msg):
+                    _STATE.cooldown_until_ts = _now_ts() + MAX_CONN_COOLDOWN_SEC
+                    _STATE.cooldown_reason = "Fugle 回覆連線數已達上限，暫停重連，避免越連越多。"
 
     def _send(self, payload: Dict[str, Any]):
         try:
@@ -199,9 +211,16 @@ class _FugleWSWorker:
                 _STATE.last_error = f"WebSocket closed: {code} {reason}"
 
     def _on_error(self, ws, error):
+        msg = f"WebSocket error: {error}"
         with _LOCK:
-            _STATE.last_error = f"WebSocket error: {error}"
+            _STATE.last_error = msg
             _STATE.last_event = "error"
+            if _is_max_connection_error(msg):
+                _STATE.cooldown_until_ts = _now_ts() + MAX_CONN_COOLDOWN_SEC
+                _STATE.cooldown_reason = "Fugle 回覆連線數已達上限，已進入 5 分鐘重連冷卻。"
+                _STATE.connected = False
+                _STATE.authenticated = False
+                _STATE.auth_status = "failed"
 
     def _subscribe_all(self):
         # 逐一送出，不用 channels 陣列，避免 raw WS 格式不相容。
@@ -437,13 +456,20 @@ class WebSocketLiveEngine:
             return WebSocketLiveEngine.get_status()
 
         key_hash = WebSocketLiveEngine._hash_key(api_key)
+        now = _now_ts()
+        with _LOCK:
+            if _STATE.cooldown_until_ts and now < _STATE.cooldown_until_ts:
+                # 連線數達上限時不要在每次 Streamlit rerun 重連，否則會讓 Fugle 繼續拒絕。
+                return WebSocketLiveEngine.get_status()
+
         need_restart = False
         with _LOCK:
             if _WORKER is None:
                 need_restart = True
             elif _STATE.symbol != symbol or _STATE.api_key_hash != key_hash:
                 need_restart = True
-            elif _STATE.last_event in ["closed", "error"] and (_now_ts() - _STATE.last_message_ts > 8):
+            elif _STATE.last_event in ["closed", "error"] and (_now_ts() - _STATE.last_message_ts > 30):
+                # 錯誤後延後重連，避免每次自動刷新都開新連線。
                 need_restart = True
 
         if need_restart:
@@ -465,6 +491,9 @@ class WebSocketLiveEngine:
             ch_age = {}
             for ch, t in _STATE.channel_last_message_ts.items():
                 ch_age[ch] = round(now - t, 2)
+            cooldown_left = 0
+            if _STATE.cooldown_until_ts:
+                cooldown_left = max(0, int(round(_STATE.cooldown_until_ts - now)))
             return {
                 "enabled": _STATE.enabled,
                 "symbol": _STATE.symbol,
@@ -473,6 +502,8 @@ class WebSocketLiveEngine:
                 "auth_status": _STATE.auth_status,
                 "last_event": _STATE.last_event,
                 "last_error": _STATE.last_error,
+                "cooldown_left_sec": cooldown_left,
+                "cooldown_reason": _STATE.cooldown_reason,
                 "last_message_age_sec": round(age, 2) if age is not None else None,
                 "subscribed": dict(_STATE.subscribed),
                 "channel_status": dict(_STATE.channel_status),
@@ -682,6 +713,9 @@ class WebSocketLiveEngine:
 
         if status.get("last_error"):
             st.error(f"WS 錯誤：{status.get('last_error')}")
+        if status.get("cooldown_left_sec"):
+            st.warning(f"重連冷卻：{status.get('cooldown_left_sec')} 秒｜{status.get('cooldown_reason')}")
+            st.caption("這通常代表同一組 Fugle API Key 已有其他 WebSocket 連線尚未釋放。請先關閉 WebSocket，等待幾分鐘，或到 Streamlit Cloud Reboot app 後再試。")
 
         st.markdown("**WS 診斷：送出 / 回傳原始訊息**")
 

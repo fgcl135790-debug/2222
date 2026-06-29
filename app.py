@@ -387,8 +387,7 @@ def main():
     )
 
     # =========================
-    # Sidebar：只保留實戰看盤必要功能
-    # 已移除：回測、勝率統計、真實K線匯出、當沖模型介紹區塊
+    # Sidebar：實戰功能 + 診斷
     # =========================
 
     with st.sidebar.expander("📡 WebSocket 診斷", expanded=True):
@@ -405,6 +404,27 @@ def main():
                 enabled=False,
             )
         WebSocketLiveEngine.render_sidebar_status(st)
+
+    # 這三個功能先恢復：回測、勝率統計、真實 K 線匯出。
+    # WebSocket 診斷保留，方便確認 AI 是否真的吃到 trades/books/candles。
+    render_backtest_sidebar_panel(
+        api_key=api_key,
+        stock_code=stock_code,
+    )
+
+    render_win_rate_sidebar_panel()
+
+    render_kline_export_sidebar_panel(
+        api_key=api_key,
+        stock_code=stock_code,
+    )
+
+    # 當沖模型仍維持手動建立，避免每次刷新抓 30 日 K 線卡住主畫面。
+    _render_intraday_model_sidebar(
+        api_key=api_key,
+        stock_code=stock_code,
+        data_source=data_source,
+    )
 
     # =========================
     # 切換股票 / 資料來源 / 模擬模式時清空
@@ -776,12 +796,22 @@ def main():
     # Header
     # =========================
 
+    ws_status = {}
+    try:
+        ws_status = WebSocketLiveEngine.get_status() or {}
+    except Exception:
+        ws_status = {}
+
     if st.session_state.get("api_error_message"):
         connection_status = "資料延遲"
+    elif data_source == "真實盤" and websocket_enabled and WebSocketLiveEngine.is_ws_active():
+        connection_status = "REST + WS"
     elif data_source == "真實盤" and market_status == "休市":
         connection_status = "休市快照"
+    elif data_source == "真實盤":
+        connection_status = "REST"
     else:
-        connection_status = "連線正常"
+        connection_status = "模擬盤"
 
     render_header(
         name=name,

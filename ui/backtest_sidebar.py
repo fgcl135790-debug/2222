@@ -166,7 +166,7 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             )
 
             st.caption("專業訊號：ORB / VWAP / Tape Flow / 五檔壓力 / 盤勢分類 / 動態停損停利 / 停損冷卻")
-            st.caption("目前版本：訊號品質 v3｜修正真實時鐘判斷、ORB 缺資料保護、K棒收盤位置濾網、第二筆交易加嚴；不訓練、不硬湊、不偷看。")
+            st.caption("目前版本：AI報酬強化 v1｜新增 MFE/MAE 預估、品質閘門、進場後提早退出 / 浮盈保護；不訓練、不硬湊、不偷看。")
 
             max_trades_per_day = st.slider(
                 "每日最多交易",
@@ -465,6 +465,11 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             "predicted_win_rate",
             "predicted_expected_value",
             "required_win_rate",
+            "estimated_mfe_pct",
+            "estimated_mae_pct",
+            "mfe_mae_ratio",
+            "ev_after_quality",
+            "best_favorable_pct",
             "setup_type",
             "raw_win_rate",
             "calibrated_win_rate",

@@ -269,8 +269,13 @@ class DecisionEngine:
     def _payload_from_realtime_signal(signal, price):
         action = signal.get("decision", "WAIT")
         chosen = signal.get("chosen", {}) or {}
-        stop_pct = DecisionEngine.DEFAULT_STOP_PCT
-        take_pct = DecisionEngine.DEFAULT_TAKE_PCT
+        risk_plan = signal.get("risk_plan", {}) or {}
+        stop_pct = DecisionEngine._safe_float(signal.get("adaptive_stop_pct") or risk_plan.get("stop_pct"), DecisionEngine.DEFAULT_STOP_PCT)
+        take_pct = DecisionEngine._safe_float(signal.get("adaptive_take_pct") or risk_plan.get("take_pct"), DecisionEngine.DEFAULT_TAKE_PCT)
+        if stop_pct <= 0:
+            stop_pct = DecisionEngine.DEFAULT_STOP_PCT
+        if take_pct <= 0:
+            take_pct = DecisionEngine.DEFAULT_TAKE_PCT
         risk_reward = take_pct / max(stop_pct, 0.01)
 
         if action not in ["BUY", "SELL"]:
@@ -286,6 +291,10 @@ class DecisionEngine:
                     "expected_value": chosen.get("expected_value", 0),
                     "predicted_win_rate": chosen.get("win_rate", 0),
                     "required_win_rate": signal.get("required_win_rate", 0),
+                    "estimated_mfe_pct": signal.get("estimated_mfe_pct", 0),
+                    "estimated_mae_pct": signal.get("estimated_mae_pct", 0),
+                    "mfe_mae_ratio": signal.get("mfe_mae_ratio", 0),
+                    "ev_after_quality": signal.get("ev_after_quality", 0),
                 },
             )
 
@@ -331,6 +340,12 @@ class DecisionEngine:
             "expected_value": chosen.get("expected_value", 0),
             "predicted_win_rate": chosen.get("win_rate", 0),
             "required_win_rate": signal.get("required_win_rate", 0),
+            "estimated_mfe_pct": signal.get("estimated_mfe_pct", 0),
+            "estimated_mae_pct": signal.get("estimated_mae_pct", 0),
+            "mfe_mae_ratio": signal.get("mfe_mae_ratio", 0),
+            "ev_after_quality": signal.get("ev_after_quality", chosen.get("ev_after_quality", 0)),
+            "signal_quality": signal.get("signal_quality", {}),
+            "trade_management_note": "進場後若 3~5 根K未推進或浮盈回吐，系統會提示提早退出。",
             "rest_microstructure": signal.get("rest_microstructure", {}),
             "estimated_slippage_pct": signal.get("estimated_slippage_pct", 0),
             "execution_risk": signal.get("execution_risk", ""),
