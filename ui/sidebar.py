@@ -53,6 +53,13 @@ def render_sidebar(reset_callback):
             key="sidebar_refresh_sec",
         )
 
+        websocket_enabled = st.toggle(
+            "啟用 WebSocket 即時流",
+            value=st.session_state.get("websocket_enabled", True),
+            key="websocket_enabled",
+            help="使用 Fugle WebSocket 訂閱 trades/books/candles。若權限不足或連線失敗，會自動退回 REST。",
+        )
+
         st.divider()
 
         mobile_layout = st.toggle(
@@ -73,4 +80,5 @@ def render_sidebar(reset_callback):
         mode,
         refresh_sec,
         mobile_layout,
+        websocket_enabled,
     )

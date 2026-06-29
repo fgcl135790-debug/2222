@@ -192,6 +192,7 @@ try:
         StockModelCache = None
 
     from rest_microstructure_engine import RestMicrostructureEngine
+    from websocket_live_engine import WebSocketLiveEngine
 
     from ui.header import render_header
     from ui.chart_panel import render_chart
@@ -328,6 +329,10 @@ def reset_state():
         RestMicrostructureEngine.reset(st)
     except Exception:
         pass
+    try:
+        WebSocketLiveEngine.reset(st)
+    except Exception:
+        pass
 
     # 手動重置時，下一次會重新建立模擬路徑
     st.session_state.market_context_key = None
@@ -370,6 +375,7 @@ def main():
         mode,
         refresh_sec,
         mobile_layout,
+        websocket_enabled,
     ) = render_sidebar(reset_state)
 
     api_key = _resolve_api_key(api_key)
@@ -391,6 +397,22 @@ def main():
         api_key=api_key,
         stock_code=stock_code,
     )
+
+    with st.sidebar.expander("📡 WebSocket 即時流", expanded=False):
+        if data_source == "真實盤" and websocket_enabled and api_key:
+            WebSocketLiveEngine.ensure_running(
+                api_key=api_key,
+                symbol=stock_code,
+                enabled=True,
+            )
+        else:
+            WebSocketLiveEngine.ensure_running(
+                api_key=api_key,
+                symbol=stock_code,
+                enabled=False,
+            )
+        WebSocketLiveEngine.render_sidebar_status(st)
+        st.caption("訂閱：trades / books / candles。失敗時主畫面會自動使用 REST 備援。")
 
     _render_intraday_model_sidebar(
         api_key=api_key,
@@ -421,6 +443,10 @@ def main():
         WinRateEngine.reset(st)
         try:
             RestMicrostructureEngine.reset(st)
+        except Exception:
+            pass
+        try:
+            WebSocketLiveEngine.reset(st)
         except Exception:
             pass
 
@@ -464,6 +490,14 @@ def main():
 
         if not quote:
             raise ValueError("empty quote")
+
+        if data_source == "真實盤" and websocket_enabled and api_key:
+            WebSocketLiveEngine.ensure_running(
+                api_key=api_key,
+                symbol=stock_code,
+                enabled=True,
+            )
+            quote = WebSocketLiveEngine.apply_to_quote(quote, stock_code)
 
         st.session_state.last_good_quote = quote
         st.session_state.api_error_message = None
@@ -517,7 +551,7 @@ def main():
     times = snapshot["times"]
 
     # =========================
-    # REST 微結構：五檔快照序列 / 假牆 / 滑價估算
+    # REST / WebSocket 微結構：五檔序列 / 逐筆成交 / 假牆 / 滑價估算
     # =========================
 
     rest_microstructure = RestMicrostructureEngine.update(
@@ -530,6 +564,17 @@ def main():
         volume=volume,
         now=now,
     )
+
+    websocket_microstructure = WebSocketLiveEngine.get_microstructure(stock_code)
+
+    # WebSocket 有資料時，以 WebSocket 逐筆成交 / 連續五檔為主；
+    # REST 快照序列保留當備援。
+    if websocket_microstructure.get("available"):
+        combined_microstructure = dict(rest_microstructure or {})
+        combined_microstructure.update(websocket_microstructure)
+        combined_microstructure["fallback_rest_microstructure"] = rest_microstructure
+    else:
+        combined_microstructure = rest_microstructure
 
     # =========================
     # 主力大單偵測
@@ -639,7 +684,7 @@ def main():
         time_values=times,
         bids=bids,
         asks=asks,
-        rest_microstructure=rest_microstructure,
+        rest_microstructure=combined_microstructure,
     )
 
     # =========================
