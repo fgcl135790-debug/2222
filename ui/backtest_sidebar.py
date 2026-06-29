@@ -22,8 +22,6 @@ def _fmt_num(value):
 def render_backtest_sidebar_panel(api_key, stock_code):
     with st.sidebar.expander("📊 回測", expanded=False):
 
-        st.caption("使用 Fugle 歷史分 K 回測目前策略。")
-
         if not api_key:
             st.warning("請先輸入 Fugle API KEY。")
             return
@@ -89,8 +87,6 @@ def render_backtest_sidebar_panel(api_key, stock_code):
 
             model_mode = model_mode_map.get(model_mode_label, "realtime_structure")
 
-            st.caption("這版已移除 Walk-forward 歷史模型與每日候選；只用當下以前 K 線結構判斷。每日最多交易=當天第一個達標訊號，不是事後挑最佳點。")
-
             scan_step_bars = st.slider(
                 "回測掃描間隔 K 數",
                 min_value=1,
@@ -101,18 +97,8 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 help="1 最精準；2~5 比較快但可能跳過部分進場點。",
             )
 
-            max_runtime_seconds = st.slider(
-                "回測最長秒數",
-                min_value=20,
-                max_value=120,
-                value=120,
-                step=5,
-                key="bt_max_runtime_seconds",
-                help="避免 Streamlit Cloud 長時間卡住。超過時間會先輸出已完成結果。",
-            )
-
-
-            st.caption("已移除候選硬湊：回測只允許當下已達標的 BUY / SELL 訊號；若每日最多交易 > 1，第二筆會自動提高門檻，避免盤整段重複進場。")
+            # 內部保護用，不顯示在側邊欄。
+            max_runtime_seconds = 120
 
             score_threshold = st.slider(
                 "最低 Score",
@@ -164,9 +150,6 @@ def render_backtest_sidebar_panel(api_key, stock_code):
                 step=0.1,
                 key="bt_default_take_pct",
             )
-
-            st.caption("專業訊號：ORB / VWAP / Tape Flow / 五檔壓力 / 盤勢分類 / 動態停損停利 / 停損冷卻")
-            st.caption("目前版本：AI報酬強化 v1｜新增 MFE/MAE 預估、品質閘門、進場後提早退出 / 浮盈保護；不訓練、不硬湊、不偷看。")
 
             max_trades_per_day = st.slider(
                 "每日最多交易",
@@ -226,23 +209,10 @@ def render_backtest_sidebar_panel(api_key, stock_code):
 
             if model_mode == "realtime_structure":
                 st.caption(
-                    f"模式：專業即時結構 AI｜不訓練｜不偷看｜"
-                    f"掃描間隔 {scan_step_bars}K｜最長 {max_runtime_seconds} 秒｜每日最多 {max_trades_per_day} 筆"
+                    f"模式：專業即時結構 AI｜掃描間隔 {scan_step_bars}K｜每日最多 {max_trades_per_day} 筆"
                 )
             else:
                 st.caption("模式：一般 AI 無模型｜只作對照，不建議當主策略")
-
-            st.caption(
-                f"股價目標：停損 {default_stop_pct:.1f}%｜"
-                f"停利 {default_take_pct:.1f}%｜"
-                f"最多持有 {max_hold_bars} 根K｜停損冷卻 {loss_cooldown_bars}K"
-            )
-
-            st.caption(
-                f"成本只扣在損益：手續費 {effective_commission_pct:.4f}% × 2｜"
-                f"證交稅 {tax_rate_pct:.2f}%｜"
-                f"單趟來回約 {estimated_round_trip_cost:.3f}%"
-            )
 
             run_clicked = st.form_submit_button(
                 "執行回測",
