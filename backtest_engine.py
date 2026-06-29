@@ -542,6 +542,7 @@ class BacktestEngine:
                 current_candle=c,
                 bars_held=max(0, i - entry_index),
                 best_favorable_pct=best_favorable_pct,
+                cost_pct=(effective_commission_pct * 2 + tax_rate_pct),
             )
             if management:
                 best_favorable_pct = management.get("best_favorable_pct", best_favorable_pct)
