@@ -111,7 +111,8 @@ class DecisionEngine:
                 reason="尚未建立成本感知模型，且一般 AI 分數低於 75，暫不出手。",
                 extra={"reasons": reasons, "rebound": rebound},
             )
-
+        signal = ai if isinstance(ai, dict) else {}
+     
         risk_plan = signal.get("risk_plan", {}) or {}
         stop_pct = DecisionEngine._safe_float(
             signal.get("adaptive_stop_pct") or risk_plan.get("stop_pct"),
