@@ -307,6 +307,7 @@ class BacktestEngine:
                         "tape_flow": signal.get("tape_flow", {}),
                         "orderbook_flow": signal.get("orderbook_flow", {}),
                         "market_context": signal.get("market_context", {}),
+                        "feature": signal.get("feature", {}),
                     },
                     "predicted_up_pct": eff_take_pct if action == "BUY" else 0,
                     "predicted_down_pct": eff_take_pct if action == "SELL" else 0,
@@ -340,6 +341,7 @@ class BacktestEngine:
                     "sell": signal.get("sell", {}),
                     "chosen": signal.get("chosen", {}),
                     "required_win_rate": signal.get("required_win_rate", 0),
+                    "feature": signal.get("feature", {}),
                 },
                 "risk_level": "HIGH",
                 "expected_value": (signal.get("chosen", {}) or {}).get("expected_value", 0),
@@ -849,7 +851,7 @@ class BacktestEngine:
             shared_model_message = (
                 "即時結構 AI：不訓練、不使用事後結果、不設定訓練天數；"
                 "每一根 K 只用當下以前的 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷；"
-                "每日最多交易=取當天第一個達標訊號，不是回頭挑最佳點。"
+                "每日最多交易=當天即時達標訊號；第二筆自動提高門檻，不回頭挑最佳點。"
                 f"｜每日最多 {max_trades_per_day} 筆"
             )
 
@@ -858,7 +860,7 @@ class BacktestEngine:
             shared_model_message = (
                 "即時結構 AI：不訓練、不使用事後結果、不設定訓練天數；"
                 "每一根 K 只用當下以前的 ORB / VWAP / Tape Flow / 五檔 / 盤勢 / 動態風控判斷；"
-                "每日最多交易=取當天第一個達標訊號，不是回頭挑最佳點。"
+                "每日最多交易=當天即時達標訊號；第二筆自動提高門檻，不回頭挑最佳點。"
                 f"｜每日最多 {max_trades_per_day} 筆"
             )
 
@@ -1011,6 +1013,12 @@ class BacktestEngine:
 
                 effective_score_threshold = score_threshold
 
+                # 第二筆交易不應該和第一筆用同一門檻。
+                # 當天已經出現一次有效訊號後，第二次通常是盤整、追價或反彈失敗區，
+                # 因此自動提高門檻；這不是每日候選，而是即時風控。
+                if day_trade_count >= 1:
+                    effective_score_threshold += 8
+
                 if score < effective_score_threshold:
                     i += scan_step_bars
                     continue
@@ -1052,6 +1060,7 @@ class BacktestEngine:
                 chosen = swing_prediction.get("chosen", {}) or {}
                 buy_pred = swing_prediction.get("buy", {}) or {}
                 sell_pred = swing_prediction.get("sell", {}) or {}
+                feature_pred = swing_prediction.get("feature", {}) or {}
 
                 trades.append(
                     {
@@ -1108,6 +1117,13 @@ class BacktestEngine:
                         "market_quality": (swing_prediction.get("market_context", {}) or {}).get("quality"),
                         "adaptive_stop_pct": decision.get("adaptive_stop_pct"),
                         "adaptive_take_pct": decision.get("adaptive_take_pct"),
+                        "clock_minute": feature_pred.get("clock_minute"),
+                        "orb_ready": feature_pred.get("orb_ready"),
+                        "missing_open_data": feature_pred.get("missing_open_data"),
+                        "vwap_gap": feature_pred.get("vwap_gap"),
+                        "close_location": feature_pred.get("close_location"),
+                        "volume_ratio_5": feature_pred.get("volume_ratio_5"),
+                        "volume_acceleration": feature_pred.get("volume_acceleration"),
                         "result": exit_data["result"],
                     }
                 )

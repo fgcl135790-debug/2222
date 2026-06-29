@@ -1,4 +1,5 @@
 import math
+from datetime import datetime
 
 from tape_flow_engine import TapeFlowEngine
 from orderbook_flow_engine import OrderBookFlowEngine
@@ -55,6 +56,42 @@ class IntradaySignalEngine:
     @staticmethod
     def _clamp(value, low, high):
         return max(low, min(high, value))
+
+
+    @staticmethod
+    def _minute_from_time_value(value):
+        """
+        回傳距離台股 09:00 開盤後幾分鐘。
+        重要：不能用「第幾根 K」代替時間，因為 Fugle 歷史資料有時某些日子只從 10:24 之後開始。
+        如果用第幾根 K，10:45 會被誤判成 09:21，會讓 10:30~11:00 濾網完全失效。
+        """
+        if value is None:
+            return None
+        try:
+            if isinstance(value, datetime):
+                h, m = value.hour, value.minute
+                return h * 60 + m - 9 * 60
+        except Exception:
+            pass
+
+        s = str(value).strip()
+        if not s:
+            return None
+
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return dt.hour * 60 + dt.minute - 9 * 60
+        except Exception:
+            pass
+
+        try:
+            part = s.split(" ")[-1]
+            if "T" in part:
+                part = part.split("T")[-1]
+            hh, mm = part.split(":")[:2]
+            return int(hh) * 60 + int(mm) - 9 * 60
+        except Exception:
+            return None
 
     @staticmethod
     def required_win_rate_pct(stop_pct=0.7, take_pct=1.8, cost_pct=0.435, safety_margin=0.0):
@@ -113,7 +150,17 @@ class IntradaySignalEngine:
             lows = (lows + prices[len(lows):])[:n]
 
         price = prices[-1]
-        minute_index = n - 1
+
+        clock_minutes = []
+        if time_values and len(time_values) >= n:
+            for t in list(time_values)[:n]:
+                clock_minutes.append(IntradaySignalEngine._minute_from_time_value(t))
+        else:
+            clock_minutes = [None] * n
+
+        # 用真實時鐘分鐘，不用第幾根 K。
+        # 若某天資料從 10:24 才開始，n-1 會把 10:45 誤判為開盤後 21 分鐘，這是前一版 10:30 濾網失效主因。
+        minute_index = clock_minutes[-1] if clock_minutes and clock_minutes[-1] is not None else n - 1
 
         if vwap_values and len(vwap_values) >= n:
             vwap = IntradaySignalEngine._safe_float(vwap_values[-1], price)
@@ -125,9 +172,29 @@ class IntradaySignalEngine:
                 vol_sum += max(v, 0)
             vwap = amount / vol_sum if vol_sum > 0 else price
 
-        orb_len = min(15, n)
-        orb_high = max(highs[:orb_len]) if highs[:orb_len] else price
-        orb_low = min(lows[:orb_len]) if lows[:orb_len] else price
+        # ORB 必須用真正 09:00~09:14 的 K，不可用「資料開始後前 15 根」代替。
+        # 歷史 K 若缺開盤資料，就標記 orb_ready=False 並降低信心，避免把 10:24~10:38 誤當開盤區間。
+        orb_indices = [
+            idx for idx, mm in enumerate(clock_minutes)
+            if mm is not None and 0 <= mm < 15
+        ]
+        if orb_indices:
+            orb_high = max(highs[idx] for idx in orb_indices)
+            orb_low = min(lows[idx] for idx in orb_indices)
+            orb_ready = len(orb_indices) >= 8
+        else:
+            orb_len = min(15, n)
+            orb_high = max(highs[:orb_len]) if highs[:orb_len] else price
+            orb_low = min(lows[:orb_len]) if lows[:orb_len] else price
+            orb_ready = False
+
+        first_clock_minute = next((mm for mm in clock_minutes if mm is not None), None)
+        missing_open_data = bool(
+            first_clock_minute is not None
+            and first_clock_minute > 5
+            and minute_index >= 30
+        )
+
         day_high = max(highs)
         day_low = min(lows)
         day_range_pct = (day_high - day_low) / max(price, 0.000001) * 100
@@ -161,6 +228,10 @@ class IntradaySignalEngine:
         return {
             "price": price,
             "minute_index": minute_index,
+            "clock_minute": minute_index,
+            "orb_ready": orb_ready,
+            "missing_open_data": missing_open_data,
+            "first_clock_minute": first_clock_minute,
             "vwap": vwap,
             "vwap_gap": IntradaySignalEngine._pct(price, vwap),
             "orb_high": orb_high,
@@ -188,7 +259,7 @@ class IntradaySignalEngine:
         }
 
     @staticmethod
-    def _direction_score(feature, action, tape, orderbook, market_context):
+    def _direction_score(feature, action, tape, orderbook, market_context, rest_microstructure=None):
         f = feature
         score = 42.0
         reasons = []
@@ -217,19 +288,37 @@ class IntradaySignalEngine:
         tape_sell = tape.get("sell_pressure", 50)
         ob_buy = orderbook.get("buy_pressure", 50)
         ob_sell = orderbook.get("sell_pressure", 50)
+        rest_microstructure = rest_microstructure or {}
+        rest_available = bool(rest_microstructure.get("available", False))
+        rest_buy = rest_microstructure.get("buy_pressure", 50)
+        rest_sell = rest_microstructure.get("sell_pressure", 50)
+        rest_exec_risk = rest_microstructure.get("execution_risk", "")
+        rest_fake_bid = rest_microstructure.get("fake_bid_wall_risk", 0)
+        rest_fake_ask = rest_microstructure.get("fake_ask_wall_risk", 0)
+        rest_slip_buy = rest_microstructure.get("estimated_slippage_pct_buy", 0)
+        rest_slip_sell = rest_microstructure.get("estimated_slippage_pct_sell", 0)
         context_trend = market_context.get("trend", "WAIT")
         context_quality = market_context.get("quality", 50)
         regime = market_context.get("regime", "MIXED")
+        orb_ready = bool(f.get("orb_ready", False))
+        missing_open_data = bool(f.get("missing_open_data", False))
 
         # 盤勢品質先當底層濾網。
         score += (context_quality - 50) * 0.18
+
+        if missing_open_data:
+            score -= 10
+            penalties.append("歷史 K 缺少開盤區間，不能把資料前 15 根誤當 ORB，降低信心。")
+        elif not orb_ready and minute >= 30:
+            score -= 5
+            penalties.append("ORB 開盤區間資料不足，突破可信度降低。")
         if day_range < 0.9:
             score -= 7
             penalties.append("當日區間偏小，停利空間不足。")
 
         if action == "BUY":
             # 三種做多型態：突破、VWAP 拉回再攻、急跌後轉強反彈。
-            breakout = orb_high_gap >= -0.03 and slope3 > 0.05
+            breakout = orb_ready and orb_high_gap >= -0.03 and slope3 > 0.05
             vwap_reclaim = -0.25 <= vwap_gap <= 0.45 and slope3 > 0.06 and close_loc >= 0.55
             rebound = vwap_gap < -0.25 and slope1 > 0 and slope3 > 0.08 and close_loc >= 0.62 and tape_buy >= 55
 
@@ -268,6 +357,20 @@ class IntradaySignalEngine:
             # Tape / Orderbook：有方向就加，反向就扣。
             score += (tape_buy - 50) * 0.22
             score += (ob_buy - 50) * 0.10
+            if rest_available:
+                score += (rest_buy - 50) * 0.14
+                score -= rest_fake_bid * 0.35
+                score -= max(0, rest_slip_buy - 0.12) * 18
+                if rest_buy >= 60:
+                    reasons.append("REST 五檔序列偏多：委買深度/補單速度改善。")
+                if rest_fake_bid >= 8:
+                    penalties.append("REST 偵測疑似假買牆，做多降低信心。")
+                if rest_exec_risk == "HIGH":
+                    score -= 8
+                    penalties.append("REST 估計成交難度高，做多滑價風險增加。")
+                elif rest_exec_risk == "MEDIUM":
+                    score -= 3
+                    penalties.append("REST 估計成交難度中等，需注意滑價。")
             if tape_buy >= 60:
                 reasons.append("成交流偏主動買。")
             if orderbook.get("available") and ob_buy >= 60:
@@ -296,7 +399,7 @@ class IntradaySignalEngine:
                 penalties.append("量能不足，做多延續性偏弱。")
 
         else:
-            breakout = orb_low_gap <= 0.03 and slope3 < -0.05
+            breakout = orb_ready and orb_low_gap <= 0.03 and slope3 < -0.05
             vwap_fail = -0.45 <= vwap_gap <= 0.25 and slope3 < -0.06 and close_loc <= 0.45
             flush = vwap_gap > 0.25 and slope1 < 0 and slope3 < -0.08 and close_loc <= 0.38 and tape_sell >= 55
 
@@ -334,6 +437,20 @@ class IntradaySignalEngine:
 
             score += (tape_sell - 50) * 0.22
             score += (ob_sell - 50) * 0.10
+            if rest_available:
+                score += (rest_sell - 50) * 0.14
+                score -= rest_fake_ask * 0.35
+                score -= max(0, rest_slip_sell - 0.12) * 18
+                if rest_sell >= 60:
+                    reasons.append("REST 五檔序列偏空：委賣深度/壓力增加。")
+                if rest_fake_ask >= 8:
+                    penalties.append("REST 偵測疑似假賣牆，做空降低信心。")
+                if rest_exec_risk == "HIGH":
+                    score -= 8
+                    penalties.append("REST 估計成交難度高，做空滑價風險增加。")
+                elif rest_exec_risk == "MEDIUM":
+                    score -= 3
+                    penalties.append("REST 估計成交難度中等，需注意滑價。")
             if tape_sell >= 60:
                 reasons.append("成交流偏主動賣。")
             if orderbook.get("available") and ob_sell >= 60:
@@ -361,6 +478,68 @@ class IntradaySignalEngine:
                 score -= 7
                 penalties.append("量能不足，做空延續性偏弱。")
 
+
+        # 方向 K 棒品質：不能只看分數。BUY 卻收在 K 棒低位、SELL 卻收在 K 棒高位，
+        # 代表當下攻擊沒有被價格確認，前一版很多虧損都來自這種「看起來有方向但收盤位置不好」。
+        if action == "BUY":
+            if close_loc < 0.35:
+                score -= 14
+                penalties.append("做多但 K 棒收在低位，攻擊沒有被價格確認。")
+            elif close_loc < 0.50 and slope1 <= 0:
+                score -= 9
+                penalties.append("做多收盤位置偏弱且短線未續強。")
+        else:
+            if close_loc > 0.65:
+                score -= 14
+                penalties.append("做空但 K 棒收在高位，賣壓沒有被價格確認。")
+            elif close_loc > 0.50 and slope1 >= 0:
+                score -= 9
+                penalties.append("做空收盤位置偏強且短線未續弱。")
+
+        # 10:30~11:00 在這批 3481 回測中是明顯的洗盤 / 第一波走完區。
+        # 不是完全禁止，而是要求「二次攻擊」：量能重新放大、K 棒收在攻擊方向、短斜率同向。
+        # 這是即時可判斷的規則，不使用未來結果。
+        if 90 <= minute < 120:
+            if action == "BUY":
+                second_push_ok = (
+                    slope1 > 0.02
+                    and slope3 > 0.12
+                    and close_loc >= 0.62
+                    and (vr5 >= 1.35 or vacc >= 1.25)
+                    and tape_buy >= 58
+                    and vwap_gap <= 1.20
+                )
+            else:
+                second_push_ok = (
+                    slope1 < -0.02
+                    and slope3 < -0.12
+                    and close_loc <= 0.38
+                    and (vr5 >= 1.35 or vacc >= 1.25)
+                    and tape_sell >= 58
+                    and vwap_gap >= -1.20
+                )
+
+            if missing_open_data:
+                score -= 26
+                penalties.append("10:30~11:00 且缺少開盤資料，無法確認是否為二次攻擊，先避開。")
+            elif not second_push_ok:
+                score -= 24
+                penalties.append("10:30~11:00 第一波常已走完；未出現二次量價攻擊，避免追價。")
+            else:
+                score += 4
+                reasons.append("10:30~11:00 仍有二次量價攻擊，允許觀察。")
+
+        # 盤勢延伸後追高 / 追空風險：趨勢盤不是看到同向就追，
+        # 已靠近日高/日低且離 VWAP 偏遠時，勝率容易被高估。
+        if action == "BUY":
+            if minute >= 30 and regime == "TREND_UP" and vwap_gap > 0.55 and dist_high <= 0.45 and slope1 <= 0.05:
+                score -= 12
+                penalties.append("多頭延伸但靠近日高、離 VWAP 偏遠，疑似追高。")
+        else:
+            if minute >= 30 and regime == "TREND_DOWN" and vwap_gap < -0.55 and dist_low <= 0.45 and slope1 >= -0.05:
+                score -= 12
+                penalties.append("空頭延伸但靠近日低、離 VWAP 偏遠，疑似追空。")
+
         # 時段風險：專業當沖不是完全禁止午盤，但門檻要提高。
         if minute >= 230:
             score -= 9
@@ -386,6 +565,7 @@ class IntradaySignalEngine:
         time_values=None,
         bids=None,
         asks=None,
+        rest_microstructure=None,
         stop_pct=0.7,
         take_pct=1.8,
         cost_pct=0.435,
@@ -407,6 +587,12 @@ class IntradaySignalEngine:
 
         tape = TapeFlowEngine.analyze(prices=prices, volumes=volumes)
         orderbook = OrderBookFlowEngine.analyze(bids=bids, asks=asks, price=feature.get("price"))
+        rest_microstructure = rest_microstructure or {}
+        if rest_microstructure.get("available"):
+            # REST 序列比單次五檔快照更可靠，混合進五檔壓力。
+            orderbook["buy_pressure"] = round((orderbook.get("buy_pressure", 50) * 0.45) + (rest_microstructure.get("buy_pressure", 50) * 0.55), 2)
+            orderbook["sell_pressure"] = round((orderbook.get("sell_pressure", 50) * 0.45) + (rest_microstructure.get("sell_pressure", 50) * 0.55), 2)
+            orderbook["rest_sequence_available"] = True
         market_context = MarketContextEngine.analyze(
             prices=prices,
             volumes=volumes,
@@ -432,20 +618,22 @@ class IntradaySignalEngine:
 
         eff_stop = risk_plan.get("stop_pct", stop_pct)
         eff_take = risk_plan.get("take_pct", take_pct)
-        required = IntradaySignalEngine.required_win_rate_pct(eff_stop, eff_take, cost_pct, safety_margin=0.0)
+        rest_cost_add = IntradaySignalEngine._safe_float(rest_microstructure.get("effective_cost_add_pct", 0), 0) if rest_microstructure else 0
+        effective_cost_pct = cost_pct + min(max(rest_cost_add, 0), 0.35)
+        required = IntradaySignalEngine.required_win_rate_pct(eff_stop, eff_take, effective_cost_pct, safety_margin=0.0)
 
         buy_score, buy_reasons, buy_penalties = IntradaySignalEngine._direction_score(
-            feature, "BUY", tape=tape, orderbook=orderbook, market_context=market_context
+            feature, "BUY", tape=tape, orderbook=orderbook, market_context=market_context, rest_microstructure=rest_microstructure
         )
         sell_score, sell_reasons, sell_penalties = IntradaySignalEngine._direction_score(
-            feature, "SELL", tape=tape, orderbook=orderbook, market_context=market_context
+            feature, "SELL", tape=tape, orderbook=orderbook, market_context=market_context, rest_microstructure=rest_microstructure
         )
 
         context_quality = market_context.get("quality", 50)
         buy_wr = IntradaySignalEngine._score_to_win_rate(buy_score, required, context_quality=context_quality)
         sell_wr = IntradaySignalEngine._score_to_win_rate(sell_score, required, context_quality=context_quality)
-        buy_ev = IntradaySignalEngine.estimate_ev(buy_wr, eff_stop, eff_take, cost_pct)
-        sell_ev = IntradaySignalEngine.estimate_ev(sell_wr, eff_stop, eff_take, cost_pct)
+        buy_ev = IntradaySignalEngine.estimate_ev(buy_wr, eff_stop, eff_take, effective_cost_pct)
+        sell_ev = IntradaySignalEngine.estimate_ev(sell_wr, eff_stop, eff_take, effective_cost_pct)
 
         buy = {
             "action": "BUY",
@@ -486,6 +674,8 @@ class IntradaySignalEngine:
         common_reasons.extend(tape.get("reasons", [])[:2])
         if orderbook.get("available"):
             common_reasons.extend(orderbook.get("reasons", [])[:2])
+        if rest_microstructure.get("available"):
+            common_reasons.extend(rest_microstructure.get("reasons", [])[:3])
         common_reasons.extend(risk_plan.get("reasons", [])[:2])
 
         base_payload = {
@@ -496,6 +686,10 @@ class IntradaySignalEngine:
             "risk_plan": risk_plan,
             "tape_flow": tape,
             "orderbook_flow": orderbook,
+            "rest_microstructure": rest_microstructure,
+            "estimated_slippage_pct": round(rest_cost_add, 3),
+            "execution_risk": rest_microstructure.get("execution_risk", ""),
+            "effective_cost_pct": round(effective_cost_pct, 3),
             "market_context": market_context,
             "feature": feature,
             "adaptive_stop_pct": eff_stop,
@@ -513,7 +707,7 @@ class IntradaySignalEngine:
                 "reasons": [
                     f"BUY 分數 {buy['score']}｜勝率估 {buy['win_rate']}%｜EV {buy['expected_value']}%",
                     f"SELL 分數 {sell['score']}｜勝率估 {sell['win_rate']}%｜EV {sell['expected_value']}%",
-                    f"需求勝率 {required}%｜最低 EV {min_expected_value}%｜最低 Score {min_score}",
+                    f"需求勝率 {required}%｜最低 EV {min_expected_value}%｜最低 Score {min_score}｜有效成本 {effective_cost_pct:.3f}%",
                     *(common_reasons[:5]),
                     *(chosen.get("penalties", [])[:3]),
                 ],
