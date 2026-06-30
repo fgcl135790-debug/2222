@@ -191,8 +191,6 @@ try:
     except Exception:
         StockModelCache = None
 
-    from rest_microstructure_engine import RestMicrostructureEngine
-
     from ui.header import render_header
     from ui.chart_panel import render_chart
     from ui.lower_market_grid import render_lower_market_grid
@@ -324,10 +322,6 @@ def _render_intraday_model_sidebar(api_key, stock_code, data_source):
 
 def reset_state():
     MarketFlowEngine.reset_market_state(st)
-    try:
-        RestMicrostructureEngine.reset(st)
-    except Exception:
-        pass
 
     # 手動重置時，下一次會重新建立模擬路徑
     st.session_state.market_context_key = None
@@ -336,10 +330,6 @@ def reset_state():
 
 def init_session_state():
     MarketFlowEngine.init_session_state(st)
-    try:
-        RestMicrostructureEngine.init_state(st)
-    except Exception:
-        pass
 
 
 # =========================
@@ -419,10 +409,6 @@ def main():
             st.session_state.sim_run_id = random.randint(100000, 999999)
 
         WinRateEngine.reset(st)
-        try:
-            RestMicrostructureEngine.reset(st)
-        except Exception:
-            pass
 
     # =========================
     # Auto Refresh
@@ -515,21 +501,6 @@ def main():
     volumes = snapshot["volumes"]
     vwaps = snapshot["vwaps"]
     times = snapshot["times"]
-
-    # =========================
-    # REST 微結構：五檔快照序列 / 假牆 / 滑價估算
-    # =========================
-
-    rest_microstructure = RestMicrostructureEngine.update(
-        st=st,
-        stock_code=stock_code,
-        serial=serial,
-        price=price,
-        bids=bids,
-        asks=asks,
-        volume=volume,
-        now=now,
-    )
 
     # =========================
     # 主力大單偵測
@@ -639,7 +610,6 @@ def main():
         time_values=times,
         bids=bids,
         asks=asks,
-        rest_microstructure=rest_microstructure,
     )
 
     # =========================
