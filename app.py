@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +18,11 @@ DATA_DIR = APP_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 MODEL_PATH = DATA_DIR / "current_model.json"
 DASHBOARD_PATH = DATA_DIR / "dashboard_data.json"
+TW_TZ = timezone(timedelta(hours=8))
+
+
+def taiwan_now() -> datetime:
+    return datetime.now(TW_TZ)
 
 st.set_page_config(
     page_title="台股 AI 模擬交易看盤",
@@ -33,6 +38,19 @@ html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, "No
 .block-container { padding-top: 1.2rem; max-width: 1180px; }
 .big-title { font-size: 2.3rem; font-weight: 900; letter-spacing: .02em; margin-bottom: .2rem; }
 .subtle { color: var(--muted); font-size: .92rem; }
+.top-status { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:.35rem 0 .8rem 0; color:#b9c8de; font-size:.9rem; }
+.status-pill { border:1px solid #355c88; background:#0b1727; border-radius:999px; padding:4px 9px; font-weight:800; white-space:nowrap; }
+.status-ok { color: var(--green); border-color:#1a8a58; }
+.status-warn { color:#ffd166; border-color:#806a22; }
+.status-bad { color: var(--red); border-color:#8a3333; }
+.mini-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:8px 0 12px 0; }
+.mini-card { background:var(--card); border:1px solid #263a59; border-radius:14px; padding:12px 14px; min-height:68px; }
+.mini-title { color:#c9d7ee; font-size:.82rem; font-weight:800; }
+.mini-value { font-size:1.28rem; font-weight:950; margin-top:5px; line-height:1.1; }
+.signal-box { background:#11223a; border:1px solid #2c5d96; border-radius:14px; padding:12px 14px; margin:8px 0; }
+.signal-main { font-weight:950; font-size:1.05rem; }
+.signal-sub { color:#b9c8de; font-size:.86rem; margin-top:4px; }
+.compact-warning { background:#3b4210; border:1px solid #626b18; color:#fff4a8; border-radius:12px; padding:10px 12px; margin:8px 0 12px; font-size:.88rem; line-height:1.5; }
 .card { background: var(--card); border:1px solid #263a59; border-radius:16px; padding:16px; margin:8px 0; }
 .card-blue { background: #12365a; border:1px solid #2374d5; border-radius:16px; padding:16px; margin:8px 0; }
 .metric-title { color:#c9d7ee; font-size:.85rem; font-weight:700; }
@@ -47,8 +65,14 @@ html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, "No
 .small-note { color:#9aa8bd; font-size:.86rem; line-height:1.5; }
 @media (max-width: 700px) {
   .big-title { font-size: 1.8rem; }
-  .metric-value { font-size: 1.35rem; }
-  .card { padding:12px; }
+  .metric-value { font-size: 1.25rem; }
+  .card { padding:10px; margin:6px 0; }
+  .mini-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .mini-card { padding:10px 11px; min-height:58px; }
+  .mini-value { font-size:1.12rem; }
+  .fill-tape { margin:10px 0 14px 0; padding:12px; }
+  .fill-main { gap:8px; font-size:.92rem; }
+  .block-container { padding-top:.65rem; }
 }
 </style>
 """
@@ -116,7 +140,7 @@ def normalize_quote(raw: Dict[str, Any], symbol: str) -> Dict[str, Any]:
     ask_size = sum(safe_int(x.get("size"), 0) for x in asks if isinstance(x, dict))
     bid1 = safe_float(bids[0].get("price"), price) if bids and isinstance(bids[0], dict) else price
     ask1 = safe_float(asks[0].get("price"), price) if asks and isinstance(asks[0], dict) else price
-    now = datetime.now()
+    now = taiwan_now()
     return {
         "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
         "time": now.strftime("%H:%M:%S"),
@@ -144,6 +168,9 @@ def ensure_state() -> None:
     st.session_state.setdefault("last_fill", None)
     st.session_state.setdefault("run_count", 0)
     st.session_state.setdefault("signals", [])
+    st.session_state.setdefault("connection_status", "未連線")
+    st.session_state.setdefault("last_update_tw", "-")
+    st.session_state.setdefault("last_error", "")
 
 
 def get_history(symbol: str) -> pd.DataFrame:
@@ -291,7 +318,7 @@ def update_positions(quotes_by_symbol: Dict[str, Dict[str, Any]], settings: Dict
 
 
 def maybe_open_positions(signals: List[Dict[str, Any]], settings: Dict[str, Any]) -> None:
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = taiwan_now().strftime("%Y-%m-%d")
     today_trades = [t for t in st.session_state.trades if str(t.get("date")) == today]
     open_count = sum(1 for p in st.session_state.positions if p.get("status") == "OPEN")
     if len(today_trades) + open_count >= int(settings["max_daily_trades"]):
@@ -309,6 +336,25 @@ def maybe_open_positions(signals: List[Dict[str, Any]], settings: Dict[str, Any]
 
 def render_metric(title: str, value: Any, cls: str = "") -> None:
     st.markdown(f"<div class='card'><div class='metric-title'>{title}</div><div class='metric-value {cls}'>{value}</div></div>", unsafe_allow_html=True)
+
+
+def render_mini_grid(items: List[tuple]) -> None:
+    html = ["<div class='mini-grid'>"]
+    for title, value, cls in items:
+        html.append(f"<div class='mini-card'><div class='mini-title'>{title}</div><div class='mini-value {cls}'>{value}</div></div>")
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def render_trade_details(trades: List[Dict[str, Any]], height: int = 260) -> None:
+    st.markdown("## 交易明細（最新在上）")
+    if trades:
+        trades_df = pd.DataFrame(trades)
+        order_cols = ["date", "exit_time", "symbol", "name", "side", "action", "entry_time", "entry_price", "exit_price", "lots", "score", "gross_pnl_pct", "cost_pct", "pnl_pct", "pnl", "result", "exit_reason", "setup_type", "reason"]
+        st.dataframe(trades_df[[c for c in order_cols if c in trades_df.columns]], use_container_width=True, hide_index=True, height=height)
+        st.download_button("下載交易明細 CSV", trades_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"mobile_paper_trades_{taiwan_now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
+    else:
+        st.markdown("<div class='card-blue'>目前沒有模擬交易明細。</div>", unsafe_allow_html=True)
 
 
 def render_fill_tape() -> None:
@@ -469,8 +515,20 @@ model = load_json(MODEL_PATH, {"model_name": "model_initial_v1", "model_date": "
 dashboard = load_json(DASHBOARD_PATH, {})
 
 st.markdown("<div class='big-title'>台股 AI 模擬交易看盤</div>", unsafe_allow_html=True)
+_now_tw = taiwan_now().strftime("%Y-%m-%d %H:%M:%S")
+_conn = st.session_state.get("connection_status", "未連線")
+_conn_cls = "status-ok" if "已連線" in _conn or "成功" in _conn else ("status-bad" if "失敗" in _conn or "錯誤" in _conn else "status-warn")
 st.markdown(
-    f"<div class='subtle'>手機端 V14.4 共用AI引擎｜模型：{model.get('model_name','-')}｜模型日期：{model.get('model_date','尚未同步')}</div>",
+    f"""
+    <div class='top-status'>
+      <span>手機端 V14.4 共用AI引擎</span>
+      <span>模型：{model.get('model_name','-')}</span>
+      <span>模型日期：{model.get('model_date','尚未同步')}</span>
+      <span class='status-pill'>台灣時間：{_now_tw}</span>
+      <span class='status-pill {_conn_cls}'>連線：{_conn}</span>
+      <span class='status-pill'>最後更新：{st.session_state.get('last_update_tw','-')}</span>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
@@ -516,6 +574,7 @@ quotes_now: Dict[str, Dict[str, Any]] = {}
 signals_now: List[Dict[str, Any]] = []
 
 if run_reason and api_key and symbols:
+    any_error = False
     for symbol in symbols:
         try:
             raw = fetch_fugle_quote(api_key, symbol)
@@ -524,7 +583,14 @@ if run_reason and api_key and symbols:
             st.session_state.quotes[symbol] = st.session_state.quotes[symbol][-360:]
             quotes_now[symbol] = q
         except Exception as e:
+            any_error = True
+            st.session_state.last_error = str(e)
             st.error(f"{symbol} 即時報價失敗：{e}")
+    if quotes_now:
+        st.session_state.connection_status = "已連線" if not any_error else "部分成功"
+        st.session_state.last_update_tw = taiwan_now().strftime("%H:%M:%S")
+    elif any_error:
+        st.session_state.connection_status = "連線失敗"
     if quotes_now:
         update_positions(quotes_now, settings)
         for symbol, q in quotes_now.items():
@@ -542,34 +608,45 @@ trades = st.session_state.trades
 best_sig = max(st.session_state.get("signals", []), key=lambda x: safe_float(x.get("score")), default={})
 
 st.markdown("## V14 模擬交易 AI")
-cols = st.columns(4)
-with cols[0]: render_metric("目前持倉", len(open_positions))
-with cols[1]: render_metric("今日模擬成交", len(trades))
-with cols[2]: render_metric("最高分股票", f"{best_sig.get('name','-')} {best_sig.get('symbol','')}")
-with cols[3]: render_metric("最高分", best_sig.get("score", "-"))
-
-cols2 = st.columns(4)
-with cols2[0]: render_metric("AI模型日期", model.get("model_date", "尚未同步"))
-with cols2[1]: render_metric("做多門檻", settings["entry_score"])
-with cols2[2]: render_metric("停損%", settings["stop_loss_pct"])
-with cols2[3]: render_metric("停利%", settings["take_profit_pct"])
+render_mini_grid([
+    ("目前持倉", len(open_positions), ""),
+    ("今日成交", len(trades), ""),
+    ("最高分股票", f"{best_sig.get('name','-')} {best_sig.get('symbol','')}", ""),
+    ("最高分", best_sig.get("score", "-"), ""),
+    ("AI模型日期", model.get("model_date", "尚未同步"), ""),
+    ("做多門檻", settings["entry_score"], ""),
+    ("停損%", settings["stop_loss_pct"], ""),
+    ("停利%", settings["take_profit_pct"], ""),
+])
 
 if model.get("model_date") in (None, "", "尚未同步") or str(model.get("model_date", "")).startswith("2026-06-30"):
-    st.warning("AI 模型日期仍是舊資料或尚未同步。請把 PC Worker 最新的 models/current_model.json 同步到 streamlit_github/data/current_model.json。手機端即時模擬仍可使用，但模型資訊會顯示舊日期。")
+    st.markdown("<div class='compact-warning'>AI 模型日期尚未同步或仍是舊資料。現在不用急著更新也可以測即時模擬與 real_quotes 回測；等 PC Worker 收盤訓練完成後，再同步 models/current_model.json 到 streamlit_github/data/current_model.json，模型日期才會更新。</div>", unsafe_allow_html=True)
 
 st.markdown("## AI 即時判斷")
 if st.session_state.get("signals"):
     sig_df = pd.DataFrame(st.session_state.signals)
-    show_cols = ["time", "symbol", "name", "action", "score", "long_score", "short_score", "price", "vwap", "vwap_gap", "ask_bid_ratio", "bid_ask_imbalance", "expected_net_pct", "setup_type", "reason"]
-    st.dataframe(sig_df[[c for c in show_cols if c in sig_df.columns]], use_container_width=True, hide_index=True)
+    top = best_sig or st.session_state.signals[0]
+    action_txt = {"BUY":"做多", "SELL":"做空", "WAIT":"觀望"}.get(top.get("action"), top.get("action", "-"))
+    action_cls = "good" if top.get("action") == "BUY" else ("bad" if top.get("action") == "SELL" else "warn")
+    st.markdown(f"""
+    <div class='signal-box'>
+      <div class='signal-main'><span class='{action_cls}'>{action_txt}</span>｜{top.get('name','-')} {top.get('symbol','')}｜Score {top.get('score','-')}｜{fmt_price(top.get('price'))}</div>
+      <div class='signal-sub'>{top.get('setup_type','')}｜{top.get('reason','')}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    with st.expander("查看完整 AI 訊號表", expanded=False):
+        show_cols = ["time", "symbol", "name", "action", "score", "long_score", "short_score", "price", "vwap", "vwap_gap", "ask_bid_ratio", "bid_ask_imbalance", "expected_net_pct", "setup_type", "reason"]
+        st.dataframe(sig_df[[c for c in show_cols if c in sig_df.columns]], use_container_width=True, hide_index=True, height=220)
 else:
     st.markdown("<div class='card-blue'>尚無 AI 訊號。請輸入 API Key 後按「立即更新 / 執行一次AI」。</div>", unsafe_allow_html=True)
+
+render_trade_details(trades, height=260)
 
 chart_symbol = symbols[0] if symbols else "3481"
 fig = make_price_chart(chart_symbol)
 if fig:
-    st.markdown("## 價格 / VWAP 走勢")
-    st.plotly_chart(fig, use_container_width=True)
+    with st.expander("價格 / VWAP 走勢", expanded=False):
+        st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("## 模擬持倉")
 if open_positions:
@@ -583,16 +660,6 @@ if open_positions:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 else:
     st.markdown("<div class='card-blue'>目前沒有持倉資料。</div>", unsafe_allow_html=True)
-
-st.markdown("## 交易明細（最新在上）")
-if trades:
-    trades_df = pd.DataFrame(trades)
-    order_cols = ["date", "exit_time", "symbol", "name", "side", "action", "entry_time", "entry_price", "exit_price", "lots", "score", "gross_pnl_pct", "cost_pct", "pnl_pct", "pnl", "result", "exit_reason", "setup_type", "reason"]
-    st.dataframe(trades_df[[c for c in order_cols if c in trades_df.columns]], use_container_width=True, hide_index=True, height=360)
-    st.download_button("下載交易明細 CSV", trades_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"mobile_paper_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
-else:
-    st.markdown("<div class='card-blue'>目前沒有模擬交易明細。</div>", unsafe_allow_html=True)
-
 
 st.markdown("## 匯入 real_quotes 回測")
 st.markdown("<div class='small-note'>手機端可直接上傳 PC Worker 產生的 real_quotes_*.csv，呼叫與電腦端共用的 v14_engine.py 回測，讓手機與電腦使用同一套核心判斷。</div>", unsafe_allow_html=True)
@@ -624,7 +691,7 @@ if isinstance(bt_trades, pd.DataFrame) and not bt_trades.empty:
     st.download_button(
         "下載手機端 real_quotes 回測明細 CSV",
         bt_trades.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"mobile_real_quotes_backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        file_name=f"mobile_real_quotes_backtest_{taiwan_now().strftime('%Y%m%d_%H%M%S')}.csv",
         mime="text/csv",
         use_container_width=True,
     )
