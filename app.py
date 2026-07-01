@@ -395,6 +395,239 @@ def make_price_chart(symbol: str) -> Optional[go.Figure]:
     fig.update_layout(height=280, margin=dict(l=10, r=10, t=20, b=10), template="plotly_dark", legend=dict(orientation="h"))
     return fig
 
+
+# -----------------------------
+# Mobile real_quotes backtest
+# -----------------------------
+
+def _pick_col(df: pd.DataFrame, names: List[str]) -> Optional[str]:
+    lowered = {str(c).strip().lower(): c for c in df.columns}
+    for n in names:
+        if n.lower() in lowered:
+            return lowered[n.lower()]
+    return None
+
+
+def normalize_uploaded_real_quotes(uploaded_file: Any) -> pd.DataFrame:
+    df = pd.read_csv(uploaded_file)
+    if df.empty:
+        return pd.DataFrame()
+    ts_col = _pick_col(df, ["ts", "time", "datetime", "date_time"])
+    date_col = _pick_col(df, ["trade_date", "date"])
+    symbol_col = _pick_col(df, ["symbol", "stock", "code"])
+    name_col = _pick_col(df, ["name", "stock_name"])
+    price_col = _pick_col(df, ["price", "close", "lastPrice", "closePrice"])
+    vwap_col = _pick_col(df, ["vwap", "avgPrice", "averagePrice"])
+    high_col = _pick_col(df, ["high", "highPrice"])
+    low_col = _pick_col(df, ["low", "lowPrice"])
+    size_col = _pick_col(df, ["last_size", "lastSize", "volume"])
+    bid_col = _pick_col(df, ["total_bid", "bid_size", "bid"])
+    ask_col = _pick_col(df, ["total_ask", "ask_size", "ask"])
+    if not ts_col or not price_col:
+        raise ValueError("CSV 必須至少包含 ts/time 與 price/close 欄位。")
+    out = pd.DataFrame()
+    out["ts_raw"] = df[ts_col].astype(str)
+    out["dt"] = pd.to_datetime(out["ts_raw"], errors="coerce")
+    if out["dt"].isna().all():
+        raise ValueError("時間欄位無法解析，請確認 real_quotes CSV 的 ts 欄位。")
+    out["date"] = df[date_col].astype(str) if date_col else out["dt"].dt.strftime("%Y-%m-%d")
+    out["symbol"] = df[symbol_col].astype(str) if symbol_col else "3481"
+    out["name"] = df[name_col].astype(str) if name_col else out["symbol"]
+    out["price"] = pd.to_numeric(df[price_col], errors="coerce")
+    out["vwap"] = pd.to_numeric(df[vwap_col], errors="coerce") if vwap_col else out["price"]
+    out["high"] = pd.to_numeric(df[high_col], errors="coerce") if high_col else out["price"]
+    out["low"] = pd.to_numeric(df[low_col], errors="coerce") if low_col else out["price"]
+    out["last_size"] = pd.to_numeric(df[size_col], errors="coerce").fillna(0) if size_col else 0
+    out["bid_size"] = pd.to_numeric(df[bid_col], errors="coerce").fillna(0) if bid_col else 0
+    out["ask_size"] = pd.to_numeric(df[ask_col], errors="coerce").fillna(0) if ask_col else 0
+    out = out.dropna(subset=["dt", "price"]).copy()
+    out = out[out["price"] > 0]
+    out = out.sort_values("dt")
+    return out
+
+
+def aggregate_quotes_to_1m_df(raw: pd.DataFrame) -> pd.DataFrame:
+    if raw.empty:
+        return pd.DataFrame()
+    df = raw.copy()
+    df["minute"] = df["dt"].dt.floor("min")
+    rows = []
+    for (symbol, minute), g in df.groupby(["symbol", "minute"], sort=True):
+        g = g.sort_values("dt")
+        last = g.iloc[-1]
+        date_val = str(last.get("date") or minute.strftime("%Y-%m-%d"))[:10]
+        rows.append({
+            "ts": minute.strftime("%Y-%m-%d %H:%M:%S"),
+            "time": minute.strftime("%H:%M"),
+            "date": date_val,
+            "symbol": str(symbol),
+            "name": str(last.get("name") or symbol),
+            "price": float(last["price"]),
+            "vwap": float(pd.to_numeric(g["vwap"], errors="coerce").dropna().iloc[-1]) if pd.to_numeric(g["vwap"], errors="coerce").dropna().size else float(last["price"]),
+            "open": float(g["price"].iloc[0]),
+            "high": float(g["price"].max()),
+            "low": float(g["price"].min()),
+            "last_size": float(g["last_size"].sum()),
+            "bid_size": float(g["bid_size"].iloc[-1]),
+            "ask_size": float(g["ask_size"].iloc[-1]),
+        })
+    return pd.DataFrame(rows).sort_values(["ts", "symbol"]).reset_index(drop=True)
+
+
+def compute_wave_signal_local(symbol: str, quote: Dict[str, Any], hist_rows: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dict[str, Any]:
+    price = safe_float(quote.get("price"))
+    vwap = safe_float(quote.get("vwap"), price)
+    if price <= 0:
+        return {"symbol": symbol, "action": "WAIT", "score": 0, "reason": "無有效價格"}
+    bid_size = safe_float(quote.get("bid_size"), 0)
+    ask_size = safe_float(quote.get("ask_size"), 0)
+    ask_bid_ratio = ask_size / max(bid_size, 1.0)
+    imbalance = (bid_size - ask_size) / max(bid_size + ask_size, 1.0)
+    vwap_gap = (price - vwap) / vwap * 100 if vwap else 0.0
+    prices = [safe_float(x.get("price")) for x in hist_rows if safe_float(x.get("price")) > 0]
+    if not prices:
+        prices = [price]
+    def ret_n(n: int) -> float:
+        if len(prices) <= n or prices[-n-1] == 0:
+            return 0.0
+        return (prices[-1] - prices[-n-1]) / prices[-n-1] * 100
+    mom3 = ret_n(3)
+    mom5 = ret_n(5)
+    recent = prices[-5:] if len(prices) >= 5 else prices
+    recent_high = max(recent) if recent else price
+    recent_low = min(recent) if recent else price
+    close_pos_5 = (price - recent_low) / max(recent_high - recent_low, 0.0001) * 100
+    long_score = 0.0
+    short_score = 0.0
+    reasons_long: List[str] = []
+    reasons_short: List[str] = []
+    if vwap_gap < -0.7:
+        long_score += 18; reasons_long.append("低於VWAP有反彈空間")
+    if imbalance > 0.10:
+        long_score += 18; reasons_long.append("買盤回補")
+    if ask_bid_ratio < 1.25:
+        long_score += 14; reasons_long.append("賣壓不厚")
+    if mom3 > 0 and mom5 > -0.4:
+        long_score += 18; reasons_long.append("短線由弱轉強")
+    if close_pos_5 > 55:
+        long_score += 12; reasons_long.append("5K位置轉強")
+    if vwap_gap > settings["max_vwap_gap_long"]:
+        long_score -= 35; reasons_long.append("離VWAP太遠不追高")
+    if ask_bid_ratio > settings["max_ask_bid_for_long"] and imbalance < -0.25:
+        long_score -= 45; reasons_long.append("高檔賣壓過厚禁止做多")
+    if vwap_gap > 0.45:
+        short_score += 18; reasons_short.append("高於VWAP有回落空間")
+    if ask_bid_ratio > 1.8:
+        short_score += 22; reasons_short.append("賣壓厚")
+    if imbalance < -0.25:
+        short_score += 20; reasons_short.append("買賣盤偏空")
+    if close_pos_5 > 70 and mom3 <= 0.25:
+        short_score += 18; reasons_short.append("高檔推進效率轉差")
+    if mom3 < 0:
+        short_score += 10; reasons_short.append("短線轉弱")
+    if vwap_gap < -settings["max_vwap_gap_short"]:
+        short_score -= 35; reasons_short.append("離VWAP過低不追空")
+    long_expected = max(0.0, min(2.5, long_score / 100 * settings["take_profit_pct"] * 1.25))
+    short_expected = max(0.0, min(2.8, short_score / 100 * settings["take_profit_pct"] * 1.35))
+    min_expected = settings["min_expected_net_pct"]
+    if short_score >= settings["entry_score"] and short_score >= long_score + 6 and short_expected >= min_expected:
+        action = "SELL"; score = min(100.0, short_score); reason = "、".join(reasons_short[:4]); expected = short_expected; setup = "V14波段做空"
+    elif long_score >= settings["entry_score"] and long_score > short_score + 6 and long_expected >= min_expected:
+        action = "BUY"; score = min(100.0, long_score); reason = "、".join(reasons_long[:4]); expected = long_expected; setup = "V14波段做多"
+    else:
+        action = "WAIT"; score = max(long_score, short_score); reason = "觀望：波段分數或預估淨利不足"; expected = max(long_expected, short_expected); setup = "觀望"
+    return {
+        "ts": quote.get("ts"), "time": quote.get("time"), "date": quote.get("date"), "symbol": symbol, "name": quote.get("name", symbol),
+        "price": price, "vwap": vwap, "action": action, "score": round(score, 1),
+        "long_score": round(long_score, 1), "short_score": round(short_score, 1), "expected_net_pct": round(expected, 3),
+        "reason": reason, "setup_type": setup, "vwap_gap": round(vwap_gap, 3), "ask_bid_ratio": round(ask_bid_ratio, 3),
+        "bid_ask_imbalance": round(imbalance, 3), "mom3": round(mom3, 3), "mom5": round(mom5, 3), "close_pos_5": round(close_pos_5, 1),
+    }
+
+
+def run_uploaded_real_quotes_backtest(raw: pd.DataFrame, settings: Dict[str, Any]) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
+    bars = aggregate_quotes_to_1m_df(raw)
+    if bars.empty:
+        raise ValueError("real_quotes 聚合後沒有可回測的 1 分鐘資料。")
+    history: Dict[str, List[Dict[str, Any]]] = {}
+    positions: List[Dict[str, Any]] = []
+    trades: List[Dict[str, Any]] = []
+    signals: List[Dict[str, Any]] = []
+    for _, row in bars.iterrows():
+        q = row.to_dict()
+        symbol = str(q["symbol"])
+        history.setdefault(symbol, []).append(q)
+        sig = compute_wave_signal_local(symbol, q, history[symbol], settings)
+        signals.append(sig)
+        for pos in list(positions):
+            if pos.get("status") != "OPEN" or pos.get("symbol") != symbol:
+                continue
+            price = safe_float(q["price"])
+            entry = safe_float(pos["entry_price"])
+            gross = (price - entry) / entry * 100 if pos["side"] == "LONG" else (entry - price) / entry * 100
+            exit_reason = ""
+            if gross <= -settings["stop_loss_pct"]:
+                exit_reason = "停損"
+            elif gross >= settings["take_profit_pct"]:
+                exit_reason = "停利"
+            elif pos["side"] == "LONG" and sig["action"] == "SELL" and gross >= settings["min_reversal_exit_gross_pct"]:
+                exit_reason = "波段轉空"
+            elif pos["side"] == "SHORT" and sig["action"] == "BUY" and gross >= settings["min_reversal_exit_gross_pct"]:
+                exit_reason = "波段轉多"
+            if exit_reason:
+                pnl_pct = gross - settings["cost_pct"]
+                pnl = round(entry * 1000 * int(settings["lots"]) * pnl_pct / 100)
+                trades.append({
+                    "date": q.get("date"), "exit_time": q.get("time"), "symbol": symbol, "name": q.get("name", symbol),
+                    "side": pos["side"], "action": "SELL" if pos["side"] == "LONG" else "BUY", "entry_time": pos["entry_time"],
+                    "entry_price": round(entry, 3), "exit_price": round(price, 3), "lots": int(settings["lots"]), "score": pos.get("score", 0),
+                    "gross_pnl_pct": round(gross, 3), "cost_pct": round(settings["cost_pct"], 3), "pnl_pct": round(pnl_pct, 3),
+                    "pnl": pnl, "result": "WIN" if pnl_pct > 0 else "LOSS", "exit_reason": exit_reason,
+                    "setup_type": pos.get("setup_type", ""), "reason": pos.get("reason", ""),
+                })
+                pos["status"] = "CLOSED"
+        open_positions = [p for p in positions if p.get("status") == "OPEN" and p.get("symbol") == symbol]
+        if len(trades) + len([p for p in positions if p.get("status") == "OPEN"]) < int(settings["max_daily_trades"]):
+            if not open_positions and sig["action"] in ("BUY", "SELL"):
+                if sig["action"] != "SELL" or settings["allow_short"]:
+                    positions.append({
+                        "symbol": symbol, "side": "LONG" if sig["action"] == "BUY" else "SHORT", "status": "OPEN",
+                        "entry_time": q.get("time"), "entry_price": safe_float(q.get("price")), "score": sig.get("score"),
+                        "setup_type": sig.get("setup_type"), "reason": sig.get("reason"),
+                    })
+    # Force close open positions at last available price, for backtest comparability.
+    for pos in [p for p in positions if p.get("status") == "OPEN"]:
+        last_rows = bars[bars["symbol"].astype(str) == str(pos["symbol"])]
+        if last_rows.empty:
+            continue
+        q = last_rows.iloc[-1].to_dict()
+        price = safe_float(q["price"]); entry = safe_float(pos["entry_price"])
+        gross = (price - entry) / entry * 100 if pos["side"] == "LONG" else (entry - price) / entry * 100
+        pnl_pct = gross - settings["cost_pct"]
+        pnl = round(entry * 1000 * int(settings["lots"]) * pnl_pct / 100)
+        trades.append({
+            "date": q.get("date"), "exit_time": q.get("time"), "symbol": pos["symbol"], "name": q.get("name", pos["symbol"]),
+            "side": pos["side"], "action": "SELL" if pos["side"] == "LONG" else "BUY", "entry_time": pos["entry_time"],
+            "entry_price": round(entry, 3), "exit_price": round(price, 3), "lots": int(settings["lots"]), "score": pos.get("score", 0),
+            "gross_pnl_pct": round(gross, 3), "cost_pct": round(settings["cost_pct"], 3), "pnl_pct": round(pnl_pct, 3),
+            "pnl": pnl, "result": "WIN" if pnl_pct > 0 else "LOSS", "exit_reason": "收盤平倉",
+            "setup_type": pos.get("setup_type", ""), "reason": pos.get("reason", ""),
+        })
+    trades_df = pd.DataFrame(trades).iloc[::-1].reset_index(drop=True) if trades else pd.DataFrame()
+    sig_df = pd.DataFrame(signals)
+    if not trades_df.empty:
+        wins = int((trades_df["pnl_pct"] > 0).sum())
+        total = int(len(trades_df))
+        summary = {
+            "bars": int(len(bars)), "trades": total, "wins": wins, "win_rate": round(wins / total * 100, 1),
+            "total_pnl": int(trades_df["pnl"].sum()), "total_pnl_pct": round(float(trades_df["pnl_pct"].sum()), 3),
+            "avg_pnl_pct": round(float(trades_df["pnl_pct"].mean()), 3),
+            "long_trades": int((trades_df["side"] == "LONG").sum()), "short_trades": int((trades_df["side"] == "SHORT").sum()),
+        }
+    else:
+        summary = {"bars": int(len(bars)), "trades": 0, "wins": 0, "win_rate": 0.0, "total_pnl": 0, "total_pnl_pct": 0.0, "avg_pnl_pct": 0.0, "long_trades": 0, "short_trades": 0}
+    return trades_df, summary, sig_df
+
 # -----------------------------
 # UI
 # -----------------------------
@@ -414,7 +647,7 @@ with st.sidebar:
     symbols_text = st.text_input("監控股票代碼", value="3481", help="多檔請用逗號，例如 3481,2330,2303")
     refresh_now = st.button("立即更新 / 執行一次AI", use_container_width=True)
     auto_refresh = st.checkbox("自動刷新", value=False)
-    refresh_sec = st.number_input("自動刷新秒數", min_value=3, max_value=60, value=5, step=1)
+    refresh_sec = st.number_input("自動刷新秒數", min_value=1, max_value=60, value=1, step=1)
     st.divider()
     lots = st.number_input("每筆張數", min_value=1, max_value=100, value=1, step=1)
     max_daily_trades = st.number_input("每日最多模擬成交", min_value=1, max_value=50, value=8, step=1)
@@ -521,6 +754,44 @@ if trades:
     st.download_button("下載交易明細 CSV", trades_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"mobile_paper_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
 else:
     st.markdown("<div class='card-blue'>目前沒有模擬交易明細。</div>", unsafe_allow_html=True)
+
+
+st.markdown("## 匯入 real_quotes 回測")
+st.markdown("<div class='small-note'>手機端可直接上傳 PC Worker 產生的 real_quotes_*.csv，使用同一套 V14 WaveScore 做回測，比對手機端與電腦版邏輯。</div>", unsafe_allow_html=True)
+uploaded_real_quotes = st.file_uploader("上傳 real_quotes CSV", type=["csv"], key="real_quotes_backtest_uploader")
+backtest_run = st.button("執行手機端 real_quotes 回測", use_container_width=True)
+if uploaded_real_quotes is not None:
+    st.caption(f"已選擇：{uploaded_real_quotes.name}")
+if backtest_run and uploaded_real_quotes is not None:
+    try:
+        raw_bt = normalize_uploaded_real_quotes(uploaded_real_quotes)
+        bt_trades, bt_summary, bt_signals = run_uploaded_real_quotes_backtest(raw_bt, settings)
+        st.session_state["uploaded_backtest_trades"] = bt_trades
+        st.session_state["uploaded_backtest_summary"] = bt_summary
+        st.session_state["uploaded_backtest_signals"] = bt_signals
+    except Exception as e:
+        st.error(f"real_quotes 回測失敗：{e}")
+
+bt_summary = st.session_state.get("uploaded_backtest_summary")
+bt_trades = st.session_state.get("uploaded_backtest_trades")
+if isinstance(bt_summary, dict):
+    c = st.columns(5)
+    c[0].metric("1分K數", bt_summary.get("bars", 0))
+    c[1].metric("交易筆數", bt_summary.get("trades", 0))
+    c[2].metric("勝率", f"{bt_summary.get('win_rate', 0)}%")
+    c[3].metric("總損益", f"{bt_summary.get('total_pnl', 0):,}")
+    c[4].metric("總損益%", f"{bt_summary.get('total_pnl_pct', 0)}%")
+if isinstance(bt_trades, pd.DataFrame) and not bt_trades.empty:
+    st.dataframe(bt_trades, use_container_width=True, hide_index=True, height=360)
+    st.download_button(
+        "下載手機端 real_quotes 回測明細 CSV",
+        bt_trades.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"mobile_real_quotes_backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+elif isinstance(bt_summary, dict):
+    st.markdown("<div class='card-blue'>這次 real_quotes 回測沒有產生交易。</div>", unsafe_allow_html=True)
 
 st.markdown("## 每日績效報告")
 if trades:
