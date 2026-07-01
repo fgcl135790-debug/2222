@@ -76,24 +76,25 @@ def render_win_rate_sidebar_panel():
             st.divider()
             st.caption("最近 10 筆訊號結果")
 
-            df = pd.DataFrame(trades[-10:])
+            df = pd.DataFrame(list(reversed(trades[-10:])))
 
             show_cols = [
                 "source",
                 "stock_code",
                 "action",
+                "exit_reason",
+                "result",
+                "pnl_pct",
                 "score",
                 "entry_time",
                 "entry_price",
+                "exit_time",
+                "exit_price",
+                "hold_bars",
                 "stop_loss_pct",
                 "take_profit_pct",
                 "stop_loss",
                 "take_profit",
-                "exit_time",
-                "exit_reason",
-                "hold_bars",
-                "pnl_pct",
-                "result",
             ]
 
             df = df[[col for col in show_cols if col in df.columns]]

@@ -193,7 +193,31 @@ class WinRateEngine:
                 if len(st.session_state.winrate_trades) > 300:
                     st.session_state.winrate_trades = st.session_state.winrate_trades[-300:]
 
-                return
+                direction_label = "多單" if active_action == "BUY" else "空單"
+                level = "success" if pnl_pct > 0 else "danger"
+
+                if result == "FLAT":
+                    level = "warning"
+
+                return {
+                    "type": "EXIT",
+                    "level": level,
+                    "action": active_action,
+                    "title": f"{direction_label}出場提醒｜{exit_reason}",
+                    "message": (
+                        f"{name}({stock_code})｜出場 {round(price, 2)}｜"
+                        f"損益 {round(pnl_pct, 2)}%"
+                    ),
+                    "detail": (
+                        f"進場 {round(entry_price, 2)}｜"
+                        f"持有 {active.get('bars_held', 0)} 根K｜{result}"
+                    ),
+                    "price": round(price, 2),
+                    "pnl_pct": round(pnl_pct, 3),
+                    "reason": exit_reason,
+                    "result": result,
+                    "created_at": now.strftime("%H:%M:%S"),
+                }
 
         # =========================
         # 沒有追蹤交易時，建立新交易
@@ -241,6 +265,29 @@ class WinRateEngine:
             }
 
             st.session_state.winrate_last_signal_key = signal_key
+
+            direction_label = "多單" if action == "BUY" else "空單"
+            level = "success" if action == "BUY" else "danger"
+
+            return {
+                "type": "ENTRY",
+                "level": level,
+                "action": action,
+                "title": f"{direction_label}進場提醒",
+                "message": (
+                    f"{name}({stock_code})｜進場 {round(price, 2)}｜"
+                    f"AI 信心 {score}"
+                ),
+                "detail": (
+                    f"停損 {round(stop_loss, 2)}｜"
+                    f"停利 {round(take_profit, 2)}"
+                ),
+                "price": round(price, 2),
+                "stop_loss": round(stop_loss, 2),
+                "take_profit": round(take_profit, 2),
+                "score": score,
+                "created_at": now.strftime("%H:%M:%S"),
+            }
 
     @staticmethod
     def import_backtest_trades(st, trades):

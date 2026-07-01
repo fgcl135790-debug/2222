@@ -172,7 +172,7 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
 
 try:
     import random
-    from datetime import datetime
+    from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 
     from market_analyzer import MarketAnalyzer
@@ -200,7 +200,8 @@ try:
     from ui.alerts import render_alerts
     from ui.sidebar import render_sidebar
     from ui.backtest_sidebar import render_backtest_sidebar_panel
-    from ui.win_rate_sidebar import render_win_rate_sidebar_panel
+    from ui.win_rate_panel import render_win_rate_panel
+    from ui.trade_toast import render_trade_toast
     from ui.event_stream_panel import render_event_stream_panel
     from ui.kline_export_sidebar import render_kline_export_sidebar_panel
 
@@ -374,8 +375,6 @@ def main():
         api_key=api_key,
         stock_code=stock_code,
     )
-
-    render_win_rate_sidebar_panel()
 
     render_kline_export_sidebar_panel(
         api_key=api_key,
@@ -689,7 +688,7 @@ def main():
         price=price,
     )
 
-    WinRateEngine.update_live(
+    trade_event = WinRateEngine.update_live(
         st=st,
         stock_code=stock_code,
         name=name,
@@ -710,6 +709,48 @@ def main():
         trade_alert=trade_alert,
         big_order_log=st.session_state.big_order_log,
     )
+
+    # =========================
+    # 上方進出場 Toast 提醒
+    # =========================
+
+    toast_seconds = 6
+
+    if trade_event:
+        st.session_state.trade_toast_event = trade_event
+        st.session_state.trade_toast_until = now + timedelta(seconds=toast_seconds)
+
+    else:
+        alert_level = str(trade_alert.get("level", "")).upper()
+
+        if alert_level in ["ENTRY", "SUCCESS", "DANGER"]:
+            alert_key = (
+                f"{stock_code}|{data_source}|{decision.get('action')}|"
+                f"{trade_alert.get('title')}|{now.strftime('%H:%M')}"
+            )
+
+            if st.session_state.get("last_trade_alert_toast_key") != alert_key:
+                st.session_state.last_trade_alert_toast_key = alert_key
+
+                alert_type = "ENTRY" if alert_level == "ENTRY" else "EXIT"
+                alert_action = decision.get("action", "WAIT")
+
+                st.session_state.trade_toast_event = {
+                    "type": alert_type,
+                    "level": trade_alert.get("level", "warning"),
+                    "action": alert_action,
+                    "title": trade_alert.get("title", "交易提醒"),
+                    "message": f"{name}({stock_code})｜現價 {price:.2f}",
+                    "detail": trade_alert.get("detail") or trade_alert.get("message", ""),
+                    "created_at": now.strftime("%H:%M:%S"),
+                }
+                st.session_state.trade_toast_until = now + timedelta(seconds=toast_seconds)
+
+    toast_until = st.session_state.get("trade_toast_until")
+    toast_event = st.session_state.get("trade_toast_event")
+
+    if toast_event and toast_until and now <= toast_until:
+        render_trade_toast(toast_event)
 
     # =========================
     # Header
@@ -760,6 +801,8 @@ def main():
         # =========================
         # 手機版：單欄順序，避免左右欄位把畫面撐寬
         # =========================
+
+        render_win_rate_panel()
 
         render_decision_card(decision)
 
@@ -851,6 +894,8 @@ def main():
         # =========================
 
         with main_right:
+            render_win_rate_panel()
+
             render_decision_card(decision)
 
             render_rebound_panel(

@@ -443,25 +443,26 @@ def render_backtest_sidebar_panel(api_key, stock_code):
         st.divider()
         st.caption("最近 10 筆回測交易")
 
-        df = pd.DataFrame(trades[-10:])
+        df = pd.DataFrame(list(reversed(trades[-10:])))
 
         show_cols = [
             "date",
             "action",
+            "exit_reason",
+            "result",
+            "pnl_pct",
             "score",
             "entry_time",
             "entry_price",
+            "exit_time",
+            "exit_price",
+            "hold_bars",
+            "gross_pnl_pct",
+            "cost_pct",
             "stop_loss_pct",
             "take_profit_pct",
             "stop_loss",
             "take_profit",
-            "exit_time",
-            "exit_price",
-            "exit_reason",
-            "hold_bars",
-            "gross_pnl_pct",
-            "cost_pct",
-            "pnl_pct",
             "predicted_win_rate",
             "predicted_expected_value",
             "required_win_rate",
@@ -473,7 +474,6 @@ def render_backtest_sidebar_panel(api_key, stock_code):
             "hard_fail_reasons",
             "model_train_start",
             "model_train_end",
-            "result",
         ]
 
         df = df[
