@@ -1,0 +1,36 @@
+{
+  "exported_at": "尚未連接電腦端 Worker",
+  "trade_date": "2026-06-30",
+  "model": {
+    "model_name": "Taiwan Intraday Monitor AI",
+    "model_date": "2026-06-30",
+    "version": "model_initial_v1",
+    "description": "規則式 AI 第一版：VWAP、EMA、五檔壓力、量能、突破偵測。僅供模擬與監控。",
+    "weights": {
+      "price_above_vwap": 18,
+      "ema_bull": 22,
+      "orderbook_pressure": 18,
+      "volume_spike": 17,
+      "breakout": 15,
+      "risk_penalty": 10
+    },
+    "thresholds": {
+      "long_score": 70,
+      "short_score": 35,
+      "bid_ask_ratio_bull": 1.25,
+      "bid_ask_ratio_bear": 0.8,
+      "volume_spike_ratio": 1.8,
+      "stop_loss_pct": 1.2,
+      "take_profit_pct": 2.0,
+      "max_holding_minutes": 90,
+      "big_order_lots": 100
+    },
+    "training_notes": ["初始模型，等待每日資料累積後微調。"],
+    "updated_at": "2026-06-30T00:00:00+08:00"
+  },
+  "latest_quotes": [],
+  "latest_signals": [],
+  "positions": [],
+  "paper_trades": [],
+  "daily_reports": []
+}
