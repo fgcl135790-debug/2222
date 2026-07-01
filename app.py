@@ -110,6 +110,56 @@ footer {
         font-size: 13px !important;
     }
 }
+
+
+/* =========================
+   手機響應式修正
+   ========================= */
+* { box-sizing: border-box; }
+html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
+    overflow-x: hidden !important;
+    max-width: 100vw !important;
+}
+[data-testid="stHorizontalBlock"], [data-testid="column"] { min-width: 0 !important; }
+.stPlotlyChart, .js-plotly-plot, .plot-container { max-width: 100% !important; }
+
+@media (max-width: 760px) {
+    .block-container {
+        max-width: 100vw !important;
+        width: 100vw !important;
+        padding: 0.75rem 0.45rem 5.0rem 0.45rem !important;
+    }
+    header[data-testid="stHeader"] { height: 30px !important; }
+    div[data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+        gap: 0.45rem !important;
+        width: 100% !important;
+    }
+    div[data-testid="column"] {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+    }
+    div[role="radiogroup"], div[data-baseweb="radio"] {
+        flex-wrap: wrap !important;
+        max-width: 100% !important;
+    }
+    button, div[data-testid="stButton"] button {
+        min-height: 34px !important;
+        white-space: nowrap !important;
+    }
+    .modebar {
+        transform: scale(0.72) !important;
+        transform-origin: top right !important;
+    }
+    .stDataFrame, [data-testid="stDataFrame"] {
+        max-width: 100% !important;
+        overflow-x: auto !important;
+    }
+    p, div, span { font-size: 12px; }
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -309,6 +359,7 @@ def main():
         api_key,
         mode,
         refresh_sec,
+        mobile_layout,
     ) = render_sidebar(reset_state)
 
     api_key = _resolve_api_key(api_key)
@@ -705,16 +756,13 @@ def main():
     # V7.6 Dashboard Layout
     # =========================
 
-    main_left, main_right = st.columns(
-        [1.92, 0.92],
-        gap="small",
-    )
+    if mobile_layout:
+        # =========================
+        # 手機版：單欄順序，避免左右欄位把畫面撐寬
+        # =========================
 
-    # =========================
-    # 左側：主圖 + 市場資訊 + 大單事件流
-    # =========================
+        render_decision_card(decision)
 
-    with main_left:
         render_chart(
             prices=prices,
             volumes=volumes,
@@ -739,18 +787,6 @@ def main():
             volumes=volumes,
         )
 
-        render_event_stream_panel(
-            big_order_log=st.session_state.big_order_log,
-            decision=decision,
-        )
-
-    # =========================
-    # 右側：決策 + 反彈 + 主力 + 警示
-    # =========================
-
-    with main_right:
-        render_decision_card(decision)
-
         render_rebound_panel(
             decision=decision,
             trade_alert=trade_alert,
@@ -764,6 +800,72 @@ def main():
         )
 
         render_alerts(alerts)
+
+        render_event_stream_panel(
+            big_order_log=st.session_state.big_order_log,
+            decision=decision,
+        )
+
+    else:
+        main_left, main_right = st.columns(
+            [1.92, 0.92],
+            gap="small",
+        )
+
+        # =========================
+        # 左側：主圖 + 市場資訊 + 大單事件流
+        # =========================
+
+        with main_left:
+            render_chart(
+                prices=prices,
+                volumes=volumes,
+                vwap_values=vwaps,
+                time_values=times,
+                decision=decision,
+                trade_alert=trade_alert,
+            )
+
+            render_lower_market_grid(
+                bids=bids,
+                asks=asks,
+                decision=decision,
+                price=price,
+                vwap=vwap,
+                ema5=ema5,
+                ema20=ema20,
+                rsi=rsi,
+                macd=macd,
+                macd_signal=macd_signal,
+                volume=volume,
+                volumes=volumes,
+            )
+
+            render_event_stream_panel(
+                big_order_log=st.session_state.big_order_log,
+                decision=decision,
+            )
+
+        # =========================
+        # 右側：決策 + 反彈 + 主力 + 警示
+        # =========================
+
+        with main_right:
+            render_decision_card(decision)
+
+            render_rebound_panel(
+                decision=decision,
+                trade_alert=trade_alert,
+            )
+
+            render_main_force_panel(
+                bids=bids,
+                asks=asks,
+                big_order_log=st.session_state.big_order_log,
+                decision=decision,
+            )
+
+            render_alerts(alerts)
 
 
 # =========================

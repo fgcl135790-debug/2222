@@ -13,6 +13,8 @@ from ui.theme import (
     SUBTEXT,
 )
 
+from ui.html_utils import render_html
+
 
 def _safe_float(value, default=0.0):
     try:
@@ -421,8 +423,4 @@ def render_event_stream_panel(big_order_log, decision=None):
 </html>
 """
 
-    components.html(
-        html,
-        height=315,
-        scrolling=False,
-    )
+    render_html(html, height=520)

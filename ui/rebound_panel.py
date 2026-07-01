@@ -12,6 +12,8 @@ from ui.theme import (
     SUBTEXT,
 )
 
+from ui.html_utils import render_html
+
 
 def _safe_int(value, default=0):
     try:
@@ -244,8 +246,4 @@ def render_rebound_panel(decision, trade_alert):
 </html>
 """
 
-    components.html(
-        html,
-        height=210,
-        scrolling=False,
-    )
+    render_html(html, height=460)

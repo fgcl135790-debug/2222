@@ -53,6 +53,15 @@ def render_sidebar(reset_callback):
             key="sidebar_refresh_sec",
         )
 
+        st.divider()
+
+        mobile_layout = st.toggle(
+            "手機版單欄排版",
+            value=st.session_state.get("mobile_layout", False),
+            key="mobile_layout",
+            help="手機觀看請打開。會把左右欄改成單欄，並把圖表控制改成下拉式，避免畫面被撐寬。",
+        )
+
         if st.button("重置股票", key="sidebar_reset_stock"):
             reset_callback()
             st.rerun()
@@ -63,4 +72,5 @@ def render_sidebar(reset_callback):
         api_key,
         mode,
         refresh_sec,
+        mobile_layout,
     )
