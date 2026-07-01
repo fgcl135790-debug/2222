@@ -1,97 +1,41 @@
-# 台股 AI 手機看盤：GitHub / Streamlit 端
+# Streamlit GitHub 手機顯示端（V14.2 模擬交易 UI）
 
-這個資料夾是「手機端 Dashboard」。它只負責顯示電腦端 Worker 輸出的資料，不負責長時間抓資料、模擬交易或訓練。
+這個資料夾是手機 / Streamlit 顯示端，主要讀取 PC Worker 匯出的資料，不會送出真實委託。
 
----
+## 新增功能
 
-## 1. 本機測試
+- V14 模擬交易 AI 摘要
+- 上方券商 APP 風格「模擬成交快訊」跑馬燈
+- 下方「交易明細」表格，最新資料固定在最上面
+- 可下載交易明細 CSV
+- 支援讀取 `data/dashboard_data.json` 裡的：
+  - `latest_quotes`
+  - `latest_signals`
+  - `positions`
+  - `paper_trades`
+  - `daily_reports`
+- 額外支援 `data/` 裡的 `paper_trades*.csv`、`backtest_trades*.csv` 作為交易明細來源
 
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+## 使用方式
 
----
-
-## 2. 上傳 GitHub
-
-把這個資料夾內容上傳到一個 GitHub repo，例如：
-
-```text
-stock-ai-streamlit-dashboard
-```
-
-repo 至少要有：
-
-```text
-app.py
-requirements.txt
-data/dashboard_data.json
-data/current_model.json
-```
-
----
-
-## 3. 部署到 Streamlit Community Cloud
-
-1. 登入 Streamlit Community Cloud
-2. 選 GitHub repo
-3. Branch 選 main
-4. Main file path 選 `app.py`
-5. Deploy
-
-部署後手機開 Streamlit 給你的網址即可。
-
----
-
-## 4. 和電腦端同步資料
-
-電腦端 Worker 會產生：
-
-```text
-exports/dashboard_data.json
-models/current_model.json
-```
-
-請把它們同步到這個 Streamlit 專案：
+1. 把 `streamlit_github` 資料夾推到 GitHub。
+2. 到 Streamlit Cloud 部署。
+3. PC Worker 匯出或同步以下檔案到 `streamlit_github/data/`：
 
 ```text
 data/dashboard_data.json
 data/current_model.json
 ```
 
-你可以在電腦端 GUI 填入這個 Streamlit 專案資料夾路徑，讓它自動複製。
-
----
-
-## 5. Streamlit Secrets 選項
-
-如果你之後把 `dashboard_data.json` 放到一個固定網址，也可以在 Streamlit Cloud 的 Secrets 設定：
-
-```toml
-DASHBOARD_JSON_URL = "https://你的固定資料網址/dashboard_data.json"
-```
-
-設定後 `app.py` 會優先讀這個遠端 JSON。
-
----
-
-## 6. 目前第一版限制
-
-第一版是檔案同步模式：
+如果有交易明細 CSV，也可以同步：
 
 ```text
-電腦 Worker -> dashboard_data.json -> GitHub / Streamlit -> 手機看盤
+data/paper_trades_YYYY-MM-DD.csv
+data/backtest_trades_YYYY-MM-DD.csv
 ```
 
-如果要做到手機端幾乎即時更新，下一版建議升級成：
+## 注意
 
-```text
-電腦 Worker -> Supabase/PostgreSQL -> Streamlit Cloud -> 手機
-```
+`paper_trades` 會優先顯示在上方成交快訊與下方交易明細。若沒有 `paper_trades`，系統會用最新 AI 訊號顯示觀察提示。
 
----
-
-## 7. 注意
-
-這是 AI 模擬交易與監控 dashboard，不是投資建議，也不會送出真實委託單。
+此 Dashboard 僅作為模擬監控與分析，不是投資建議，也不會送出真實交易。
