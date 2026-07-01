@@ -12,8 +12,6 @@ from ui.theme import (
     SUBTEXT,
 )
 
-from ui.html_utils import render_html
-
 
 def _safe_float(value, default=0.0):
     try:
@@ -467,4 +465,8 @@ def render_main_force_panel(bids, asks, big_order_log, decision):
 </html>
 """
 
-    render_html(html, height=580)
+    components.html(
+        html,
+        height=305,
+        scrolling=False,
+    )

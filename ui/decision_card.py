@@ -12,8 +12,6 @@ from ui.theme import (
     SUBTEXT,
 )
 
-from ui.html_utils import render_html
-
 
 def _safe_int(value, default=50):
     try:
@@ -167,7 +165,7 @@ def render_decision_card(decision):
             background: transparent;
             font-family: Arial, "Microsoft JhengHei", sans-serif;
             color: {TEXT};
-            overflow: visible;
+            overflow: hidden;
         }}
 
         .card {{
@@ -395,16 +393,6 @@ def render_decision_card(decision):
             font-size: 11px;
             text-align: right;
         }}
-
-        @media (max-width: 760px) {{
-            .card {{ padding: 12px; }}
-            .title {{ font-size: 23px; }}
-            .main {{ grid-template-columns: 1fr; gap: 10px; }}
-            .score-ring {{ width: 72px; height: 72px; margin: 0 auto; }}
-            .score-inner {{ width: 54px; height: 54px; }}
-            .multi-grid {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
-        }}
-
     </style>
 </head>
 
@@ -506,4 +494,8 @@ def render_decision_card(decision):
 </html>
 """
 
-    render_html(html, height=620)
+    components.html(
+        html,
+        height=430,
+        scrolling=False,
+    )

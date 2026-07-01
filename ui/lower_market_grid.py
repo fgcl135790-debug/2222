@@ -12,8 +12,6 @@ from ui.theme import (
     SUBTEXT,
 )
 
-from ui.html_utils import render_html
-
 
 def _safe_float(value, default=0.0):
     try:
@@ -475,21 +473,6 @@ def render_lower_market_grid(
         @media (max-width: 900px) {{
             .grid {{
                 grid-template-columns: 1fr;
-                gap: 8px;
-            }}
-
-            .card {{
-                min-height: auto;
-                padding: 10px;
-            }}
-
-            .big-status {{
-                font-size: 20px;
-            }}
-
-            td {{
-                font-size: 13px;
-                padding: 5px 2px;
             }}
         }}
     </style>
@@ -638,4 +621,8 @@ def render_lower_market_grid(
 </html>
 """
 
-    render_html(html, height=720)
+    components.html(
+        html,
+        height=330,
+        scrolling=False,
+    )

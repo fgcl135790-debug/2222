@@ -15,8 +15,6 @@ from ui.theme import (
     CARD_BORDER,
 )
 
-from ui.html_utils import render_html
-
 
 def _safe_float(value, default=0.0):
     try:
@@ -316,15 +314,6 @@ def _aggregate_ohlc(prices, volumes, vwaps, times, period):
 
 
 def _select_control(label, options, default, key):
-    if st.session_state.get("mobile_layout", False):
-        return st.selectbox(
-            label,
-            options,
-            index=options.index(default),
-            key=key,
-            label_visibility="collapsed",
-        )
-
     if hasattr(st, "segmented_control"):
         try:
             value = st.segmented_control(
@@ -360,45 +349,6 @@ def _render_period_selector():
         box = st.container()
 
     with box:
-        if st.session_state.get("mobile_layout", False):
-            st.caption("圖表模式")
-            mode = _select_control(
-                label="圖表模式",
-                options=["分時走勢", "K線走勢", "多週期分析"],
-                default="分時走勢",
-                key="chart_mode_selector",
-            )
-
-            st.caption("週期")
-            period = _select_control(
-                label="週期",
-                options=["1分", "5分", "15分", "30分", "日"],
-                default="1分",
-                key="chart_period_selector",
-            )
-
-            st.caption("工具")
-            tool1, tool2, tool3 = st.columns(3, gap="small")
-
-            with tool1:
-                st.button("技術", key="chart_tool_indicator", use_container_width=True)
-
-            with tool2:
-                st.button("畫線", key="chart_tool_line", use_container_width=True)
-
-            with tool3:
-                is_full = st.session_state.get("chart_fullscreen", False)
-                clicked = st.button(
-                    "返回" if is_full else "全屏",
-                    key="chart_tool_full",
-                    use_container_width=True,
-                )
-                if clicked:
-                    st.session_state.chart_fullscreen = not is_full
-                    st.rerun()
-
-            return mode, period
-
         col1, col2, col3 = st.columns(
             [1.1, 1.1, 0.9],
             gap="small",
@@ -592,7 +542,11 @@ def _render_chart_toolbar(
 </html>
 """
 
-    render_html(html, height=260)
+    components.html(
+        html,
+        height=44,
+        scrolling=False,
+    )
 
 
 def _trend_state(price, vwap, ema5, ema20, macd, signal):
@@ -924,15 +878,11 @@ def _apply_intraday_xaxis(fig, x_values):
 def _add_common_layout(fig, chart_key, x_values=None):
     is_full = st.session_state.get("chart_fullscreen", False)
 
-    mobile_layout = st.session_state.get("mobile_layout", False)
-    chart_height = 740 if is_full else (360 if mobile_layout else 430)
-    right_margin = 42 if mobile_layout else 70
-
     fig.update_layout(
-        height=chart_height,
+        height=740 if is_full else 430,
         margin=dict(
-            l=8 if mobile_layout else 12,
-            r=right_margin,
+            l=12,
+            r=70,
             t=18,
             b=8,
         ),
