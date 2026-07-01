@@ -112,13 +112,13 @@ class DecisionEngine:
                 extra={"reasons": reasons, "rebound": rebound},
             )
 
-        risk_plan = signal.get("risk_plan", {}) or {}
+        risk_plan = ai.get("risk_plan", {}) or {}
         stop_pct = DecisionEngine._safe_float(
-            signal.get("adaptive_stop_pct") or risk_plan.get("stop_pct"),
+            ai.get("adaptive_stop_pct") or risk_plan.get("stop_pct"),
             DecisionEngine.DEFAULT_STOP_PCT,
         )
         take_pct = DecisionEngine._safe_float(
-            signal.get("adaptive_take_pct") or risk_plan.get("take_pct"),
+            ai.get("adaptive_take_pct") or risk_plan.get("take_pct"),
             DecisionEngine.DEFAULT_TAKE_PCT,
         )
         risk_reward = take_pct / max(stop_pct, 0.01)

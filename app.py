@@ -184,6 +184,7 @@ try:
     from alert_engine import AlertEngine
     from market_flow_engine import MarketFlowEngine
     from win_rate_engine import WinRateEngine
+    from attack_forecast_engine import AttackForecastEngine
 
     # 當沖模型是加值功能：缺檔時不讓主畫面整個掛掉
     try:
@@ -200,6 +201,7 @@ try:
     from ui.sidebar import render_sidebar
     from ui.backtest_sidebar import render_backtest_sidebar_panel
     from ui.win_rate_panel import render_win_rate_panel
+    from ui.attack_forecast_panel import render_attack_forecast_panel
     from ui.trade_toast import render_trade_toast
     from ui.event_stream_panel import render_event_stream_panel
     from ui.kline_export_sidebar import render_kline_export_sidebar_panel
@@ -686,6 +688,19 @@ def main():
         price=price,
     )
 
+    # =========================
+    # 攻勢預判：在正式 BUY / SELL 前先看量能、五檔與價格結構是否蓄勢
+    # =========================
+
+    attack_forecast = AttackForecastEngine.analyze(
+        prices=prices,
+        volumes=volumes,
+        vwap_values=vwaps,
+        bids=bids,
+        asks=asks,
+        decision=decision,
+    )
+
     trade_event = WinRateEngine.update_live(
         st=st,
         stock_code=stock_code,
@@ -719,6 +734,38 @@ def main():
         st.session_state.trade_toast_until = now + timedelta(seconds=toast_seconds)
 
     else:
+        forecast_direction = str(attack_forecast.get("direction", "WAIT"))
+        forecast_score = int(attack_forecast.get("score", 0) or 0)
+        forecast_urgency = str(attack_forecast.get("urgency", "LOW"))
+
+        if (
+            forecast_direction in ["LONG", "SHORT"]
+            and forecast_urgency in ["MEDIUM", "HIGH"]
+            and forecast_score >= 70
+        ):
+            forecast_key = (
+                f"{stock_code}|{data_source}|PRE_ATTACK|"
+                f"{forecast_direction}|{forecast_score}|{now.strftime('%H:%M')}"
+            )
+
+            if st.session_state.get("last_attack_forecast_toast_key") != forecast_key:
+                st.session_state.last_attack_forecast_toast_key = forecast_key
+
+                forecast_action = "BUY" if forecast_direction == "LONG" else "SELL"
+                forecast_level = "success" if forecast_direction == "LONG" else "danger"
+                forecast_label = "多方攻勢預警" if forecast_direction == "LONG" else "空方攻勢預警"
+
+                st.session_state.trade_toast_event = {
+                    "type": "ALERT",
+                    "level": forecast_level,
+                    "action": forecast_action,
+                    "title": forecast_label,
+                    "message": f"{name}({stock_code})｜預判分數 {forecast_score}｜現價 {price:.2f}",
+                    "detail": attack_forecast.get("message", "攻勢正在醞釀，等待交易決策確認。"),
+                    "created_at": now.strftime("%H:%M:%S"),
+                }
+                st.session_state.trade_toast_until = now + timedelta(seconds=toast_seconds)
+
         alert_level = str(trade_alert.get("level", "")).upper()
 
         if alert_level in ["ENTRY", "SUCCESS", "DANGER"]:
@@ -786,6 +833,8 @@ def main():
 
         render_win_rate_panel()
 
+        render_attack_forecast_panel(attack_forecast)
+
         render_decision_card(decision)
 
         render_lower_market_grid(
@@ -831,6 +880,8 @@ def main():
         # 左側：勝率統計 + 交易決策，進出場判斷永遠在第一屏。
         with decision_col:
             render_win_rate_panel()
+
+            render_attack_forecast_panel(attack_forecast)
 
             render_decision_card(decision)
 
