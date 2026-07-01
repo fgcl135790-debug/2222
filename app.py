@@ -192,7 +192,6 @@ try:
         StockModelCache = None
 
     from ui.header import render_header
-    from ui.chart_panel import render_chart
     from ui.lower_market_grid import render_lower_market_grid
     from ui.decision_card import render_decision_card
     from ui.rebound_panel import render_rebound_panel
@@ -413,17 +412,16 @@ def main():
     # Auto Refresh
     # =========================
 
-    chart_fullscreen = st.session_state.get("chart_fullscreen", False)
+    # 走勢圖已移除：若舊版曾進入圖表全屏，這裡直接關閉，避免卡在舊狀態。
+    st.session_state.chart_fullscreen = False
     backtest_running = st.session_state.get("backtest_status") == "running"
 
-    if not chart_fullscreen and not backtest_running:
+    if not backtest_running:
         st_autorefresh(
             interval=refresh_sec * 1000,
-            key="v75_dashboard_refresh",
+            key="v78_dashboard_refresh",
         )
-    elif chart_fullscreen:
-        st.info("圖表全屏檢視中，自動刷新已暫停。按圖表工具列的「返回」恢復。")
-    elif backtest_running:
+    else:
         st.info("回測執行中，自動刷新已暫停。")
 
     # =========================
@@ -779,41 +777,16 @@ def main():
     )
 
     # =========================
-    # 全屏圖表模式
-    # =========================
-
-    if st.session_state.get("chart_fullscreen", False):
-        render_chart(
-            prices=prices,
-            volumes=volumes,
-            vwap_values=vwaps,
-            time_values=times,
-            decision=decision,
-            trade_alert=trade_alert,
-        )
-        return
-
-    # =========================
-    # V7.6 Dashboard Layout
+    # V7.8 Dashboard Layout
+    # 走勢圖已移除，資訊改為：決策區 / 盤面區 / 主力風控區。
     # =========================
 
     if mobile_layout:
-        # =========================
-        # 手機版：單欄順序，避免左右欄位把畫面撐寬
-        # =========================
+        # 手機版：最新、最常看的內容放最上面，減少上下滑動。
 
         render_win_rate_panel()
 
         render_decision_card(decision)
-
-        render_chart(
-            prices=prices,
-            volumes=volumes,
-            vwap_values=vwaps,
-            time_values=times,
-            decision=decision,
-            trade_alert=trade_alert,
-        )
 
         render_lower_market_grid(
             bids=bids,
@@ -830,16 +803,16 @@ def main():
             volumes=volumes,
         )
 
-        render_rebound_panel(
-            decision=decision,
-            trade_alert=trade_alert,
-        )
-
         render_main_force_panel(
             bids=bids,
             asks=asks,
             big_order_log=st.session_state.big_order_log,
             decision=decision,
+        )
+
+        render_rebound_panel(
+            decision=decision,
+            trade_alert=trade_alert,
         )
 
         render_alerts(alerts)
@@ -850,25 +823,19 @@ def main():
         )
 
     else:
-        main_left, main_right = st.columns(
-            [1.92, 0.92],
+        decision_col, market_col, force_col = st.columns(
+            [1.0, 1.18, 1.0],
             gap="small",
         )
 
-        # =========================
-        # 左側：主圖 + 市場資訊 + 大單事件流
-        # =========================
+        # 左側：勝率統計 + 交易決策，進出場判斷永遠在第一屏。
+        with decision_col:
+            render_win_rate_panel()
 
-        with main_left:
-            render_chart(
-                prices=prices,
-                volumes=volumes,
-                vwap_values=vwaps,
-                time_values=times,
-                decision=decision,
-                trade_alert=trade_alert,
-            )
+            render_decision_card(decision)
 
+        # 中間：五檔、買賣力道、技術狀態。
+        with market_col:
             render_lower_market_grid(
                 bids=bids,
                 asks=asks,
@@ -889,25 +856,18 @@ def main():
                 decision=decision,
             )
 
-        # =========================
-        # 右側：決策 + 反彈 + 主力 + 警示
-        # =========================
-
-        with main_right:
-            render_win_rate_panel()
-
-            render_decision_card(decision)
-
-            render_rebound_panel(
-                decision=decision,
-                trade_alert=trade_alert,
-            )
-
+        # 右側：主力、反彈、防守警示。
+        with force_col:
             render_main_force_panel(
                 bids=bids,
                 asks=asks,
                 big_order_log=st.session_state.big_order_log,
                 decision=decision,
+            )
+
+            render_rebound_panel(
+                decision=decision,
+                trade_alert=trade_alert,
             )
 
             render_alerts(alerts)
