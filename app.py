@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import time
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -11,6 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import websocket
 import v14_engine
 
 APP_DIR = Path(__file__).resolve().parent
@@ -25,7 +27,7 @@ def taiwan_now() -> datetime:
     return datetime.now(TW_TZ)
 
 st.set_page_config(
-    page_title="台股 AI 模擬交易看盤",
+    page_title="台股 AI WebSocket 模擬交易看盤",
     page_icon="📣",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -77,6 +79,243 @@ html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, "No
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
+
+
+# -----------------------------
+# Fugle WebSocket mobile client
+# -----------------------------
+WS_URL = "wss://api.fugle.tw/marketdata/v1.0/stock/streaming"
+
+
+def ws_log(store: Dict[str, Any], msg: str) -> None:
+    logs = store.setdefault("logs", [])
+    logs.insert(0, f"[{taiwan_now().strftime('%H:%M:%S')}] {msg}")
+    del logs[120:]
+
+
+def fugle_time_to_dt(value: Any) -> datetime:
+    """Fugle WS time is usually microseconds since epoch."""
+    if value is None or value == "":
+        return taiwan_now()
+    if isinstance(value, str):
+        s = value.strip().replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=TW_TZ)
+            return dt.astimezone(TW_TZ)
+        except Exception:
+            try:
+                value = float(s)
+            except Exception:
+                return taiwan_now()
+    try:
+        t = float(value)
+        if t > 10_000_000_000_000:  # microseconds
+            sec = t / 1_000_000.0
+        elif t > 10_000_000_000:  # milliseconds
+            sec = t / 1000.0
+        else:
+            sec = t
+        return datetime.fromtimestamp(sec, tz=timezone.utc).astimezone(TW_TZ)
+    except Exception:
+        return taiwan_now()
+
+
+class FugleWSManager:
+    def __init__(self, api_key: str, symbols: List[str], store: Dict[str, Any], channels: Optional[List[str]] = None):
+        self.api_key = api_key.strip()
+        self.symbols = [s.strip() for s in symbols if s.strip()]
+        self.channels = channels or ["trades", "books", "candles", "aggregates"]
+        self.store = store
+        self.ws = None
+        self.thread = None
+        self.stop_requested = False
+
+    def start(self) -> None:
+        self.stop_requested = False
+        self.store["status"] = "連線中"
+        self.store["symbols"] = self.symbols
+        self.store["channels"] = self.channels
+        ws_log(self.store, f"建立 Fugle WebSocket：{','.join(self.symbols)}")
+        self.ws = websocket.WebSocketApp(
+            WS_URL,
+            on_open=self._on_open,
+            on_message=self._on_message,
+            on_error=self._on_error,
+            on_close=self._on_close,
+        )
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_requested = True
+        self.store["status"] = "已停止"
+        try:
+            if self.ws:
+                self.ws.close()
+        except Exception:
+            pass
+        ws_log(self.store, "WebSocket 已要求停止")
+
+    def is_alive(self) -> bool:
+        return bool(self.thread and self.thread.is_alive())
+
+    def _run(self) -> None:
+        try:
+            self.ws.run_forever(ping_interval=25, ping_timeout=10)
+        except Exception as e:
+            self.store["status"] = "連線錯誤"
+            self.store["last_error"] = str(e)
+            ws_log(self.store, f"run_forever 失敗：{e}")
+
+    def _send(self, payload: Dict[str, Any]) -> None:
+        try:
+            if self.ws:
+                self.ws.send(json.dumps(payload, ensure_ascii=False))
+        except Exception as e:
+            self.store["last_error"] = str(e)
+            ws_log(self.store, f"送出訊息失敗：{e}")
+
+    def _on_open(self, ws) -> None:
+        self.store["status"] = "已連線，驗證中"
+        ws_log(self.store, "WebSocket 已開啟，送出 auth")
+        self._send({"event": "auth", "data": {"apikey": self.api_key}})
+
+    def _subscribe_all(self) -> None:
+        for channel in self.channels:
+            # 官方支援 symbols 多檔訂閱；若失敗仍會在 log 看到 error。
+            self._send({"event": "subscribe", "data": {"channel": channel, "symbols": self.symbols}})
+            ws_log(self.store, f"訂閱 {channel}: {','.join(self.symbols)}")
+
+    def _on_message(self, ws, message: str) -> None:
+        try:
+            payload = json.loads(message)
+        except Exception:
+            ws_log(self.store, f"收到非 JSON 訊息：{str(message)[:120]}")
+            return
+        event = payload.get("event")
+        channel = payload.get("channel")
+        data = payload.get("data")
+        if event == "authenticated":
+            self.store["status"] = "已連線"
+            self.store["authenticated"] = True
+            ws_log(self.store, "Fugle WebSocket 驗證成功")
+            self._subscribe_all()
+            return
+        if event == "subscribed":
+            ws_log(self.store, f"訂閱成功：{data}")
+            return
+        if event == "heartbeat":
+            self.store["heartbeat"] = taiwan_now().strftime("%H:%M:%S")
+            return
+        if event == "error":
+            self.store["status"] = "連線錯誤"
+            self.store["last_error"] = str(data)
+            ws_log(self.store, f"WebSocket error：{data}")
+            return
+        if event == "data":
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        self._apply_data(channel, item)
+            elif isinstance(data, dict):
+                self._apply_data(channel, data)
+
+    def _on_error(self, ws, error) -> None:
+        self.store["status"] = "連線錯誤"
+        self.store["last_error"] = str(error)
+        ws_log(self.store, f"WebSocket 連線錯誤：{error}")
+
+    def _on_close(self, ws, close_status_code, close_msg) -> None:
+        if self.stop_requested:
+            self.store["status"] = "已停止"
+        else:
+            self.store["status"] = "已斷線"
+        ws_log(self.store, f"WebSocket 關閉：{close_status_code} {close_msg}")
+
+    def _apply_data(self, channel: str, data: Dict[str, Any]) -> None:
+        symbol = str(data.get("symbol") or "").strip()
+        if not symbol:
+            return
+        states = self.store.setdefault("symbol_states", {})
+        state = states.setdefault(symbol, {"symbol": symbol, "name": data.get("name") or symbol})
+        state["symbol"] = symbol
+        state["name"] = data.get("name") or state.get("name") or symbol
+        dt = fugle_time_to_dt(data.get("time") or data.get("date") or data.get("lastUpdated"))
+        state["last_channel"] = channel
+        state["last_event_time"] = dt.isoformat()
+
+        if channel == "trades":
+            state["price"] = safe_float(data.get("price"), state.get("price", 0))
+            state["bid1"] = safe_float(data.get("bid"), state.get("bid1", state.get("price", 0)))
+            state["ask1"] = safe_float(data.get("ask"), state.get("ask1", state.get("price", 0)))
+            state["last_size"] = safe_int(data.get("size"), 0)
+            state["volume"] = safe_int(data.get("volume"), state.get("volume", 0))
+        elif channel == "books":
+            bids = data.get("bids") if isinstance(data.get("bids"), list) else []
+            asks = data.get("asks") if isinstance(data.get("asks"), list) else []
+            state["bids"] = bids
+            state["asks"] = asks
+            state["total_bid"] = sum(safe_int(x.get("size"), 0) for x in bids if isinstance(x, dict))
+            state["total_ask"] = sum(safe_int(x.get("size"), 0) for x in asks if isinstance(x, dict))
+            if bids and isinstance(bids[0], dict):
+                state["bid1"] = safe_float(bids[0].get("price"), state.get("bid1", 0))
+            if asks and isinstance(asks[0], dict):
+                state["ask1"] = safe_float(asks[0].get("price"), state.get("ask1", 0))
+            if not safe_float(state.get("price")) and safe_float(state.get("bid1")) and safe_float(state.get("ask1")):
+                state["price"] = (safe_float(state.get("bid1")) + safe_float(state.get("ask1"))) / 2
+        elif channel == "candles":
+            state["open"] = safe_float(data.get("open"), state.get("open", state.get("price", 0)))
+            state["high"] = safe_float(data.get("high"), state.get("high", state.get("price", 0)))
+            state["low"] = safe_float(data.get("low"), state.get("low", state.get("price", 0)))
+            state["price"] = safe_float(data.get("close"), state.get("price", 0))
+            state["vwap"] = safe_float(data.get("average"), state.get("vwap", state.get("price", 0)))
+            state["last_size"] = safe_int(data.get("volume"), state.get("last_size", 0))
+        elif channel == "aggregates":
+            state["open"] = safe_float(data.get("openPrice"), state.get("open", state.get("price", 0)))
+            state["high"] = safe_float(data.get("highPrice"), state.get("high", state.get("price", 0)))
+            state["low"] = safe_float(data.get("lowPrice"), state.get("low", state.get("price", 0)))
+            state["price"] = safe_float(data.get("lastPrice") or data.get("closePrice"), state.get("price", 0))
+            state["vwap"] = safe_float(data.get("avgPrice"), state.get("vwap", state.get("price", 0)))
+            state["last_size"] = safe_int(data.get("lastSize"), state.get("last_size", 0))
+            total = data.get("total") if isinstance(data.get("total"), dict) else {}
+            state["volume"] = safe_int(total.get("tradeVolume"), state.get("volume", 0))
+
+        price = safe_float(state.get("price"))
+        if price <= 0:
+            return
+        vwap = safe_float(state.get("vwap"), price) or price
+        bid_size = safe_int(state.get("total_bid"), 0)
+        ask_size = safe_int(state.get("total_ask"), 0)
+        seq = int(self.store.get("seq", 0)) + 1
+        self.store["seq"] = seq
+        q = {
+            "seq": seq,
+            "ts": dt.strftime("%Y-%m-%d %H:%M:%S"),
+            "time": dt.strftime("%H:%M:%S"),
+            "date": dt.strftime("%Y-%m-%d"),
+            "symbol": symbol,
+            "name": state.get("name") or symbol,
+            "price": price,
+            "vwap": vwap,
+            "open": safe_float(state.get("open"), price),
+            "high": safe_float(state.get("high"), price),
+            "low": safe_float(state.get("low"), price),
+            "last_size": safe_int(state.get("last_size"), 0),
+            "bid_size": bid_size,
+            "ask_size": ask_size,
+            "total_bid": bid_size,
+            "total_ask": ask_size,
+            "bid1": safe_float(state.get("bid1"), price),
+            "ask1": safe_float(state.get("ask1"), price),
+            "source_channel": channel,
+        }
+        quotes = self.store.setdefault("quotes", {}).setdefault(symbol, [])
+        quotes.append(q)
+        del quotes[:-900]
+        self.store.setdefault("latest", {})[symbol] = q
+        self.store["last_update_tw"] = taiwan_now().strftime("%H:%M:%S")
 
 # -----------------------------
 # Helpers
@@ -171,6 +410,9 @@ def ensure_state() -> None:
     st.session_state.setdefault("connection_status", "未連線")
     st.session_state.setdefault("last_update_tw", "-")
     st.session_state.setdefault("last_error", "")
+    st.session_state.setdefault("ws_store", {"status": "未連線", "quotes": {}, "latest": {}, "logs": [], "symbol_states": {}, "seq": 0})
+    st.session_state.setdefault("ws_manager", None)
+    st.session_state.setdefault("last_processed_seq", {})
 
 
 def get_history(symbol: str) -> pd.DataFrame:
@@ -514,14 +756,14 @@ ensure_state()
 model = load_json(MODEL_PATH, {"model_name": "model_initial_v1", "model_date": "尚未同步", "version": "V14.4_SHARED_ENGINE"})
 dashboard = load_json(DASHBOARD_PATH, {})
 
-st.markdown("<div class='big-title'>台股 AI 模擬交易看盤</div>", unsafe_allow_html=True)
+st.markdown("<div class='big-title'>台股 AI WebSocket 模擬交易看盤</div>", unsafe_allow_html=True)
 _now_tw = taiwan_now().strftime("%Y-%m-%d %H:%M:%S")
 _conn = st.session_state.get("connection_status", "未連線")
 _conn_cls = "status-ok" if "已連線" in _conn or "成功" in _conn else ("status-bad" if "失敗" in _conn or "錯誤" in _conn else "status-warn")
 st.markdown(
     f"""
     <div class='top-status'>
-      <span>手機端 V14.4 共用AI引擎</span>
+      <span>手機端 V14.6 WebSocket 共用AI引擎</span>
       <span>模型：{model.get('model_name','-')}</span>
       <span>模型日期：{model.get('model_date','尚未同步')}</span>
       <span class='status-pill'>台灣時間：{_now_tw}</span>
@@ -533,12 +775,16 @@ st.markdown(
 )
 
 with st.sidebar:
-    st.header("手機端設定")
-    api_key = st.text_input("Fugle API Key", type="password", help="只存在本次 Streamlit session，不寫入檔案。")
+    st.header("手機 WebSocket 設定")
+    api_key = st.text_input("Fugle API Key", type="password", help="用 WebSocket auth 驗證，只存在本次 Streamlit session。")
     symbols_text = st.text_input("監控股票代碼", value="3481", help="多檔請用逗號，例如 3481,2330,2303")
-    refresh_now = st.button("立即更新 / 執行一次AI", use_container_width=True)
-    auto_refresh = st.checkbox("自動刷新", value=False)
-    refresh_sec = st.number_input("自動刷新秒數", min_value=1, max_value=60, value=1, step=1)
+    symbols = [s.strip() for s in symbols_text.replace("，", ",").split(",") if s.strip()]
+    channels = st.multiselect("WebSocket 頻道", ["trades", "books", "candles", "aggregates"], default=["trades", "books", "candles", "aggregates"], help="trades=逐筆成交，books=五檔，candles=分鐘K，aggregates=聚合行情")
+    c1, c2 = st.columns(2)
+    start_ws = c1.button("啟動 WebSocket", use_container_width=True)
+    stop_ws = c2.button("停止", use_container_width=True)
+    auto_refresh = st.checkbox("自動刷新畫面", value=True, help="行情由 WebSocket 推送；這裡只控制畫面刷新。")
+    refresh_sec = st.number_input("畫面刷新秒數", min_value=1, max_value=60, value=1, step=1)
     st.divider()
     lots = st.number_input("每筆張數", min_value=1, max_value=100, value=1, step=1)
     max_daily_trades = st.number_input("每日最多模擬成交", min_value=1, max_value=50, value=8, step=1)
@@ -566,42 +812,83 @@ settings = {
     "lot_size": 1000, "fee_discount": 1.0, "tax_rate_pct": 0.15,
 }
 
+# WebSocket lifecycle.
+store = st.session_state.ws_store
+if stop_ws:
+    mgr = st.session_state.get("ws_manager")
+    if mgr:
+        mgr.stop()
+    st.session_state.ws_manager = None
+    st.session_state.connection_status = "已停止"
+
+if start_ws:
+    if not api_key:
+        st.error("請先輸入 Fugle API Key。")
+    elif not symbols:
+        st.error("請先輸入股票代碼。")
+    else:
+        old_mgr = st.session_state.get("ws_manager")
+        if old_mgr:
+            old_mgr.stop()
+        st.session_state.ws_store = {"status": "連線中", "quotes": {}, "latest": {}, "logs": [], "symbol_states": {}, "seq": 0}
+        store = st.session_state.ws_store
+        mgr = FugleWSManager(api_key=api_key, symbols=symbols, store=store, channels=channels or ["trades", "books", "candles"])
+        st.session_state.ws_manager = mgr
+        mgr.start()
+        time.sleep(0.2)
+        st.rerun()
+
+mgr = st.session_state.get("ws_manager")
+if mgr and mgr.is_alive():
+    st.session_state.connection_status = store.get("status", "連線中")
+else:
+    st.session_state.connection_status = store.get("status", "未連線")
+st.session_state.last_update_tw = store.get("last_update_tw", st.session_state.get("last_update_tw", "-"))
+st.session_state.last_error = store.get("last_error", st.session_state.get("last_error", ""))
+
 render_fill_tape()
 
-run_reason = refresh_now or (auto_refresh and bool(api_key))
+# Sync WebSocket store into Streamlit state and process only new ticks.
+store = st.session_state.ws_store
 symbols = [s.strip() for s in symbols_text.replace("，", ",").split(",") if s.strip()]
-quotes_now: Dict[str, Dict[str, Any]] = {}
-signals_now: List[Dict[str, Any]] = []
+if store.get("quotes"):
+    st.session_state.quotes = store.get("quotes", {})
 
-if run_reason and api_key and symbols:
-    any_error = False
-    for symbol in symbols:
-        try:
-            raw = fetch_fugle_quote(api_key, symbol)
-            q = normalize_quote(raw, symbol)
-            st.session_state.quotes.setdefault(symbol, []).append(q)
-            st.session_state.quotes[symbol] = st.session_state.quotes[symbol][-360:]
-            quotes_now[symbol] = q
-        except Exception as e:
-            any_error = True
-            st.session_state.last_error = str(e)
-            st.error(f"{symbol} 即時報價失敗：{e}")
-    if quotes_now:
-        st.session_state.connection_status = "已連線" if not any_error else "部分成功"
-        st.session_state.last_update_tw = taiwan_now().strftime("%H:%M:%S")
-    elif any_error:
-        st.session_state.connection_status = "連線失敗"
-    if quotes_now:
-        update_positions(quotes_now, settings)
-        for symbol, q in quotes_now.items():
-            signals_now.append(compute_wave_signal(symbol, q, settings))
-        st.session_state.signals = signals_now
-        maybe_open_positions(signals_now, settings)
-        st.session_state.run_count += 1
-elif not api_key:
-    st.info("請在左側輸入 Fugle API Key，手機端就能直接用即時股市資料跑 V14 模擬交易。")
-else:
+quotes_now: Dict[str, Dict[str, Any]] = {}
+new_data = False
+for symbol in symbols:
+    q = store.get("latest", {}).get(symbol)
+    if not q:
+        continue
+    seq = safe_int(q.get("seq"), 0)
+    if seq > safe_int(st.session_state.last_processed_seq.get(symbol), 0):
+        quotes_now[symbol] = q
+        st.session_state.last_processed_seq[symbol] = seq
+        new_data = True
+
+signals_now: List[Dict[str, Any]] = []
+if new_data and quotes_now:
+    update_positions(quotes_now, settings)
+    for symbol, q in quotes_now.items():
+        signals_now.append(compute_wave_signal(symbol, q, settings))
+    st.session_state.signals = signals_now
+    maybe_open_positions(signals_now, settings)
+    st.session_state.run_count += 1
+elif st.session_state.get("signals"):
     signals_now = st.session_state.get("signals", [])
+else:
+    # No signal yet, but display latest quotes if any.
+    for symbol in symbols:
+        q = store.get("latest", {}).get(symbol)
+        if q:
+            signals_now.append(compute_wave_signal(symbol, q, settings))
+    if signals_now:
+        st.session_state.signals = signals_now
+
+if not api_key:
+    st.info("請在左側輸入 Fugle API Key，按「啟動 WebSocket」後即可用即時推送資料跑 V14 模擬交易。")
+elif not (mgr and mgr.is_alive()):
+    st.info("請按左側「啟動 WebSocket」。行情會由 Fugle WebSocket 推送，不再用 REST 每秒輪詢。")
 
 open_positions = [p for p in st.session_state.positions if p.get("status") == "OPEN"]
 trades = st.session_state.trades
@@ -639,6 +926,31 @@ if st.session_state.get("signals"):
         st.dataframe(sig_df[[c for c in show_cols if c in sig_df.columns]], use_container_width=True, hide_index=True, height=220)
 else:
     st.markdown("<div class='card-blue'>尚無 AI 訊號。請輸入 API Key 後按「立即更新 / 執行一次AI」。</div>", unsafe_allow_html=True)
+
+
+with st.expander("WebSocket 連線紀錄", expanded=False):
+    logs = st.session_state.ws_store.get("logs", [])
+    if st.session_state.get("last_error"):
+        st.markdown(f"<div class='compact-warning'>最後錯誤：{st.session_state.get('last_error')}</div>", unsafe_allow_html=True)
+    if logs:
+        st.code("\n".join(logs[:80]), language="text")
+    else:
+        st.caption("尚無 WebSocket 記錄。")
+
+# 可下載本次 WebSocket 收到的 real_quotes，方便和 PC 端比對。
+if st.session_state.ws_store.get("quotes"):
+    all_rows = []
+    for _sym, _rows in st.session_state.ws_store.get("quotes", {}).items():
+        all_rows.extend(_rows)
+    if all_rows:
+        ws_df = pd.DataFrame(all_rows)
+        st.download_button(
+            "下載本次 WebSocket real_quotes CSV",
+            ws_df.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"mobile_ws_real_quotes_{taiwan_now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
 render_trade_details(trades, height=260)
 
@@ -717,6 +1029,6 @@ with st.expander("模型訓練備註"):
     st.json(model)
     st.markdown("手機端可以直接跑即時模擬，但正式長時間訓練與收盤後強化，仍建議由 PC Worker 負責，並同步 current_model.json 與 dashboard_data.json。")
 
-if auto_refresh and api_key:
+if auto_refresh and api_key and mgr and mgr.is_alive():
     time.sleep(int(refresh_sec))
     st.rerun()
